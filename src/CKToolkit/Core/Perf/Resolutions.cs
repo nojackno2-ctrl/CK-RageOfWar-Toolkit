@@ -266,7 +266,7 @@ public static partial class Resolutions
         pak.WriteText(iniPath, ini.ToText());
     }
 
-    private static string? FindConstIniEntryName(HmmPak pak)
+    public static string? FindConstIniEntryName(HmmPak pak)
     {
         if (pak.Contains("VXCONST.INI")) return "VXCONST.INI";
         if (pak.Contains(@"DATA\VXCONST.INI")) return @"DATA\VXCONST.INI";

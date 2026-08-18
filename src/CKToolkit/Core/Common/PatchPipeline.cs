@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
 using CKToolkit.I18n;
 
@@ -15,7 +16,7 @@ public interface IPatchModule
 
     void ApplyExe(ref byte[] exeBytes, ToolkitConfig config);
     void ApplyLauncher(ref byte[] launcherBytes, ToolkitConfig config);
-    void ApplyDataPak(HmmPak pak, ToolkitConfig config);
+    void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null);
     void ApplyLocalPak(HmmPak pak, ToolkitConfig config);
     void ApplyVxSettings(IniFile ini, ToolkitConfig config, IReadOnlyList<string>? availableResolutions, List<string>? warnings = null);
 }
@@ -175,6 +176,7 @@ public sealed class PatchPipeline
     {
         var pipeline = new PatchPipeline();
         pipeline.RegisterModule(new PerfModule());
+        pipeline.RegisterModule(new LangModule());
         return pipeline;
     }
 
@@ -340,7 +342,7 @@ public sealed class PatchPipeline
 
             foreach (var mod in _modules)
             {
-                mod.ApplyDataPak(dataPak, config);
+                mod.ApplyDataPak(dataPak, config, warnings);
             }
 
             availableResolutions = Resolutions.GetAvailableResolutionsList(dataPak);
@@ -371,23 +373,38 @@ public sealed class PatchPipeline
             var normRes = PatchState.Normalise(GameFile.LocalPak, liveBytes);
             if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
 
-            HmmPak localPak;
-            try
-            {
-                localPak = HmmPak.FromBytes(normRes.Value!);
-            }
-            catch (PakException ex)
-            {
-                return Result<ApplyReport>.Fail($"解析 local.pak 失敗：{ex.Message}", ExitCodes.GeneralFailure);
-            }
-
             var localPakLayered = new List<string>();
-            foreach (var mod in _modules)
+            if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
             {
-                mod.ApplyLocalPak(localPak, config);
+                localPakLayered.Add($"langpack ({config.Lang.Pack})");
             }
 
-            byte[] localPakBytes = localPak.ToBytes();
+            // 沒有任何模組要動 local.pak 時，連解析都不做。
+            // HmmPak 的 FromBytes -> ToBytes 往返不保證位元組恆等（重建時的版面配置
+            // 與原檔的死空間不同），所以白繞一圈會讓 4.8MB 的檔案被無謂重寫，
+            // 每次 apply 看起來都動過遊戲檔案。正規化的結果仍會參與下面的比對，
+            // 所以「移除先前安裝的語言包」這條路徑照樣會寫入。
+            byte[] localPakBytes = normRes.Value!;
+
+            if (localPakLayered.Count > 0)
+            {
+                HmmPak localPak;
+                try
+                {
+                    localPak = HmmPak.FromBytes(localPakBytes);
+                }
+                catch (PakException ex)
+                {
+                    return Result<ApplyReport>.Fail($"解析 local.pak 失敗：{ex.Message}", ExitCodes.GeneralFailure);
+                }
+
+                foreach (var mod in _modules)
+                {
+                    mod.ApplyLocalPak(localPak, config);
+                }
+
+                localPakBytes = localPak.ToBytes();
+            }
 
             if (!localPakBytes.AsSpan().SequenceEqual(liveBytes))
             {
@@ -422,6 +439,7 @@ public sealed class PatchPipeline
             if (config.Perf.NoObjectAnimations) vxLayered.Add("no_object_animations");
             if (config.Perf.NoWaterAnimation) vxLayered.Add("no_water_animation");
             if (!string.IsNullOrWhiteSpace(config.Perf.Resolution)) vxLayered.Add($"resolution ({config.Perf.Resolution})");
+            if (!string.IsNullOrWhiteSpace(config.Lang.Pack)) vxLayered.Add($"lang_default ({config.Lang.Pack})");
 
             foreach (var mod in _modules)
             {
@@ -720,7 +738,11 @@ public sealed class PatchPipeline
                 break;
 
             case GameFile.LocalPak:
-                // Phase 3 語言包
+                if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+                {
+                    string packFolder = config.Lang.Pack.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ? "CHINESE" : config.Lang.Pack;
+                    list.Add($"langpack_{packFolder}");
+                }
                 break;
 
             case GameFile.VxSettings:
@@ -739,6 +761,11 @@ public sealed class PatchPipeline
                 if (config.Perf.NoObjectAnimations || config.Perf.NoWaterAnimation || isCustomRes)
                 {
                     list.Add("vxsettings_custom");
+                }
+                if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+                {
+                    string langKey = config.Lang.Pack.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ? "chinese" : config.Lang.Pack.ToLowerInvariant();
+                    list.Add($"lang_default ({langKey})");
                 }
                 break;
         }

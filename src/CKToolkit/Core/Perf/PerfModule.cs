@@ -76,10 +76,26 @@ public sealed class PerfModule : IPatchModule
     /// <summary>
     /// 對 data.pak 內的 VXCONST.INI 附加自訂解析度清單。
     /// 嚴格確保 [Resolutions] 不包含寬度大於當前 ZoomMap 表格容量之條目。
+    /// 若有超出容量而被移除或略過之解析度，產生明確警告。
     /// </summary>
-    public void ApplyDataPak(HmmPak pak, ToolkitConfig config)
+    public void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null)
     {
         int zoomMapCapacity = config.Perf.Hires >= 1600 ? config.Perf.Hires : 1600;
+
+        // 檢查是否有超出容量而被移除之條目
+        string? iniPath = Resolutions.FindConstIniEntryName(pak);
+        if (iniPath is not null)
+        {
+            var existing = Resolutions.ParseResolutionsFromText(pak.ReadText(iniPath));
+            var overCapacity = existing.Where(e => e.Width > zoomMapCapacity).ToList();
+            if (overCapacity.Count > 0 && warnings is not null)
+            {
+                foreach (var r in overCapacity)
+                {
+                    warnings.Add(I18n.Strings.Get("Warning_ResolutionOverCapacityRemoved", $"{r.Width}x{r.Height}", zoomMapCapacity));
+                }
+            }
+        }
 
         // 確保 [Resolutions] 不包含寬度大於當前 ZoomMap 容量之條目
         Resolutions.EnforceCapacity(pak, zoomMapCapacity);
@@ -90,9 +106,16 @@ public sealed class PerfModule : IPatchModule
         foreach (string resStr in config.Perf.AddRes)
         {
             var (w, h) = ParseDimensions(resStr, 0, 0);
-            if (w > 0 && h > 0 && w <= zoomMapCapacity)
+            if (w > 0 && h > 0)
             {
-                wanted.Add((w, h));
+                if (w <= zoomMapCapacity)
+                {
+                    wanted.Add((w, h));
+                }
+                else
+                {
+                    warnings?.Add(I18n.Strings.Get("Warning_ResolutionOverCapacitySkipped", resStr, zoomMapCapacity));
+                }
             }
         }
 

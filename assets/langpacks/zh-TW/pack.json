@@ -1,0 +1,40 @@
+{
+  "id": "zh-TW",
+  "name": "Traditional Chinese",
+  "nativeName": "繁體中文",
+  "version": "1.0.0",
+  "authors": [
+    "nojackno2-ctrl"
+  ],
+  "gameLangFolder": "CHINESE",
+  "gameLangKey": "chinese",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "微軟正黑體",
+    "fallbackFaces": [
+      "Microsoft JhengHei",
+      "PMingLiU"
+    ],
+    "ranges": [
+      "00B7",
+      "2014-2015",
+      "2026",
+      "3000-303F",
+      "3105-312A",
+      "FF01-FF5F",
+      "FF61",
+      "FFE0-FFE1",
+      "FFE5"
+    ],
+    "sizeAdjust": 0,
+    "_rangesNote": "ranges 只宣告『無論譯文用不用到都必須存在』的字元（標點、全形符號、注音）。漢字不在此列 —— 它們由譯文實際用到的字元自動涵蓋（LanguagePack.GetUsedCodepoints）。曾經在這裡宣告整個 4E00-9FFF（20,992 字），結果 12 套字型各光柵化兩萬多個字形，local.pak 從 4.8MB 膨脹到 24.3MB，而實際只需要約 2,900 個字形。"
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": [
+      "campaign-tutorial.json",
+      "campaign-celtic-kings-adventure.json"
+    ]
+  }
+}

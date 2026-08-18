@@ -42,8 +42,15 @@ public sealed class PerfConfig
 /// </summary>
 public sealed class LangConfig
 {
+    /// <summary>
+    /// 要安裝的語言包 id。空字串代表不安裝任何語言包，維持遊戲原本的語系。
+    ///
+    /// ⚠ 預設必須是空字串。曾經預設為 "zh-TW"，結果任何只想開 HD 的使用者，
+    /// 第一次 apply 就會被靜默裝上中文語言包並改寫 local.pak —— 那是使用者從未要求過的
+    /// 重大改動。安裝語言包一律必須由使用者明確指定（CLI `lang install` 或 GUI 勾選）。
+    /// </summary>
     [JsonPropertyName("pack")]
-    public string Pack { get; set; } = "zh-TW";
+    public string Pack { get; set; } = string.Empty;
 
     [JsonPropertyName("fontFace")]
     public string FontFace { get; set; } = "微軟正黑體";

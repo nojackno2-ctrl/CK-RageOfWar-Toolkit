@@ -17,7 +17,11 @@
   "Error_ApplyPartialFailure": "Failed to write file {0}. Already written: [{1}]. Game install is in a partial state; please run restore --all.",
   "Error_RestoreAllMissingFlag": "The restore command requires the --all flag to confirm restoring all files.",
   "Error_PerfSubcommandRequired": "The perf command requires either the get or set subcommand.",
-  "Cli_HelpText": "CKToolkit - Celtic Kings: Rage of War Integrated Toolkit\nUsage: CKToolkit.exe [command] [options]\n\nAvailable commands:\n  apply               Apply configuration to game files\n  restore --all       Normalise and reverse all patches to vanilla\n  verify              Verify file patch state and configuration consistency (read-only)\n  perf get            Display current performance patch settings\n  perf set            Update performance patch settings (config only)\n  status              Inspect game path and patch status (read-only)\n  --help, -h          Show this help message\n  --version, -v       Show version information\n\nGlobal options:\n  --game <dir>        Override game installation directory\n  --config <path>     Specify configuration file path\n  --json              Output structured JSON result",
+  "Error_LangSubcommandRequired": "The lang command requires either list, install, uninstall, or export-template subcommand.",
+  "Error_LangPackNotFound": "Specified language pack '{0}' not found.",
+  "Error_LangInstallMissingPack": "The lang install command requires the --pack <id> argument.",
+  "Error_ExportTemplateMissingOut": "The lang export-template command requires the --out <dir> argument.",
+  "Cli_HelpText": "CKToolkit - Celtic Kings: Rage of War Integrated Toolkit\nUsage: CKToolkit.exe [command] [options]\n\nAvailable commands:\n  apply               Apply configuration to game files\n  restore --all       Normalise and reverse all patches to vanilla\n  verify              Verify file patch state and configuration consistency (read-only)\n  perf get            Display current performance patch settings\n  perf set            Update performance patch settings (config only)\n  lang list           List all available language packs (built-in and external)\n  lang install        Set language pack to install (--pack <id> [--font <face>])\n  lang uninstall      Uninstall language pack (restore vanilla game language)\n  lang export-template Export language pack translation skeleton template (--out <dir> [--template <lang>])\n  status              Inspect game path and patch status (read-only)\n  --help, -h          Show this help message\n  --version, -v       Show version information\n\nGlobal options:\n  --game <dir>        Override game installation directory\n  --config <path>     Specify configuration file path\n  --json              Output structured JSON result",
   "Cli_Version": "CKToolkit version 1.0.0",
   "Status_GameDir": "Game Directory: {0}",
   "Status_Vanilla": "Vanilla (Unmodified)",
@@ -34,7 +38,12 @@
   "Verify_AllOk": "Verification complete: all game files recognised and live files match configuration.",
   "Verify_Mismatch": "Verification complete: detected configuration mismatch or unrecognised files.",
   "Perf_Set_Success": "Performance settings successfully updated in configuration (game files not modified; run apply to apply).",
+  "Lang_Install_Success": "Language pack '{0}' configured in settings (game files not modified; run apply to apply).",
+  "Lang_Uninstall_Success": "Language pack setting cleared in configuration (game files not modified; run apply to apply).",
+  "Lang_ExportTemplate_Success": "Language pack template successfully exported to: {0}",
   "Warning_VerifyConfigMismatch": "File {0} patch state does not match current configuration.",
   "Warning_VerifyUnrecognisedFile": "File {0} is unrecognised and may have been modified by a third-party tool.",
-  "Warning_ResolutionExceedsCapacity": "Resolution {0} exceeds current ZoomMap capacity ({1}). Automatically adjusted to {2} (index {3})."
+  "Warning_ResolutionExceedsCapacity": "Resolution {0} exceeds current ZoomMap capacity ({1}). Automatically adjusted to {2} (index {3}).",
+  "Warning_ResolutionOverCapacityRemoved": "Resolution {0} exceeds current ZoomMap capacity ({1}) and was removed from data.pak.",
+  "Warning_ResolutionOverCapacitySkipped": "Resolution {0} exceeds current ZoomMap capacity ({1}) and was skipped when appending to data.pak."
 }

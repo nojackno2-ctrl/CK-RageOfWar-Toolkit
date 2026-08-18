@@ -1,14 +1,15 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
+using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
 using CKToolkit.I18n;
 
 namespace CKToolkit.SelfTest;
 
 /// <summary>
-/// Phase 1, Phase 2 & Phase 2B 自我驗證測試套件。
+/// Phase 1, Phase 2, Phase 2B & Phase 3 自我驗證測試套件。
 ///
 /// 涵蓋檢查項目：
 ///   Phase 1:
@@ -38,6 +39,16 @@ namespace CKToolkit.SelfTest;
 ///   20. CLI perf get / set 讀寫設定檔、Launcher 互斥性切換與遊戲目錄零寫入保證
 ///   21. CLI verify 唯讀與零寫入保證（驗證修補狀態與設定相符性）
 ///   22. Perf ZoomMap 表格容量一致性、降低解析度重套用與 Hires 關閉測試
+///
+///   Phase 3 語言包模組與 APF 字型可逆性：
+///   23. ApfFont: APF 點陣字型讀寫往返、字形追加與 StripAddedRanges 逐位元組 100% 精確反轉
+///   24. LanguagePack: pack.json 必填欄位驗證（缺欄位回傳名稱）與內建 zh-TW 載入
+///   25. FontBuilder: 字型光柵化字元集由 pack.json 範圍驅動（無硬編 CJK 常數，泛化多語言）
+///   26. LocXml: <translationtable> XML 重建與自閉合 <entry ... /> 標籤保護
+///   27. local.pak: 語言包安裝、Uninstall 逐位元組精確反轉、重複安裝冪等性與語系切換無殘留
+///   28. vxSettings.ini: [Language] Default 設定與 Normalise 原版反轉
+///   29. LangInstaller: 語言包範本 (export-template) 骨架匯出
+///   30. CLI lang: list, install, uninstall, export-template 端對端整合測試
 /// </summary>
 internal static class Program
 {
@@ -50,7 +61,7 @@ internal static class Program
         Console.OutputEncoding = utf8;
         Console.InputEncoding = utf8;
 
-        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1, Phase 2 & Phase 2B) ===\n");
+        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1, Phase 2, Phase 2B & Phase 3) ===\n");
 
         // Phase 1 核心測試
         RunGroup("1. ToolkitConfig", TestToolkitConfigRoundTrip);
@@ -82,11 +93,21 @@ internal static class Program
         RunGroup("21. CliVerifyZeroWrites", TestCliVerifyZeroWrites);
         RunGroup("22. PerfResolutionCapacityAndHiresOff", TestPerfResolutionCapacityAndHiresOff);
 
+        // Phase 3 語言包模組與字型管線測試
+        RunGroup("23. ApfFontReversal", TestApfFontReversal);
+        RunGroup("24. LanguagePackValidationAndLoading", TestLanguagePackValidationAndLoading);
+        RunGroup("25. FontBuilderDrivenByRanges", TestFontBuilderDrivenByRanges);
+        RunGroup("26. LocXmlAndSelfClosingTagIntegrity", TestLocXmlAndSelfClosingTagIntegrity);
+        RunGroup("27. SyntheticLocalPakInstallAndUninstallReversal", TestSyntheticLocalPakInstallAndUninstallReversal);
+        RunGroup("28. VxSettingsLanguageDefaultReversal", TestVxSettingsLanguageDefaultReversal);
+        RunGroup("29. LangExportTemplate", TestLangExportTemplate);
+        RunGroup("30. CliLangCommands", TestCliLangCommands);
+
         Console.WriteLine();
         if (_failures == 0)
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("所有測試項目全部通過！ (Phase 1, Phase 2 & Phase 2B 全綠)");
+            Console.WriteLine("所有測試項目全部通過！ (Phase 1, Phase 2, Phase 2B & Phase 3 全綠)");
             Console.ResetColor();
             return 0;
         }
@@ -1232,6 +1253,628 @@ internal static class Program
         }
     }
 
+    // --- 23. APF 點陣字型往返與精確反轉測試 ----------------------------------
+    private static void TestApfFontReversal()
+    {
+        Console.WriteLine("23. APF 點陣字型往返與精確反轉測試");
+
+        // A. 合成單一範圍字型測試 (Synthetic Single-Range Font)
+        var font1 = CreateSyntheticApf("Tahoma", 13);
+        byte[] origBytes = font1.Dump();
+
+        var font2 = ApfFont.Load(origBytes);
+        byte[] dump2 = font2.Dump();
+        Check("ApfFont 原始 Load -> Dump 往返逐位元組一致", origBytes.SequenceEqual(dump2),
+            origBytes.SequenceEqual(dump2) ? null : ApfFont.DiagnoseByteDifference(origBytes, dump2));
+
+        // 追加字形
+        var buildRes = FontBuilder.AddGlyphs(font2, [0x4E00, 0x4E01, 0x4E02], "Arial");
+        Check("FontBuilder 成功添加字形", buildRes.Added >= 0);
+        Check("追加字形後記憶體物件回報 HasInMemoryAdditions == true", font2.HasInMemoryAdditions);
+
+        byte[] patchedBytes = font2.Dump();
+        Check("追加字形後 Dump 位元組與原版不同", !patchedBytes.SequenceEqual(origBytes));
+
+        var font3 = ApfFont.Load(patchedBytes);
+        // 從位元組重新載入後，記憶體旗標必然歸零 —— APF 格式沒有任何欄位能區分
+        // 我們加的字形與原廠字形。磁碟狀態只能由 local.pak 內的清冊回答（見 Group 27）。
+        Check("重新載入後 HasInMemoryAdditions 歸零（記憶體旗標不持久化）", !font3.HasInMemoryAdditions);
+
+        font3.StripAddedRanges(buildRes.PatchRecord);
+
+        // 斷言剝離後記憶體模型與全新載入的原版模型逐欄位完全相等
+        var freshOrig = ApfFont.Load(origBytes);
+        bool modelEq = freshOrig.ModelEquals(font3, out string modelDiff);
+        Check("合成字型剝離後記憶體模型與原版逐欄位一致", modelEq, modelDiff);
+
+        byte[] restoredBytes = font3.Dump();
+        bool bytesEq = origBytes.SequenceEqual(restoredBytes);
+        Check("StripAddedRanges 後 Dump 逐位元組 100% 精確還原為原版", bytesEq,
+            bytesEq ? null : ApfFont.DiagnoseByteDifference(origBytes, restoredBytes));
+
+        // B. 合成多重範圍字型測試 (Synthetic Multi-Range Font: Latin + Cyrillic)
+        var fontMulti = CreateSyntheticApfMultiRange("Tahoma", 13);
+        byte[] origMultiBytes = fontMulti.Dump();
+
+        var fontMultiLoaded = ApfFont.Load(origMultiBytes);
+        Check("多範圍字型原始 Load -> Dump 往返逐位元組一致", origMultiBytes.SequenceEqual(fontMultiLoaded.Dump()),
+            origMultiBytes.SequenceEqual(fontMultiLoaded.Dump()) ? null : ApfFont.DiagnoseByteDifference(origMultiBytes, fontMultiLoaded.Dump()));
+
+        var buildResMulti = FontBuilder.AddGlyphs(fontMultiLoaded, [0x4E00, 0x4E01], "Arial");
+        Check("多範圍字型追加後 HasInMemoryAdditions == true", fontMultiLoaded.HasInMemoryAdditions);
+
+        byte[] patchedMultiBytes = fontMultiLoaded.Dump();
+        var fontMultiPatched = ApfFont.Load(patchedMultiBytes);
+        fontMultiPatched.StripAddedRanges(buildResMulti.PatchRecord);
+
+        var freshMultiOrig = ApfFont.Load(origMultiBytes);
+        bool multiModelEq = freshMultiOrig.ModelEquals(fontMultiPatched, out string multiModelDiff);
+        Check("多範圍字型剝離後記憶體模型與原版逐欄位一致", multiModelEq, multiModelDiff);
+
+        byte[] restoredMultiBytes = fontMultiPatched.Dump();
+        bool multiBytesEq = origMultiBytes.SequenceEqual(restoredMultiBytes);
+        Check("多範圍字型 StripAddedRanges 後 Dump 逐位元組 100% 精確還原", multiBytesEq,
+            multiBytesEq ? null : ApfFont.DiagnoseByteDifference(origMultiBytes, restoredMultiBytes));
+
+        // C. 合成重疊範圍字型測試 (Synthetic Overlapping Range Font)
+        var fontOverlap = CreateSyntheticApf("Tahoma", 13);
+        byte[] origOverlapBytes = fontOverlap.Dump();
+
+        var fontOverlapLoaded = ApfFont.Load(origOverlapBytes);
+        int origGlyphCount = fontOverlapLoaded.Ranges[0].Glyphs.Count;
+
+        // 建立重疊追加字形 (擴充 Range 0: 32..127，追加 10 個字形 128..137)
+        var extraGlyphs = new List<Glyph>();
+        for (int i = 0; i < 10; i++)
+        {
+            extraGlyphs.Add(new Glyph
+            {
+                A = 1, B = 8, C = 1, Top = 2, Width = 8, Height = 10, Pixels = new byte[80]
+            });
+        }
+        FontBuilder.ExtendRangeWithGlyphs(fontOverlapLoaded, 32, extraGlyphs);
+        Check("重疊擴充後 Range 0 字形數增加為 106", fontOverlapLoaded.Ranges[0].Glyphs.Count == origGlyphCount + 10);
+
+        // 同時再加一個全新的範圍 (例如 0x0400 Cyrillic)
+        FontBuilder.AddGlyphs(fontOverlapLoaded, [0x0400, 0x0401], "Arial");
+        var overlapPatchRecord = fontOverlapLoaded.CreatePatchRecord();
+        Check("PatchRecord 記錄了 ModifiedRanges 與 AddedRangeFirsts",
+            overlapPatchRecord.ModifiedRanges.Count == 1 && overlapPatchRecord.AddedRangeFirsts.Count == 1);
+
+        byte[] patchedOverlapBytes = fontOverlapLoaded.Dump();
+        var fontOverlapPatched = ApfFont.Load(patchedOverlapBytes);
+        fontOverlapPatched.StripAddedRanges(overlapPatchRecord);
+        Check("重疊字型 StripAddedRanges 後 Range 0 字形數恢復為原版 96 (僅移除追加字形)",
+            fontOverlapPatched.Ranges[0].Glyphs.Count == origGlyphCount);
+        Check("重疊字型 StripAddedRanges 後 Range 0 未被整筆刪除且 First == 32",
+            fontOverlapPatched.Ranges.Count == 1 && fontOverlapPatched.Ranges[0].First == 32);
+
+        var freshOverlapOrig = ApfFont.Load(origOverlapBytes);
+        bool overlapModelEq = freshOverlapOrig.ModelEquals(fontOverlapPatched, out string overlapModelDiff);
+        Check("重疊字型剝離後記憶體模型與原版逐欄位一致", overlapModelEq, overlapModelDiff);
+
+        byte[] restoredOverlapBytes = fontOverlapPatched.Dump();
+        bool overlapBytesEq = origOverlapBytes.SequenceEqual(restoredOverlapBytes);
+        Check("重疊字型 StripAddedRanges 後 Dump 逐位元組 100% 精確還原", overlapBytesEq,
+            overlapBytesEq ? null : ApfFont.DiagnoseByteDifference(origOverlapBytes, restoredOverlapBytes));
+
+        // D. 真實遊戲原廠 APF 字型完整反轉、範圍數保持與欄位一致性檢驗 (Real Game Fonts)
+        string[] candidatePakPaths =
+        [
+            Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\CK_RageOfWar_原版備份\local.pak.orig"),
+            @"（原版備份路徑，已刪除）",
+            Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\CK_RageOfWar中文化\備份\local.pak"),
+            @"（前身備份，已刪除）"
+        ];
+
+        string? realPakPath = candidatePakPaths.FirstOrDefault(File.Exists);
+        if (realPakPath != null)
+        {
+            var realPak = HmmPak.FromBytes(File.ReadAllBytes(realPakPath));
+
+            // 守護 StockLanguages / NonLanguageRoots 白名單。
+            // 這兩份清單是「哪些語系目錄不是我們裝的」的唯一依據，漏列任何一個原廠根目錄，
+            // 完全原版的 local.pak 就會被判成裝了語言包，進而被判為 Unrecognised 而拒絕操作。
+            // BULGARIAN 就是這樣漏掉過一次。與其靠印象維護，不如拿真實檔案逐一比對。
+            var unknownRoots = realPak.Names()
+                .Select(n => n.Split('\\')[0])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(r => !LangInstaller.StockLanguages.Contains(r) && !LangInstaller.NonLanguageRoots.Contains(r))
+                .ToList();
+            Check("真實原版 local.pak 的所有根目錄都在原廠白名單內（漏列會害原版遊戲被拒絕）",
+                unknownRoots.Count == 0,
+                unknownRoots.Count == 0 ? null : "白名單缺少: " + string.Join(", ", unknownRoots));
+
+            var realVanillaState = PatchState.Inspect(GameFile.LocalPak, File.ReadAllBytes(realPakPath));
+            Check("真實原版 local.pak 被判定為 Vanilla", realVanillaState.IsVanilla, realVanillaState.ToString());
+            var fontNames = realPak.Names()
+                .Where(n => n.StartsWith("FONTS\\", StringComparison.OrdinalIgnoreCase) && n.EndsWith(".APF", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            int realFontCount = 0;
+            foreach (var fn in fontNames)
+            {
+                byte[] realFontBytes = realPak.Read(fn);
+                var realOrig = ApfFont.Load(realFontBytes);
+                int vanillaRangeCount = realOrig.Ranges.Count;
+                int vanillaMetrics4 = realOrig.Metrics[4];
+                int vanillaMetrics6 = realOrig.Metrics[6];
+
+                byte[] realDump = realOrig.Dump();
+                bool rtOk = realFontBytes.SequenceEqual(realDump);
+                if (!rtOk)
+                {
+                    Check($"真實字型 {fn} Load -> Dump 往返一致", false, ApfFont.DiagnoseByteDifference(realFontBytes, realDump));
+                    continue;
+                }
+
+                // 套用 zh-TW 範圍字形（包含 < 0x2000 與 >= 0x2000 的符號與中文字形）
+                var realPatchedFont = ApfFont.Load(realFontBytes);
+                var realBuildRes = FontBuilder.AddGlyphs(realPatchedFont, [0x00A9, 0x00AE, 0x4E00, 0x4E01, 0x4E02, 0x3000, 0xFF01], "Arial");
+                byte[] realPatchedBytes = realPatchedFont.Dump();
+
+                var realLoadedPatched = ApfFont.Load(realPatchedBytes);
+                realLoadedPatched.StripAddedRanges(realBuildRes.PatchRecord);
+
+                // 嚴格斷言：原廠範圍數與 Metrics[4] 保持未變
+                Check($"真實字型 {fn} 範圍數保持未變 ({vanillaRangeCount})", realLoadedPatched.Ranges.Count == vanillaRangeCount,
+                    $"expected {vanillaRangeCount}, actual {realLoadedPatched.Ranges.Count}");
+                Check($"真實字型 {fn} Metrics[4] 保持未變 ({vanillaMetrics4})", realLoadedPatched.Metrics[4] == vanillaMetrics4,
+                    $"expected {vanillaMetrics4}, actual {realLoadedPatched.Metrics[4]}");
+                Check($"真實字型 {fn} Metrics[6] 保持未變 ({vanillaMetrics6})", realLoadedPatched.Metrics[6] == vanillaMetrics6,
+                    $"expected {vanillaMetrics6}, actual {realLoadedPatched.Metrics[6]}");
+
+                var realFreshOrig = ApfFont.Load(realFontBytes);
+                bool rModelEq = realFreshOrig.ModelEquals(realLoadedPatched, out string rModelDiff);
+                Check($"真實字型 {fn} 剝離後記憶體模型逐欄位一致", rModelEq, rModelDiff);
+
+                byte[] realRestoredBytes = realLoadedPatched.Dump();
+                bool rBytesEq = realFontBytes.SequenceEqual(realRestoredBytes);
+                Check($"真實字型 {fn} 剝離後 Dump 逐位元組 100% 精確還原", rBytesEq,
+                    rBytesEq ? null : ApfFont.DiagnoseByteDifference(realFontBytes, realRestoredBytes));
+
+                realFontCount++;
+            }
+
+            Check($"所有真實原版 APF 字型 (共 {realFontCount} 款) 皆通過精確反轉與欄位一致性驗證", realFontCount > 0);
+        }
+    }
+
+    // --- 24. 語言包載入與 pack.json 欄位驗證測試 ----------------------------
+    private static void TestLanguagePackValidationAndLoading()
+    {
+        Console.WriteLine("24. 語言包載入與 pack.json 欄位驗證測試");
+
+        // 1. 測試缺少必填欄位之拒絕
+        string jsonNoId = "{\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resNoId = LanguagePack.ParseMeta(jsonNoId);
+        Check("缺少 'id' 欄位被拒絕", !resNoId.Success && resNoId.ErrorMessage!.Contains("'id'"));
+
+        string jsonNoName = "{\"id\":\"test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resNoName = LanguagePack.ParseMeta(jsonNoName);
+        Check("缺少 'name' 欄位被拒絕", !resNoName.Success && resNoName.ErrorMessage!.Contains("'name'"));
+
+        string jsonNoFolder = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resNoFolder = LanguagePack.ParseMeta(jsonNoFolder);
+        Check("缺少 'gameLangFolder' 欄位被拒絕", !resNoFolder.Success && resNoFolder.ErrorMessage!.Contains("'gameLangFolder'"));
+
+        string jsonNoFontFace = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resNoFontFace = LanguagePack.ParseMeta(jsonNoFontFace);
+        Check("缺少 'font.face' 欄位被拒絕", !resNoFontFace.Success && resNoFontFace.ErrorMessage!.Contains("'font.face'"));
+
+        string jsonNoRanges = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resNoRanges = LanguagePack.ParseMeta(jsonNoRanges);
+        Check("缺少 'font.ranges' 欄位被拒絕", !resNoRanges.Success && resNoRanges.ErrorMessage!.Contains("'font.ranges'"));
+
+        string jsonNoUi = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{}}";
+        var resNoUi = LanguagePack.ParseMeta(jsonNoUi);
+        Check("缺少 'files.ui' 欄位被拒絕", !resNoUi.Success && resNoUi.ErrorMessage!.Contains("'files.ui'"));
+
+        // 2. 測試內建 zh-TW 載入
+        var zhRes = PackLoader.LoadEmbeddedPack("zh-TW");
+        Check("載入內建 zh-TW 成功", zhRes.Success);
+        var zh = zhRes.Value!;
+        Check("zh-TW ID 為 zh-TW", zh.Meta.Id == "zh-TW");
+        Check("zh-TW gameLangFolder 為 CHINESE", zh.Meta.GameLangFolder == "CHINESE");
+        Check("zh-TW gameLangKey 為 chinese", zh.Meta.GameLangKey == "chinese");
+        Check("zh-TW 載入翻譯詞彙數 > 0", zh.Translations.PhraseCount > 0);
+        Check("zh-TW 載入說明文件段落數 > 0", zh.Translations.Help.Count > 0);
+    }
+
+    // --- 25. 字型字形集由 pack.json 範圍驅動測試 ----------------------------
+    private static void TestFontBuilderDrivenByRanges()
+    {
+        Console.WriteLine("25. 字型字形集由 pack.json 範圍驅動測試（無硬編 CJK 常數）");
+
+        var meta = new LanguagePackMeta
+        {
+            Id = "synthetic-pack",
+            Name = "Synthetic Pack",
+            NativeName = "合成語言包",
+            Version = "1.0.0",
+            GameLangFolder = "SYNTHETIC",
+            GameLangKey = "synthetic",
+            TemplateLang = "GERMAN",
+            Font = new FontMeta
+            {
+                Face = "Arial",
+                Ranges = ["2100-2105"] // 6 個特殊符號 (Letterlike Symbols: ℀, ℁, ℂ, ℃, ℄, ℅)
+            },
+            Files = new FilesMeta { Ui = "ui.json" }
+        };
+
+        var pack = new LanguagePack { Meta = meta };
+        var declared = pack.GetDeclaredCodepoints();
+        Check("GetDeclaredCodepoints 精確解析 6 個碼位 (0x2100..0x2105)", declared.Count == 6 && declared.Contains(0x2100) && declared.Contains(0x2105));
+
+        var ranges = FontBuilder.MakeRanges(declared);
+        Check("MakeRanges 產生單一 [0x2100, 6] 區間", ranges.Count == 1 && ranges[0][0] == 0x2100 && ranges[0][1] == 6);
+
+        var font = CreateSyntheticApf();
+        FontBuilder.AddGlyphs(font, declared, "Arial");
+        Check("字型中新增的範圍 First == 0x2100", font.Ranges.Any(r => r.First == 0x2100 && r.Count == 6));
+        Check("字型未產生未宣告之 CJK 碼位 (如 0x4E00)", !font.Covered().Contains(0x4E00));
+    }
+
+    // --- 26. LocXml 解析、重建與自閉合標籤完整性測試 ------------------------
+    private static void TestLocXmlAndSelfClosingTagIntegrity()
+    {
+        Console.WriteLine("26. LocXml 解析、重建與自閉合標籤完整性測試");
+
+        // 1. 翻譯表 XML 重建
+        string sampleLocXml =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<translationtable>\r\n" +
+            "  <translationtableentry text=\"Start Game\" result=\"Spiel starten\" />\r\n" +
+            "  <translationtableentry text=\"Exit\" result=\"Beenden\" />\r\n" +
+            "</translationtable>\r\n";
+
+        byte[] locBytes = Encoding.UTF8.GetBytes(sampleLocXml);
+        Check("LocXml.IsTranslationTable 辨識成功", LocXml.IsTranslationTable(locBytes));
+
+        var dict = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Start Game"] = "開始遊戲",
+            ["Exit"] = "離開遊戲"
+        };
+
+        byte[] rebuilt = LocXml.Rebuild(locBytes, attrs =>
+        {
+            string src = LocXml.SourceText(attrs);
+            return dict.TryGetValue(src, out string? zh) ? zh : null;
+        }, out int done, out int total);
+
+        string rebuiltText = Encoding.UTF8.GetString(rebuilt);
+        Check("LocXml.Rebuild 翻譯 2 筆條目", done == 2 && total == 2);
+        Check("LocXml.Rebuild 替換 result=\"開始遊戲\"", rebuiltText.Contains("result=\"開始遊戲\""));
+        Check("LocXml.Rebuild 替換 result=\"離開遊戲\"", rebuiltText.Contains("result=\"離開遊戲\""));
+
+        // 2. 自閉合標籤保護測試
+        string sampleHelpXml =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<help>\r\n" +
+            "  <entry id=\"1\">First paragraph.</entry>\r\n" +
+            "  <entry id=\"2\" self=\"true\"/>\r\n" +
+            "  <entry id=\"3\">Third paragraph.</entry>\r\n" +
+            "</help>\r\n";
+
+        byte[] helpBytes = Encoding.UTF8.GetBytes(sampleHelpXml);
+        var helpDict = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["First paragraph."] = "第一段說明。",
+            ["Third paragraph."] = "第三段說明。"
+        };
+
+        byte[] rebuiltHelp = LocXml.RebuildHelp(helpBytes, helpDict, out int hDone, out int hTotal);
+        string rebuiltHelpText = Encoding.UTF8.GetString(rebuiltHelp);
+
+        Check("RebuildHelp 翻譯 2 段", hDone == 2 && hTotal == 2);
+        Check("RebuildHelp 第一段翻譯正確", rebuiltHelpText.Contains(">第一段說明。<"));
+        Check("RebuildHelp 第三段翻譯正確", rebuiltHelpText.Contains(">第三段說明。<"));
+        Check("RebuildHelp 自閉合標籤 <entry id=\"2\" self=\"true\"/> 完整保留且未被損毀", rebuiltHelpText.Contains("<entry id=\"2\" self=\"true\"/>"));
+    }
+
+    // --- 27. 合成 local.pak 語言包安裝與反轉測試 ----------------------------
+    private static void TestSyntheticLocalPakInstallAndUninstallReversal()
+    {
+        Console.WriteLine("27. 合成 local.pak 語言包安裝與反轉測試（精確可逆性、冪等性與語系切換）");
+
+        var localPak = CreateSyntheticLocalPak();
+        byte[] vanillaPakBytes = localPak.ToBytes();
+
+        var zhRes = PackLoader.LoadEmbeddedPack("zh-TW");
+        Check("載入 zh-TW 語言包", zhRes.Success);
+        var zhPack = zhRes.Value!;
+
+        // 1. 安裝 zh-TW
+        LangInstaller.Install(localPak, zhPack);
+        byte[] installedBytes = localPak.ToBytes();
+        Check("安裝後 local.pak 包含 CHINESE\\LOCAL.LOC.XML", localPak.Contains(@"CHINESE\LOCAL.LOC.XML"));
+        Check("安裝後 local.pak 包含 CHINESE\\HELP.XML", localPak.Contains(@"CHINESE\HELP.XML"));
+        Check("安裝後 local.pak 包含 CHINESE\\CREDITS.TXT", localPak.Contains(@"CHINESE\CREDITS.TXT"));
+        Check("PatchState.Inspect 判定為 PatchedByUs", PatchState.Inspect(GameFile.LocalPak, installedBytes).IsPatched);
+
+        // 1b. 危險情境：語系目錄還在，但字型清冊被外力刪除。
+        // 字型的還原完全依賴清冊，APF 位元組裡沒有任何欄位能區分我們加的字形與原廠字形。
+        // 此時若判成 PatchedByUs，解除安裝會刪掉語系目錄卻留下改過的字型；
+        // 若判成 Vanilla，下次套用會在既有字形上再疊一層。兩條路都會讓檔案永久偏移。
+        {
+            var tampered = HmmPak.FromBytes(installedBytes);
+            tampered.Remove(LangInstaller.MarkerPath);
+            var tamperedState = PatchState.Inspect(GameFile.LocalPak, tampered.ToBytes());
+            Check("清冊遺失但語系目錄仍在時判定為 Unrecognised（不得為 Vanilla 或 PatchedByUs）",
+                tamperedState.IsUnrecognised, tamperedState.ToString());
+            var tamperedNorm = PatchState.Normalise(GameFile.LocalPak, tampered.ToBytes());
+            Check("清冊遺失時 Normalise 拒絕處理並要求 Steam 驗證", !tamperedNorm.Success);
+        }
+
+        // 2. 移除還原
+        LangInstaller.Uninstall(localPak);
+        byte[] uninstalledBytes = localPak.ToBytes();
+        bool uninstalledEq = uninstalledBytes.SequenceEqual(vanillaPakBytes);
+        Check("Uninstall 後 local.pak 逐位元組 100% 精確還原為原版", uninstalledEq,
+            uninstalledEq ? null : ApfFont.DiagnoseByteDifference(vanillaPakBytes, uninstalledBytes));
+
+        // 3. 冪等性：安裝兩次等於安裝一次
+        LangInstaller.Install(localPak, zhPack);
+        byte[] onceBytes = localPak.ToBytes();
+        LangInstaller.Install(localPak, zhPack);
+        byte[] twiceBytes = localPak.ToBytes();
+        bool twiceEq = onceBytes.SequenceEqual(twiceBytes);
+        Check("重複安裝兩次與安裝一次逐位元組一致 (冪等性)", twiceEq,
+            twiceEq ? null : ApfFont.DiagnoseByteDifference(onceBytes, twiceBytes));
+
+        // 4. 切換語言包：從 Pack A 切換至 Pack B 不殘留 Pack A
+        var packA = new LanguagePack
+        {
+            Meta = new LanguagePackMeta
+            {
+                Id = "pack-a",
+                Name = "Pack A",
+                NativeName = "語言包 A",
+                Version = "1.0",
+                GameLangFolder = "PACK_A",
+                GameLangKey = "pack_a",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta { Ui = "ui.json" }
+            }
+        };
+
+        var packB = new LanguagePack
+        {
+            Meta = new LanguagePackMeta
+            {
+                Id = "pack-b",
+                Name = "Pack B",
+                NativeName = "語言包 B",
+                Version = "1.0",
+                GameLangFolder = "PACK_B",
+                GameLangKey = "pack_b",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta { Ui = "ui.json" }
+            }
+        };
+
+        // 先還原，安裝 Pack A
+        LangInstaller.Uninstall(localPak);
+        LangInstaller.Install(localPak, packA);
+        Check("已安裝 Pack A", localPak.Contains(@"PACK_A\LOCAL.LOC.XML"));
+
+        // 再還原，安裝 Pack B
+        LangInstaller.Uninstall(localPak);
+        LangInstaller.Install(localPak, packB);
+        Check("已安裝 Pack B", localPak.Contains(@"PACK_B\LOCAL.LOC.XML"));
+        Check("切換後無 Pack A 殘留", !localPak.Contains(@"PACK_A\LOCAL.LOC.XML"));
+
+        LangInstaller.Uninstall(localPak);
+
+        // 5. 測試字元範圍完全坐落於 0x2000 以下之語言包 (無 0x2000 門檻依賴)
+        var packBelow2000 = new LanguagePack
+        {
+            Meta = new LanguagePackMeta
+            {
+                Id = "pack-below-2000",
+                Name = "Pack Below 0x2000",
+                NativeName = "低碼位語言包",
+                Version = "1.0",
+                GameLangFolder = "BELOW2000",
+                GameLangKey = "below2000",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta
+                {
+                    Face = "Arial",
+                    Ranges = ["00A0-00FF", "0370-03CF"] // Latin-1 Supplement & Greek (全部 < 0x2000)
+                },
+                Files = new FilesMeta { Ui = "ui.json" }
+            }
+        };
+
+        LangInstaller.Install(localPak, packBelow2000);
+        byte[] installedBelowBytes = localPak.ToBytes();
+        Check("安裝低碼位語言包 (< 0x2000) 後 Inspect 判定為 PatchedByUs",
+            PatchState.Inspect(GameFile.LocalPak, installedBelowBytes).IsPatched);
+
+        LangInstaller.Uninstall(localPak);
+        byte[] uninstalledBelowBytes = localPak.ToBytes();
+        bool belowEq = uninstalledBelowBytes.SequenceEqual(vanillaPakBytes);
+        Check("低碼位語言包 (< 0x2000) Uninstall 後 local.pak 逐位元組 100% 精確還原", belowEq,
+            belowEq ? null : ApfFont.DiagnoseByteDifference(vanillaPakBytes, uninstalledBelowBytes));
+
+        // 6. 測試字元範圍故意與既有字型範圍重疊之語言包 (Overlap Case)
+        var packOverlap = new LanguagePack
+        {
+            Meta = new LanguagePackMeta
+            {
+                Id = "pack-overlap",
+                Name = "Pack Overlap",
+                NativeName = "重疊範圍語言包",
+                Version = "1.0",
+                GameLangFolder = "OVERLAP",
+                GameLangKey = "overlap",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta
+                {
+                    Face = "Arial",
+                    Ranges = ["0060-009F"] // 部分與 0020-007F 重疊，部分超出至 009F
+                },
+                Files = new FilesMeta { Ui = "ui.json" }
+            }
+        };
+
+        LangInstaller.Install(localPak, packOverlap);
+        byte[] installedOverlapBytes = localPak.ToBytes();
+        Check("安裝重疊範圍語言包後 Inspect 判定為 PatchedByUs",
+            PatchState.Inspect(GameFile.LocalPak, installedOverlapBytes).IsPatched);
+
+        LangInstaller.Uninstall(localPak);
+        byte[] finalBytes = localPak.ToBytes();
+        bool finalEq = finalBytes.SequenceEqual(vanillaPakBytes);
+        Check("重疊範圍語言包 Uninstall 後 local.pak 逐位元組 100% 精確還原", finalEq,
+            finalEq ? null : ApfFont.DiagnoseByteDifference(vanillaPakBytes, finalBytes));
+    }
+
+    // --- 28. vxSettings.ini [Language] Default 設定與還原測試 ----------------
+    private static void TestVxSettingsLanguageDefaultReversal()
+    {
+        Console.WriteLine("28. vxSettings.ini [Language] Default 設定與還原測試");
+
+        string vanillaText = CreateSyntheticVxSettings();
+        byte[] vanillaBytes = Encoding.GetEncoding(1252).GetBytes(vanillaText);
+        var ini = IniFile.FromText(vanillaText);
+
+        var config = new ToolkitConfig();
+        config.Lang.Pack = "zh-TW";
+
+        var langMod = new LangModule();
+        langMod.ApplyVxSettings(ini, config, null);
+
+        Check("[Language] Default 寫入 chinese", ini.GetValue("Language", "Default") == "chinese");
+
+        byte[] patchedBytes = Encoding.GetEncoding(1252).GetBytes(ini.ToText());
+        Check("修補後 Inspect 辨識出 lang_default", PatchState.Inspect(GameFile.VxSettings, patchedBytes).AppliedPatches.Any(p => p.Contains("lang_default")));
+
+        var normRes = PatchState.Normalise(GameFile.VxSettings, patchedBytes);
+        Check("Normalise 執行成功", normRes.Success);
+        Check("Normalise 後 vxSettings.ini 逐位元組 100% 還原為原版", normRes.Value!.SequenceEqual(vanillaBytes));
+    }
+
+    // --- 29. 語言包範本匯出測試 ---------------------------------------------
+    private static void TestLangExportTemplate()
+    {
+        Console.WriteLine("29. 語言包範本匯出測試");
+
+        string tempOutDir = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_ExportTemplate_" + Guid.NewGuid().ToString("N"));
+        var localPak = CreateSyntheticLocalPak();
+
+        try
+        {
+            LangInstaller.ExportTemplate(localPak, "GERMAN", tempOutDir);
+
+            Check("ui.json 匯出成功", File.Exists(Path.Combine(tempOutDir, "ui.json")));
+            Check("help.json 匯出成功", File.Exists(Path.Combine(tempOutDir, "help.json")));
+            Check("pack.json 骨架匯出成功", File.Exists(Path.Combine(tempOutDir, "pack.json")));
+
+            string packJsonText = File.ReadAllText(Path.Combine(tempOutDir, "pack.json"));
+            var metaRes = LanguagePack.ParseMeta(packJsonText);
+            Check("匯出的 pack.json 符合格式規範", metaRes.Success);
+            Check("匯出的 pack.json TemplateLang 為 GERMAN", metaRes.Value!.TemplateLang == "GERMAN");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempOutDir)) Directory.Delete(tempOutDir, true); } catch { }
+        }
+    }
+
+    // --- 30. CLI lang 指令端對端整合測試 ------------------------------------
+    private static void TestCliLangCommands()
+    {
+        Console.WriteLine("30. CLI lang 指令端對端整合測試 (list, install, uninstall, export-template)");
+
+        string tempDir = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_CliLang_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string configPath = Path.Combine(tempDir, "cktoolkit.json");
+
+        // 建立合成遊戲目錄
+        string tempGameDir = Path.Combine(tempDir, "Game");
+        Directory.CreateDirectory(tempGameDir);
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), CreateSyntheticLauncher64());
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), CreateSyntheticDataPak().ToBytes());
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), CreateSyntheticLocalPak().ToBytes());
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
+
+        try
+        {
+            // 1. lang list --json
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "list", "--json", "--config", configPath], stdout, stderr);
+                Check("CLI lang list 退出碼 0", exitCode == ExitCodes.Success);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == true", env is not null && env.Ok && env.Command == "lang list");
+            }
+
+            // 2. lang install --pack zh-TW --json
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "install", "--pack", "zh-TW", "--json", "--config", configPath], stdout, stderr);
+                Check("CLI lang install 退出碼 0", exitCode == ExitCodes.Success);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == true", env is not null && env.Ok);
+
+                var loadedConfig = ToolkitConfig.Load(configPath);
+                Check("設定檔中 Lang.Pack 設定為 zh-TW", loadedConfig.Lang.Pack == "zh-TW");
+            }
+
+            // 3. lang install 缺少 --pack 參數 -> 退出碼 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "install", "--json", "--config", configPath], stdout, stderr);
+                Check("CLI lang install 缺少 --pack 退出碼 2", exitCode == ExitCodes.InvalidArgs);
+            }
+
+            // 4. lang install 不存在的語言包 -> 退出碼 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "install", "--pack", "non_existent_pack_xyz", "--json", "--config", configPath], stdout, stderr);
+                Check("CLI lang install 未知語言包退出碼 2", exitCode == ExitCodes.InvalidArgs);
+            }
+
+            // 5. lang uninstall --json
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "uninstall", "--json", "--config", configPath], stdout, stderr);
+                Check("CLI lang uninstall 退出碼 0", exitCode == ExitCodes.Success);
+
+                var loadedConfig = ToolkitConfig.Load(configPath);
+                Check("設定檔中 Lang.Pack 已清空", string.IsNullOrEmpty(loadedConfig.Lang.Pack));
+            }
+
+            // 6. lang export-template --out <dir> --game <dir> --json
+            string exportOutDir = Path.Combine(tempDir, "Exported");
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "export-template", "--out", exportOutDir, "--game", tempGameDir, "--json"], stdout, stderr);
+                Check("CLI lang export-template 退出碼 0", exitCode == ExitCodes.Success);
+                Check("範本輸出目錄已建立 pack.json", File.Exists(Path.Combine(exportOutDir, "pack.json")));
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
     #region Fixture Helpers
 
     /// <summary>
@@ -1430,6 +2073,148 @@ internal static class Program
             "\r\n" +
             "[Update]\r\n" +
             "NewUpdate=0\r\n";
+    }
+
+    /// <summary>
+    /// 建立結構完整、具備合法 Latin GlyphRange 的合成 APF 點陣字型。
+    /// </summary>
+    private static ApfFont CreateSyntheticApf(string face = "Tahoma", int pixelSize = 13)
+    {
+        var font = new ApfFont
+        {
+            Face = face,
+            Family = face,
+            OrigMaxWidth = 10
+        };
+        font.Unk[0] = 0x20 + (face.Length + 1) * 2 + 20;
+        font.Unk[1] = 32;
+        font.Unk[2] = 39;
+        font.Unk[3] = 31;
+        font.Unk[4] = -1;
+        font.Unk[5] = 1;
+
+        font.Metrics[0] = pixelSize;
+        font.Metrics[1] = 0;
+        font.Metrics[2] = 0;
+        font.Metrics[5] = pixelSize + 3;
+        font.Metrics[6] = 10;
+        font.Metrics[10] = 11;
+        font.Metrics[11] = 2;
+
+        var latinRange = new GlyphRange(32) { IsOriginal = true };
+        for (int i = 0; i < 96; i++)
+        {
+            int w = (i == 45 || i == 55) ? 10 : 6;
+            latinRange.Glyphs.Add(new Glyph
+            {
+                A = 1,
+                B = w,
+                C = 1,
+                Top = 2,
+                Width = w,
+                Height = 10,
+                Pixels = new byte[w * 10]
+            });
+        }
+        font.Ranges.Add(latinRange);
+        return font;
+    }
+
+    /// <summary>
+    /// 建立具備雙區間 (Latin + Cyrillic) 的合成 APF 點陣字型。
+    /// </summary>
+    private static ApfFont CreateSyntheticApfMultiRange(string face = "Tahoma", int pixelSize = 13)
+    {
+        var font = new ApfFont
+        {
+            Face = face,
+            Family = face,
+            OrigMaxWidth = 11
+        };
+        font.Unk[0] = 0x20 + (face.Length + 1) * 2 + 20;
+        font.Unk[1] = 32;
+        font.Unk[2] = 39;
+        font.Unk[3] = 31;
+        font.Unk[4] = -1;
+        font.Unk[5] = 1;
+
+        font.Metrics[0] = pixelSize;
+        font.Metrics[1] = 0;
+        font.Metrics[2] = 0;
+        font.Metrics[5] = pixelSize + 3;
+        font.Metrics[6] = 11;
+        font.Metrics[10] = 11;
+        font.Metrics[11] = 2;
+
+        // Range 1: Latin (32..127, 96 chars, max width 10)
+        var latinRange = new GlyphRange(32) { IsOriginal = true };
+        for (int i = 0; i < 96; i++)
+        {
+            int w = (i == 45 || i == 55) ? 10 : 6;
+            latinRange.Glyphs.Add(new Glyph
+            {
+                A = 1,
+                B = w,
+                C = 1,
+                Top = 2,
+                Width = w,
+                Height = 10,
+                Pixels = new byte[w * 10]
+            });
+        }
+        font.Ranges.Add(latinRange);
+
+        // Range 2: Cyrillic (0x0400..0x045F, 96 chars, max width 11)
+        var cyrillicRange = new GlyphRange(0x0400) { IsOriginal = true };
+        for (int i = 0; i < 96; i++)
+        {
+            int w = (i == 10) ? 11 : 7;
+            cyrillicRange.Glyphs.Add(new Glyph
+            {
+                A = 1,
+                B = w,
+                C = 1,
+                Top = 2,
+                Width = w,
+                Height = 10,
+                Pixels = new byte[w * 10]
+            });
+        }
+        font.Ranges.Add(cyrillicRange);
+
+        return font;
+    }
+
+    /// <summary>
+    /// 建立原版結構之合成 local.pak 檔案（包含 FONTS\TAHOMA13.APF、GERMAN\LOCAL.LOC.XML、ENGLISH\HELP.XML 與 CREDITS.TXT）。
+    /// </summary>
+    private static HmmPak CreateSyntheticLocalPak()
+    {
+        var pak = HmmPak.CreateEmpty();
+        var apfBytes = CreateSyntheticApf().Dump();
+        pak.Write(@"FONTS\TAHOMA13.APF", apfBytes);
+
+        string locXml =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<translationtable>\r\n" +
+            "  <translationtableentry text=\"Start Game\" result=\"Spiel starten\" />\r\n" +
+            "  <translationtableentry text=\"Options\" result=\"Optionen\" />\r\n" +
+            "  <translationtableentry text=\"Exit\" result=\"Beenden\" />\r\n" +
+            "</translationtable>\r\n";
+        pak.WriteText(@"GERMAN\LOCAL.LOC.XML", locXml);
+
+        string helpXml =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<help>\r\n" +
+            "  <entry id=\"1\">Welcome to the game tutorial.</entry>\r\n" +
+            "  <entry id=\"2\" self=\"true\"/>\r\n" +
+            "  <entry id=\"3\">Build barracks to train warriors.</entry>\r\n" +
+            "</help>\r\n";
+        pak.WriteText(@"ENGLISH\HELP.XML", helpXml);
+
+        pak.WriteText(@"ENGLISH\CREDITS.TXT", "Celtic Kings: Rage of War Credits\r\nOriginal English Team\r\n");
+
+        return pak;
     }
 
     #endregion

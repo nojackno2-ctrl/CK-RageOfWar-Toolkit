@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
 using CKToolkit.I18n;
 
@@ -312,15 +314,64 @@ public static class PatchState
 
     private static FileState InspectLocalPak(byte[] bytes)
     {
+        HmmPak pak;
         try
         {
-            _ = HmmPak.FromBytes(bytes);
-            return FileState.Vanilla();
+            pak = HmmPak.FromBytes(bytes);
         }
         catch
         {
             return FileState.Unrecognised();
         }
+
+        var installedLangs = LangInstaller.GetInstalledLanguages(pak);
+        bool hasMarker = pak.Contains(LangInstaller.MarkerPath);
+        bool hasPatchedFonts = false;
+
+        if (hasMarker)
+        {
+            try
+            {
+                var manifest = JsonSerializer.Deserialize<FontPatchManifest>(pak.ReadText(LangInstaller.MarkerPath));
+                if (manifest?.Fonts.Count > 0)
+                {
+                    hasPatchedFonts = true;
+                }
+            }
+            catch
+            {
+                return FileState.Unrecognised();
+            }
+        }
+
+        // 安裝語言包一定同時寫入「語系目錄」與「字型清冊」。只剩其中一個代表這份
+        // local.pak 被外力動過，而字型的還原完全依賴清冊——APF 位元組裡沒有任何欄位
+        // 能區分我們加的字形與原廠字形。此時若回報 PatchedByUs，解除安裝會刪掉語系目錄
+        // 卻留下改過的字型，而且從此再也認不出來；若回報 Vanilla，下次套用會在既有字形上
+        // 再疊一層。兩條路都會讓檔案永久偏移，所以一律拒絕，請使用者用 Steam 驗證還原。
+        if (installedLangs.Count > 0 && !hasMarker)
+        {
+            return FileState.Unrecognised();
+        }
+
+        if (installedLangs.Count > 0 || hasMarker || hasPatchedFonts)
+        {
+            var patches = new List<string>();
+            if (installedLangs.Count > 0)
+            {
+                foreach (string lang in installedLangs)
+                {
+                    patches.Add($"langpack_{lang}");
+                }
+            }
+            else
+            {
+                patches.Add("langpack_installed");
+            }
+            return FileState.PatchedByUs(patches);
+        }
+
+        return FileState.Vanilla();
     }
 
     private static Result<byte[]> NormaliseLocalPak(byte[] liveBytes)
@@ -333,7 +384,23 @@ public static class PatchState
                 ExitCodes.BackupMissingNeedsSteamVerify);
         }
 
-        return Result<byte[]>.Ok((byte[])liveBytes.Clone());
+        if (state.IsVanilla)
+        {
+            return Result<byte[]>.Ok((byte[])liveBytes.Clone());
+        }
+
+        try
+        {
+            var pak = HmmPak.FromBytes(liveBytes);
+            LangInstaller.Uninstall(pak);
+            return Result<byte[]>.Ok(pak.ToBytes());
+        }
+        catch (Exception ex)
+        {
+            return Result<byte[]>.Fail(
+                Strings.Get("Error_GeneralFailure", $"local.pak 正規化失敗：{ex.Message}"),
+                ExitCodes.GeneralFailure);
+        }
     }
 
     // ---- VxSettings 檢查與正規化 --------------------------------------------
@@ -360,6 +427,13 @@ public static class PatchState
         var patches = new List<string>();
         if (isCustom) patches.Add("vxsettings_custom");
 
+        if (ini.TryGetValue("Language", "Default", out string? langVal) &&
+            !string.IsNullOrWhiteSpace(langVal) &&
+            !string.Equals(langVal.Trim(), "english", StringComparison.OrdinalIgnoreCase))
+        {
+            patches.Add($"lang_default ({langVal.Trim()})");
+        }
+
         return patches.Count > 0 ? FileState.PatchedByUs(patches) : FileState.Vanilla();
     }
 
@@ -383,6 +457,11 @@ public static class PatchState
             string text = IniEncoding.GetString(liveBytes);
             var ini = IniFile.FromText(text);
             VxSettingsPatch.Normalise(ini);
+            if (ini.TryGetValue("Language", "Default", out string? curLang) &&
+                !string.Equals(curLang?.Trim(), "english", StringComparison.OrdinalIgnoreCase))
+            {
+                ini.SetValue("Language", "Default", "english");
+            }
             return Result<byte[]>.Ok(IniEncoding.GetBytes(ini.ToText()));
         }
         catch (Exception ex)

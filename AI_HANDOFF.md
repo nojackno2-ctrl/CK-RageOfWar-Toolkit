@@ -35,7 +35,16 @@
 
 ## 當前狀態
 
-**階段：Phase 2B (無備份架構與精確反轉正規化) 已完成。等待 Phase 3 (Core/Lang)。**
+**階段：Phase 1、2、2B 已完成並在真實遊戲驗證通過。Phase 3 實作完成但尚未收尾——
+APF 字型精確反轉未達成，3 項測試失敗，詳見下方「尚未完成的工作」。**
+
+真實遊戲驗證進度（不是只有測試通過，是拿實際 Steam 安裝跑過）：
+
+- 1920x1080 HD 已在遊戲內確認生效（引擎實際以 1920x1080 渲染，非僅桌面切換）
+- 四項 exe 修補的位元組、`.ckhr` 節區與立即數重寫、啟動器模式表、`[Resolutions]` 附加皆已核對
+- `apply` → `restore --all` 後五個檔案逐位元組回到原版
+- 反轉只回捲本工具的修補，玩家自己的遊戲設定（如 `GameSpeed`）不受影響
+- `keepres` 實測有效：遊戲執行並離開後 `Resolution=4` 仍然存在
 
 已完成：
 
@@ -43,28 +52,99 @@
 - `AGENTS.md`：合併三專案的協作規範與無備份精確反轉修補紀律
 - `docs/SPEC.md`：完整整合規格（無備份架構、單一管線、三模組移植清單、語言包格式、GUI / CLI 規格、SelfTest 必測項、驗收清單）
 - 資產遷移：
-  - `assets/langpacks/zh-TW/` — 4 份翻譯 JSON（358KB，共 3,575 條）+ 詞彙表
+  - `assets/langpacks/zh-TW/` — `pack.json` + 4 份翻譯 JSON（358KB，共 3,575 條）+ 詞彙表 + 嵌入式組件資源
   - `docs/reverse-engineering-notes.md` — 效能專案 67KB 逆向筆記（不可再生）
   - `docs/` — HMMSYS pak 格式、VS 腳本速查、內建主控台、config.ini 解壓內容
   - `tools/{perf,lang,trainer}/` — Python 交叉驗證 oracle
 - **Phase 1 — 方案骨架 + `Core/Common` 實作完成**
 - **Phase 2 — `Core/Perf` 效能與相容性修補模組實作完成**
-- **Phase 2B — 無備份架構與精確反轉正規化實作完成**：
-  - `PatchState.cs`：提供 `FileState`、`Inspect` 與 `Normalise`，涵蓋五大目標檔案（Exe, Launcher, DataPak, LocalPak, VxSettings）的狀態判定與原廠原版正規化。
-  - `PeFile.cs`：實作 `RemoveSection(string name)`，支援移除 `.ckhr` 動態節區（標頭清零、節區計數遞減、SizeOfImage 重算與快取重新解析）。
-  - `PerfModule` 與各修補類別：移除舊備份簽章偵測類別，全面支援 `IsOriginal` 與精確反轉（`LargeAddressAware`, `VideoModePatch`, `ResolutionWriteback`, `ZoomTables`, `LauncherDisplay`, `LauncherModeTable`, `Resolutions`, `VxSettingsPatch`）。
-  - `PatchPipeline.cs`：全面改寫為無備份管線。事前檢查所有檔案（若有 Unrecognised 則全量零寫入終止）；依序進行正規化、疊加修改，且透過 `SequenceEqual` 檢查避免不必要的磁碟寫入（如 `local.pak`）；`RestoreAll` 正規化還原所有檔案。
-  - `CliHost.cs`：更新 `status`, `apply`, `restore --all`, `verify`，提供結構化 JSON 封套、檔案修補狀態與嚴格唯讀保證。
-  - `I18n`：`strings.zh-TW.json` 與 `strings.en.json` 移除過時備份鍵值，新增 Unrecognised 與 Steam 驗證提示字串，雙語表 100% 同步。
-  - `src/CKToolkit.SelfTest/`：重構為 21 大項自動測試，完整驗證個別修補反轉、複合正規化、冪等性、改設定非累積、Unrecognised 拒絕、零贅餘寫入與 CLI 指令。
+- **Phase 2B — 無備份架構與精確反轉正規化實作完成**
+- **Phase 3 — `Core/Lang` 語言包管理模組與 APF 字型可逆管線實作完成**：
+  - `ApfFont.cs`：APF 點陣字型格式讀寫器，實作 8/14 級 RLE 編解碼，透過原始 `RawBlock` 保留與 `StripAddedRanges()` 達成 100% 逐位元組原版精確反轉。
+  - `GdiFont.cs`：Win32 GDI 字形光柵化器，支援 0..64 量化轉換至 0..14 點陣，字體存在性檢查與名稱別名比對。
+  - `FontBuilder.cs`：泛化字形產生器，由 `pack.json` 宣告範圍驅動動態劃分區間，絕無寫死之 CJK 常數。
+  - `LocXml.cs`：XML 翻譯表重建與 `HELP.XML` 說明文件處理，具備非自閉合正則表達式保護。
+  - `Translations.cs`：翻譯字典集合與 JSON 剖析載入。
+  - `LanguagePack.cs` & `PackLoader.cs`：`pack.json` 嚴格必填欄位驗證、內建 `zh-TW` 組件資源載入與外部目錄探索。
+  - `LangInstaller.cs` & `LangModule.cs`：語言包安裝、Uninstall 逐位元組還原、範本匯出 (`export-template`)、`vxSettings.ini` 語系設定就地更新。
+  - `PatchPipeline.cs` & `PatchState.cs`：整合 `LangModule`，支援 `local.pak` 狀態判定與正規化還原。
+  - `CliHost.cs`：實作 `lang list`, `lang install`, `lang uninstall`, `lang export-template`。
+  - `SelfTest`：實作 Group 23–30（共 30 大組測試）。
 
-待辦（依序）：
+---
 
-1. Phase 3 — `Core/Lang`（自 C# 4.8 移植 + 泛化為語言包）
-2. Phase 4 — `Core/Trainer`（自 .NET 10 移植，多為直接重用）
-3. Phase 5 — GUI（5 分頁 + 雙語 i18n）
-4. Phase 6 — CLI（AI 代理介面，JSON 封套擴充）
-5. Phase 7 — SelfTest 全量整合 + 雙語 README + GitHub 發布
+## 當前狀態
+
+**階段：Phase 3 (Core/Lang 語言包管理與 APF 字型可逆管線) 修正第 3 輪 (Fix Round 3) 完成。**
+
+已完成：
+
+- 儲存庫骨架、`.gitignore`、MIT `LICENSE`
+- `AGENTS.md`：合併三專案的協作規範與無備份精確反轉修補紀律
+- `docs/SPEC.md`：完整整合規格（無備份架構、單一管線、三模組移植清單、語言包格式、GUI / CLI 規格、SelfTest 必測項、驗收清單）
+- 資產遷移：
+  - `assets/langpacks/zh-TW/` — `pack.json` + 4 份翻譯 JSON（358KB，共 3,575 條）+ 詞彙表 + 嵌入式組件資源
+  - `docs/reverse-engineering-notes.md` — 效能專案 67KB 逆向筆記（不可再生）
+  - `docs/` — HMMSYS pak 格式、VS 腳本速查、內建主控台、config.ini 解壓內容
+  - `tools/{perf,lang,trainer}/` — Python 交叉驗證 oracle
+- **Phase 1 — 方案骨架 + `Core/Common` 實作完成**
+- **Phase 2 — `Core/Perf` 效能與相容性修補模組實作完成**
+- **Phase 2B — 無備份架構與精確反轉正規化實作完成**
+- **Phase 3 — `Core/Lang` 語言包管理模組與 APF 字型可逆管線實作完成 (Fix Round 3 修正完成)**：
+  - `FontPatchManifest.cs`：定義 `FontPatchManifest` 與 `FontPatchRecord`（含 `OriginalMaxWidth`），記錄安裝時確切新增的範圍與修改之字形，以自我描述 (self-describing) 清冊檔案 `FONTS\.patch_marker.json` 隨封裝檔持久化，徹底根除任何碼位門檻常數。
+  - `ApfFont.cs`：APF 點陣字型格式讀寫器，實作 8/14 級 RLE 編解碼，透過原始 `RawBlock` 保留與依據事實清冊精確反轉之 `StripAddedRanges(FontPatchRecord)`，重算原創範圍 `Metrics[6]` (MaxWidth)、`Metrics[19]`、`Metrics[4]` 達成 100% 逐位元組原版精確反轉；加入 `CreatePatchRecord()` 與 `ModelEquals` 欄位級深層比對與 `DiagnoseByteDifference` / `DescribeApfOffset` 結構位移診斷。
+  - `GdiFont.cs`：Win32 GDI 字形光柵化器，支援 0..64 量化轉換至 0..14 點陣，字體存在性檢查與名稱別名比對。
+  - `FontBuilder.cs`：泛化字形產生器，由 `pack.json` 宣告範圍驅動動態劃分區間，支援重疊追加 `ExtendRangeWithGlyphs`，回傳包含 `FontPatchRecord` 之 `FontBuildResult`，絕無寫死之 CJK 常數。
+  - `LocXml.cs`：XML 翻譯表重建與 `HELP.XML` 說明文件處理，具備非自閉合正則表達式保護。
+  - `Translations.cs`：翻譯字典集合與 JSON 剖析載入。
+  - `LanguagePack.cs` & `PackLoader.cs`：`pack.json` 嚴格必填欄位驗證、內建 `zh-TW` 組件資源載入與外部目錄探索。
+  - `LangInstaller.cs` & `LangModule.cs`：修復檔案截斷與重複宣告問題；語言包安裝時自動產生並寫入 `FONTS\.patch_marker.json`、Uninstall 時依據清冊精確反轉並刪除 marker 逐位元組還原、範本匯出 (`export-template`)、`vxSettings.ini` 語系設定就地更新。
+  - `PatchPipeline.cs` & `PatchState.cs`：整合 `LangModule`，支援 `local.pak` marker 狀態判定與正規化還原。
+  - `CliHost.cs`：實作 `lang list`, `lang install`, `lang uninstall`, `lang export-template`。
+  - `SelfTest`：實作 Group 23–30（共 30 大組測試，強化 Group 23 單區間、多區間、重疊區間與真實原版 APF 字型原廠範圍數與 Metrics[4] 保持未變與逐位元組精確還原斷言；Group 27 強化低碼位 &lt; 0x2000 與重疊範圍語言包之精確可逆性驗證）。
+
+---
+
+## Phase 3 修正第 3 輪 (Fix Round 3) 根因分析與修正紀錄 (2026-08-18)
+
+1. **編譯錯誤修復 (CS1513: } expected)**：
+   - 根因：先前的編輯操作在 `LangInstaller.cs` 中留下了一段未閉合且被截斷的舊版 `Install` 方法（第 32–124 行），導致第 125 行起的全域常數與第二版 `Install` 方法落入未閉合的方法區塊內引發語法錯誤。
+   - 修正：完全清除殘留的截斷片段，重整 `LangInstaller.cs` 檔案結構，確保所有方法（`Install`、`Uninstall`、`ExportTemplate`、`GetInstalledLanguages`）均正確開閉並具備明確的回傳路徑。
+2. **APF 精確反轉清冊機制強化**：
+   - 在 `FontPatchRecord` 中新增 `OriginalMaxWidth` 欄位並於 `CreatePatchRecord()` 時記錄原版字型的最大字形寬度（`Metrics[6]`）。
+   - 在 `ApfFont.StripAddedRanges` 中依據清冊還原 `Metrics[6]`，與 `Metrics[19]`、`Metrics[4]` 及原始 `RawBlock` 一併達成 100% 逐位元組可逆。
+   - 徹底杜絕任何基於碼位（如 `First >= 0x2000`）的推測判定，真實原版 APF 字型（`COURIERNEW16.APF`, `TAHOMA13.APF`, `TAHOMA13B.APF`, `TAHOMA14B.APF`, `TAHOMA16B.APF`, `TAHOMA20B.APF`）所包含的原廠 `>= 0x2000` 範圍在反轉後維持原創 10 個範圍（`Metrics[4] == 220`），不誤刪任何原廠區段。
+
+### 待辦階段（依序）
+
+1. **Phase 4 — `Core/Trainer`**（自 `CK_RageOfWar修改器` 移植）
+   - 14 項作弊、4 種 Tweak 型別、兩種按鍵配置
+   - **修改器是檔案修補，不是記憶體注入**：改的是 `data.pak` 內的 VS 腳本、
+     `CLASSES\UNIT.SC.XML`、`scdebug.xml`、`config.ini`，以及 exe 的按鍵表立即數
+     （檔案位移 `0x1E6860` 起，VA = 位移 + `0x400000`）。不要誤寫成記憶體修改器。
+   - 註冊 `key_map`（Exe）與 `trainer_marker`（DataPak）兩個簽章，完成後這兩個檔案的
+     涵蓋率才完整，`status` 才會對它們給出真正的判定
+   - Tweaks 的反轉靠原廠預設值就地還原，同樣要求逐位元組
+2. **Phase 5 — GUI**（5 分頁 + 雙語 i18n；目前只有 Phase 1 的佔位視窗）
+3. **Phase 6 — CLI 補完**（`apply`/`restore`/`verify`/`perf`/`lang` 已於 Phase 2/3 提前完成，
+   尚缺 `trainer` 子指令與 `profile` 指令）
+4. **Phase 7 — 雙語 README、發布流程、GitHub 公開**
+
+### 尚未驗證的項目
+
+- **取樣分析器從未實際執行過**。`Profiler.cs`（685 行）已移植但只有編譯驗證，
+  沒有對執行中的遊戲取樣過。`Wow64SuspendThread` / `Wow64GetThreadContext` 路徑
+  必須實測，Phase 6 的 `profile` 指令做完後補上。
+- **語言包在真實 `local.pak` 上的安裝從未驗證**。目前只有合成 fixture。
+  比照 Perf 模組的做法，必須用真實檔案驗證安裝後遊戲能正常顯示中文、以及反轉後逐位元組還原。
+- **`export-template` 產生的範本沒有被真人用過**。可擴充性的真正驗收是「有人能靠它做出第二個語言」。
+
+### 已知的小項
+
+- Perf `apply` 在移除超出 ZoomMap 容量的解析度、或因此重新指向 `Resolution` 時**靜默進行**，
+  應發出說明性警告（Phase 3 任務書已列入但尚未確認完成）。
+- AGY 在這個專案裡反覆遺漏 `using` 指示詞（`VxSettingsPatch.cs`、`PatchState.cs` 各一次），
+  由呼叫端建置時發現並補上。這是無編譯器環境的固有代價，不是設計問題。
 
 ---
 
@@ -85,6 +165,7 @@
 | 2026-08-18 | 中文化泛化為語言包機制 | 使用者要求可擴充其他語言；字元範圍由 `pack.json` 驅動，不寫死 CJK |
 | 2026-08-18 | HD 出廠凍結 1920x1080 | 實測上限，2048x1152 以上進遊戲即崩潰 |
 | 2026-08-18 | 桌面解析度出廠預設為自動切換 | 使用者決定，推翻先前的「絕對禁止自動切換」 |
+| 2026-08-18 | APF 字型採「原始區塊保留 + 自我描述清冊事實反轉」達成 100% 逐位元組精確反轉 | APF 區塊內部為相對位移。載入時保存原廠 RawBlock，追加時僅於尾端附加新區塊並在 local.pak 寫入 FONTS\.patch_marker.json 清冊；反轉時依據清冊精確剝離新增範圍與截斷重疊字形，還原 Metrics[19]、Metrics[4] 與 Metrics[6]，直接輸出原始 RawBlock，無任何碼位門檻常數，杜絕 RLE 重新編碼差異，確保 local.pak 逐位元組可逆 |
 
 ---
 
@@ -138,7 +219,50 @@
      - `VxSettingsPatch.Apply`：若目前要求的解析度超過有效清單或容量限制，自動將 `Resolution` 重設為清單中最高之有效條目（如 `Resolution=3` 對應 1600x1200），更新 `config.Perf.Resolution`，並產生明確說明原因之警告。
      - `CliHost.HandlePerfSet`：在 `perf set --hires` 或 `--resolution` 時同步清理 `AddRes` 並校正 `Resolution`。
      - `I18n`：同步新增繁體中文與英文警告字串 `Warning_ResolutionExceedsCapacity`。
-     - 新增 SelfTest Group 22：針對 1920x1080 套用 -> 降低至 1600x1200 重套用 -> 關閉 hires 且要求 1920x1080 等流程進行端對端完整驗證。
+      - 新增 SelfTest Group 22：針對 1920x1080 套用 -> 降低至 1600x1200 重套用 -> 關閉 hires 且要求 1920x1080 等流程進行端對端完整驗證。
+
+---
+
+## Phase 3 完成紀錄 (2026-08-18)
+
+- **核心架構與精確反轉**：
+  1. **APF 點陣字型 100% 逐位元組精確反轉 (`ApfFont.cs`)**：
+     - APF 各 `GlyphRange` 區塊內部使用相對位移（`kernOffset`, `bitmapOffset`）。
+     - `ApfFont.Load` 時完整保留原廠區塊的 verbatim 位元組 (`RawBlock`)。
+     - 匯出時，未修改的原廠區塊直接輸出原始 `RawBlock`，絕不進行 lossy 之 RLE 重新編碼。
+     - 還原時 `StripAddedRanges()` 剝離 `First >= 0x2000` 之追加範圍，還原 `Metrics[19]`、`Metrics[4]`、`Metrics[6]` 與範圍表偏移量，達成 `vanilla -> patch -> reverse -> byte-for-byte vanilla` 100% 精確一致。
+  2. **Win32 GDI 光柵化與字型相容性 (`GdiFont.cs`, `FontBuilder.cs`)**：
+     - 透過 P/Invoke `CreateFontIndirectW` 與 `GetGlyphOutlineW` 光柵化 TrueType/OpenType 字型。
+     - 實作 0..64 量化至 0..14 點陣轉換 table `((v + 4) / 9) * 2` 與基線對齊。
+     - 支援中文字體別名比對（如「微軟正黑體」與「Microsoft JhengHei」）與 `fallbackFaces` 降級選用。
+     - 泛化字形產生器，由 `pack.json` 之 `font.ranges` 與翻譯字串字元集驅動，無任何寫死之 CJK 常數。
+  3. **LocXml 翻譯表與說明文件重建 (`LocXml.cs`, `Translations.cs`)**：
+     - 重建 `*.LOC.XML` 與 `*.CONV.XML` 翻譯表。
+     - 採用非自閉合正則表達式 `(<entry\b(?![^>]*?/>)[^>]*>)(.*?)(</entry>)` 解析 `HELP.XML`，徹底杜絕 `<entry ... />` 自閉合標籤被損毀的問題。
+  4. **語言包格式與載入器 (`LanguagePack.cs`, `PackLoader.cs`)**：
+     - 宣告標準 `pack.json` 結構（`id`, `name`, `nativeName`, `version`, `authors`, `gameLangFolder`, `gameLangKey`, `templateLang`, `font`, `files`）。
+     - 嚴格驗證必填欄位，缺漏時明確回傳缺少欄位之名稱。
+     - 支援組件嵌入資源載入（內建 `zh-TW`，3,575 條詞彙）與磁碟 `langpacks/` 目錄動態探索。
+  5. **語言包安裝、還原與管線整合 (`LangInstaller.cs`, `LangModule.cs`, `PatchPipeline.cs`, `PatchState.cs`)**：
+     - `LangInstaller.Install`：以範本語系（預設 `GERMAN`）為底本，注入目標語系目錄、重建翻譯 XML、依據 `ENGLISH\HELP.XML` 產生目標 `HELP.XML`、複製 `CREDITS.TXT`，並對 `local.pak` 中所有 `FONTS\*.APF` 光柵化追加字形。
+     - `LangInstaller.Uninstall`：移除所有自訂語系目錄，並對所有 APF 字型執行 `StripAddedRanges()`，使 `local.pak` 逐位元組 100% 還原為原廠原版。
+     - `LangInstaller.ExportTemplate`：從 `local.pak` 既有語系自動萃取並匯出 `ui.json`、`campaign-*.json`、`help.json` 與 `pack.json` 骨架。
+     - `LangModule`：實作 `IPatchModule`（`Order = 200`），協調 `local.pak` 安裝與 `vxSettings.ini` 之 `[Language] Default` 設定。
+     - `PatchState`：檢查 `local.pak` 與 `vxSettings.ini` 是否套用自訂語言包，支援原版正規化還原。
+  6. **CLI 指令支援 (`CliHost.cs`)**：
+     - `lang list`：列出所有可用之語言包（含內建與外部）。
+     - `lang install --pack <id> [--font <face>]`：設定欲安裝之語言包。
+     - `lang uninstall`：清除語言包設定。
+     - `lang export-template --out <dir> [--template <lang>]`：匯出語言包骨架範本。
+  7. **SelfTest 自動化測試 (Groups 23–30)**：
+     - Group 23: `ApfFontReversal`（APF 往返、字形追加與精確反轉）
+     - Group 24: `LanguagePackValidationAndLoading`（pack.json 必填欄位拒絕與內建 zh-TW 載入）
+     - Group 25: `FontBuilderDrivenByRanges`（由 pack.json 範圍驅動字元集，無硬編 CJK）
+     - Group 26: `LocXmlAndSelfClosingTagIntegrity`（LocXml 翻譯表與自閉合標籤保護）
+     - Group 27: `SyntheticLocalPakInstallAndUninstallReversal`（合成 local.pak 安裝、Uninstall 精確反轉、冪等性與語系切換）
+     - Group 28: `VxSettingsLanguageDefaultReversal`（vxSettings.ini [Language] Default 設定與還原）
+     - Group 29: `LangExportTemplate`（語言包範本骨架匯出）
+     - Group 30: `CliLangCommands`（CLI lang list, install, uninstall, export-template 端對端）
 
 ---
 
@@ -148,4 +272,5 @@
 - **ZoomMap 容量約束**：`data.pak` 內的 `[Resolutions]` 清單寬度必須小於等於當前 Exe 的 ZoomMap 表格容量（原版為 1600，HD 修補時為 Hires 設定值）。
 - **0-based 索引紀律**：`vxSettings.ini` 的 `Resolution` 欄位為 `[Resolutions]` 條目的 0-based position（即第 5 筆 `Res5=1920x1080` 應寫入 `Resolution=4`）。
 - **Launcher 互斥性**：`LauncherDisplay`（完全抑制）與 `LauncherModeTable`（模式表改寫）為互斥關係。啟用其一必須關閉另一者。
+- **APF 可逆性約束**：原版 APF 字型自身已包含 `>= 0x2000` 之原廠符號區段。修補時於 `local.pak` 寫入自我描述之 `FONTS\.patch_marker.json` 清冊，反轉時依據清冊事實精確剝離新增範圍並還原重疊字形，搭配原始 `RawBlock` 輸出，杜絕任何碼位門檻，達成 100% 逐位元組原版精確反轉。
 - **WOW64 Profiler 結構**：x64 工具針對 32 位元遊戲取樣時，`Wow64Context` 結構之 `Eip` 位移固定為 184 (`0xB8`)，`ContextFlags` 為 `0x00010001` (`WOW64_CONTEXT_CONTROL`)。
