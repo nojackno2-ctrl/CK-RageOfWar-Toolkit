@@ -201,7 +201,7 @@ public static partial class CliHost
     }
 
     /// <summary>
-    /// 處理 status 狀態查詢。此路徑為嚴格唯讀，絕不建立備份目錄、絕不抓取檔案、絕不寫入設定。
+    /// 處理 status 狀態查詢。此路徑為嚴格唯讀，零寫入、不建目錄、不抓檔案。
     /// </summary>
     private static int HandleStatus(string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
     {
@@ -214,71 +214,71 @@ public static partial class CliHost
             return OutputError("status", err, ExitCodes.GameNotFound, isJson, stdout, stderr);
         }
 
-        // 純唯讀查詢：使用 BackupManager 唯讀 API，絕不呼叫 ReadPristine 或 EnsureBackup
-        var backupMgr = new BackupManager();
-        PerfModule.RegisterSignatures(backupMgr);
         var filesStatus = new Dictionary<string, object>();
         var warnings = new List<string>(config.MigrationsApplied);
 
-        bool anyCoverageIncomplete = false;
-
         foreach (GameFile f in Enum.GetValues<GameFile>())
         {
-            string fileName = BackupManager.GetFileName(f);
-            bool hasBackup = backupMgr.HasBackup(f);
-            var state = backupMgr.GetFilePristineState(gameDir, f);
-            var provenance = backupMgr.GetBackupProvenance(f);
+            string fileName = PatchState.GetFileName(f);
+            string filePath = Path.Combine(gameDir, fileName);
 
-            if (!backupMgr.IsCoverageComplete(f))
+            if (!File.Exists(filePath))
             {
-                anyCoverageIncomplete = true;
+                filesStatus[fileName] = new
+                {
+                    state = "unrecognised",
+                    appliedPatches = (string[])[],
+                    isVanilla = false,
+                    isPatched = false,
+                    isUnrecognised = true,
+                    status = Strings.Get("Status_Unrecognised")
+                };
+                continue;
             }
 
-            if (provenance is not null && !provenance.CoverageComplete)
+            byte[] liveBytes;
+            try
             {
-                warnings.Add(Strings.Get("Warning_BaselineCapturedIncompleteCoverage", fileName));
+                liveBytes = File.ReadAllBytes(filePath);
+            }
+            catch
+            {
+                filesStatus[fileName] = new
+                {
+                    state = "unrecognised",
+                    appliedPatches = (string[])[],
+                    isVanilla = false,
+                    isPatched = false,
+                    isUnrecognised = true,
+                    status = Strings.Get("Status_Unrecognised")
+                };
+                continue;
             }
 
-            string stateString = state switch
+            var fileState = PatchState.Inspect(f, liveBytes);
+            string stateString = fileState.Kind switch
             {
-                PristineState.Pristine => "pristine",
-                PristineState.Patched => "patched",
-                _ => "unknown"
+                FileStateKind.Vanilla => "vanilla",
+                FileStateKind.PatchedByUs => "patched",
+                _ => "unrecognised"
             };
 
-            string statusDisplay = state switch
+            string statusDisplay = fileState.Kind switch
             {
-                PristineState.Pristine => Strings.Get("Status_Pristine"),
-                PristineState.Patched => Strings.Get("Status_Patched"),
-                _ => Strings.Get("Status_Unknown")
-            };
-
-            bool? isPristine = state switch
-            {
-                PristineState.Pristine => true,
-                PristineState.Patched => false,
-                _ => null
+                FileStateKind.Vanilla => Strings.Get("Status_Vanilla"),
+                FileStateKind.PatchedByUs => Strings.Get("Status_Patched"),
+                _ => Strings.Get("Status_Unrecognised")
             };
 
             filesStatus[fileName] = new
             {
-                hasBackup,
-                backupProvenance = provenance is not null ? new
-                {
-                    capturedAt = provenance.CapturedAtUtc,
-                    coverageComplete = provenance.CoverageComplete,
-                    registeredSignatures = provenance.RegisteredSignatures,
-                    missingSignatures = provenance.MissingSignatures
-                } : null,
-                pristineState = stateString,
-                isPristine,
+                state = stateString,
+                appliedPatches = fileState.AppliedPatches,
+                isVanilla = fileState.IsVanilla,
+                isPatched = fileState.IsPatched,
+                isUnrecognised = fileState.IsUnrecognised,
                 status = statusDisplay
             };
-        }
-
-        if (anyCoverageIncomplete)
-        {
-            warnings.Add(Strings.Get("Warning_DetectionIncomplete"));
         }
 
         var data = new
@@ -401,7 +401,7 @@ public static partial class CliHost
             stdout.WriteLine(Strings.Get("Status_GameDir", gameDir));
             foreach (var (fn, fileRes) in report.Files)
             {
-                string layeredStr = fileRes.Layered.Count > 0 ? string.Join(", ", fileRes.Layered) : "pristine";
+                string layeredStr = fileRes.Layered.Count > 0 ? string.Join(", ", fileRes.Layered) : "vanilla";
                 stdout.WriteLine($"  - {fn}: [written: {fileRes.Written}] (layered: {layeredStr})");
             }
             if (warnings.Count > 0)
@@ -415,7 +415,7 @@ public static partial class CliHost
     }
 
     /// <summary>
-    /// 處理 restore --all 還原指令。從備份還原所有目標檔案並驗證逐位元組一致性。
+    /// 處理 restore --all 還原指令。將所有已套用修補正規化還原為原版。
     /// </summary>
     private static int HandleRestore(List<string> commandArgs, string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
     {
@@ -456,7 +456,7 @@ public static partial class CliHost
                     Ok = false,
                     Command = "restore",
                     Warnings = warnings,
-                    Errors = [result.ErrorMessage ?? Strings.Get("Error_NoBackupsToRestore")]
+                    Errors = [result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "還原失敗")]
                 };
                 stdout.WriteLine(JsonSerializer.Serialize(envelope, JsonEnvelopeOptions));
             }
@@ -495,7 +495,7 @@ public static partial class CliHost
             stdout.WriteLine(Strings.Get("Status_GameDir", gameDir));
             foreach (var (fn, fInfo) in report.Files)
             {
-                stdout.WriteLine($"  - {fn}: restored={fInfo.Restored}, verified={fInfo.ByteEqualityVerified} ({fInfo.Status})");
+                stdout.WriteLine($"  - {fn}: restored={fInfo.Restored} ({fInfo.State})");
             }
             if (warnings.Count > 0)
             {
@@ -508,7 +508,7 @@ public static partial class CliHost
     }
 
     /// <summary>
-    /// 處理 verify 驗證指令。檢查備份完整性、歷程與 live 檔案是否與設定相符（嚴格唯讀）。
+    /// 處理 verify 驗證指令。檢查檔案修補狀態與當前設定是否相符（嚴格唯讀）。
     /// </summary>
     private static int HandleVerify(string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
     {
@@ -533,21 +533,10 @@ public static partial class CliHost
         {
             filesData[fn] = new
             {
-                hasBackup = fi.HasBackup,
-                backupProvenance = fi.BackupProvenance is not null ? new
-                {
-                    capturedAt = fi.BackupProvenance.CapturedAtUtc,
-                    coverageComplete = fi.BackupProvenance.CoverageComplete,
-                    registeredSignatures = fi.BackupProvenance.RegisteredSignatures,
-                    missingSignatures = fi.BackupProvenance.MissingSignatures
-                } : null,
-                pristineState = fi.PristineState switch
-                {
-                    PristineState.Pristine => "pristine",
-                    PristineState.Patched => "patched",
-                    _ => "unknown"
-                },
-                isPristine = fi.IsPristine,
+                state = fi.State,
+                isVanilla = fi.IsVanilla,
+                isPatched = fi.IsPatched,
+                isUnrecognised = fi.IsUnrecognised,
                 appliedPatches = fi.AppliedPatches,
                 expectedPatches = fi.ExpectedPatches,
                 matchesConfig = fi.MatchesConfig
@@ -557,8 +546,8 @@ public static partial class CliHost
         var data = new
         {
             gameDir,
-            allBackupsPresent = report.AllBackupsPresent,
             allMatchesConfig = report.AllMatchesConfig,
+            allRecognised = report.AllRecognised,
             files = filesData
         };
 
@@ -575,13 +564,13 @@ public static partial class CliHost
         }
         else
         {
-            stdout.WriteLine(report.AllMatchesConfig && report.AllBackupsPresent
+            stdout.WriteLine(report.AllMatchesConfig && report.AllRecognised
                 ? Strings.Get("Verify_AllOk")
                 : Strings.Get("Verify_Mismatch"));
             stdout.WriteLine(Strings.Get("Status_GameDir", gameDir));
             foreach (var (fn, fi) in report.Files)
             {
-                stdout.WriteLine($"  - {fn}: hasBackup={fi.HasBackup}, state={fi.PristineState}, matchesConfig={fi.MatchesConfig} (applied: [{string.Join(", ", fi.AppliedPatches)}], expected: [{string.Join(", ", fi.ExpectedPatches)}])");
+                stdout.WriteLine($"  - {fn}: state={fi.State}, matchesConfig={fi.MatchesConfig} (applied: [{string.Join(", ", fi.AppliedPatches)}], expected: [{string.Join(", ", fi.ExpectedPatches)}])");
             }
             if (warnings.Count > 0)
             {
@@ -706,6 +695,18 @@ public static partial class CliHost
                         if (val.Equals("off", StringComparison.OrdinalIgnoreCase) || val == "0" || val.Equals("none", StringComparison.OrdinalIgnoreCase))
                         {
                             config.Perf.Hires = 0;
+                            config.Perf.AddRes.RemoveAll(r =>
+                            {
+                                var (rw, _) = PerfModule.ParseDimensions(r, 0, 0);
+                                return rw > 1600;
+                            });
+                            var (curW, _) = PerfModule.ParseDimensions(config.Perf.Resolution, 0, 0);
+                            if (curW > 1600)
+                            {
+                                string oldRes = config.Perf.Resolution;
+                                config.Perf.Resolution = "1600x1200";
+                                warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, 1600, "1600x1200", 3));
+                            }
                         }
                         else
                         {
@@ -729,6 +730,19 @@ public static partial class CliHost
                             }
 
                             config.Perf.Hires = w;
+                            config.Perf.AddRes.RemoveAll(r =>
+                            {
+                                var (rw, _) = PerfModule.ParseDimensions(r, 0, 0);
+                                return rw > w;
+                            });
+                            var (curW, _) = PerfModule.ParseDimensions(config.Perf.Resolution, 0, 0);
+                            if (curW > w)
+                            {
+                                string oldRes = config.Perf.Resolution;
+                                config.Perf.Resolution = "1600x1200";
+                                warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, "1600x1200", 3));
+                            }
+
                             if (w >= 2048)
                             {
                                 warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
@@ -771,9 +785,21 @@ public static partial class CliHost
 
                         string normRes = $"{rw}x{rh}";
                         config.Perf.Resolution = normRes;
-                        if (!config.Perf.AddRes.Contains(normRes, StringComparer.OrdinalIgnoreCase))
+                        if (rw > 1600)
                         {
-                            config.Perf.AddRes.Add(normRes);
+                            if (!config.Perf.AddRes.Contains(normRes, StringComparer.OrdinalIgnoreCase))
+                            {
+                                config.Perf.AddRes.Add(normRes);
+                            }
+                        }
+                        else
+                        {
+                            int curCapacity = config.Perf.Hires >= 1600 ? config.Perf.Hires : 1600;
+                            config.Perf.AddRes.RemoveAll(r =>
+                            {
+                                var (w, _) = PerfModule.ParseDimensions(r, 0, 0);
+                                return w > curCapacity;
+                            });
                         }
                         if (rw >= 2048 || rh >= 1152)
                         {

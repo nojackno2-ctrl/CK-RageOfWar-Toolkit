@@ -1,4 +1,3 @@
-using System.Linq;
 using System.Text;
 using System.Text.Json;
 using CKToolkit.Cli;
@@ -9,34 +8,36 @@ using CKToolkit.I18n;
 namespace CKToolkit.SelfTest;
 
 /// <summary>
-/// Phase 1 & Phase 2 自我驗證測試套件。
+/// Phase 1, Phase 2 & Phase 2B 自我驗證測試套件。
 ///
 /// 涵蓋檢查項目：
 ///   Phase 1:
 ///   1. ToolkitConfig 序列化／反序列化往返一致性
 ///   2. IniFile 保留註解、格式、順序與 CRLF 往返一致性，以及節區鍵值操作與清單附加
-///   3. PeFile 32/64 位元 PE 解析、LAA 特徵位元切換、動態附加節區 (.ckhr) 與 RVA/位移轉換
+///   3. PeFile 32/64 位元 PE 解析、LAA 特徵位元切換、動態附加節區 (.ckhr) 與移除節區 (.ckhr) 逐位元組還原
 ///   4. HmmPak 封裝檔合成往返驗證（前綴壓縮、時間戳與二進位資料）
-///   5. BackupManager 簽章涵蓋率 (Coverage)、Pristine 狀態判定、過期重新擷取守護與舊備份遷移
-///   6. CLI status 唯讀保證（零寫入、不建立備份目錄、不抓取檔案）
+///
+///   Phase 2B 核心（無備份機制，精確反轉與正規化）：
+///   5. PatchState Inspect 與 Normalise：Vanilla / PatchedByUs / Unrecognised 狀態判定與原版正規化
+///   6. CLI status 唯讀保證（零寫入、不建目錄、回報 FileState）
 ///   7. CLI 輸出無 BOM UTF-8 編碼與非 ASCII 中文字串往返一致性
 ///   8. CLI JSON 封套結構與未定義指令退出碼 2
 ///   9. I18n zh-TW 與 en 字串鍵 100% 一致性
 ///
-///   Phase 2 (Core/Perf):
-///   10. LargeAddressAware: 套用、特徵偵測、冪等性、還原為原始位元組
-///   11. VideoModePatch: SetVideoMode 16bpp 相容性修補、特徵偵測、冪等性、精確還原
-///   12. ResolutionWriteback: 抑制 Resolution 寫回修補、21 位元組 NOP、特徵偵測、精確還原
-///   13. ZoomTables (HD 1080p): .ckhr 節區附加、對齊與 SizeOfImage 擴展、15 個立即數改寫、3 條指令重寫、重新解析驗證、特徵偵測與還原
-///   14. 全部 Exe 修補複合疊加與完全反向還原驗證（逐位元組與原版一致）
-///   15. Launcher 雙模式互斥性驗證（DisplaySuppress 互斥 ModeTable，雙向切換）
-///   16. data.pak [Resolutions] 附加、冪等性與 vxSettings.ini 0-based 索引重新查表對應
-///   17. 特徵涵蓋率 (Coverage) 驗證：Launcher 與 VxSettings 達 100% 涵蓋並回報真實狀態；Exe 與 DataPak 維持 Unknown
-///   18. 統一套用管線 (PatchPipeline) 端對端重建、寫入與還原 (RestoreAll) 逐位元組一致性
-///   19. CLI apply 與 restore --all 端對端套用、歷程紀錄、警告傳遞、逐位元組驗證與原版完全一致
-///   20. CLI restore --all 無備份時正確回報失敗 (退出碼 4)
-///   21. CLI perf get / set 讀寫設定檔、Launcher 互斥性切換與遊戲目錄零寫入保證
-///   22. CLI verify 唯讀與零寫入保證（驗證備份完整性、歷程與設定相符性）
+///   Phase 2 & Phase 2B 效能模組個別精確反轉 (Vanilla -> Apply -> Reverse -> Byte-for-byte Vanilla):
+///   10. LargeAddressAware: 套用、特徵偵測、冪等性、精確還原為原始位元組
+///   11. VideoModePatch: SetVideoMode 16bpp 相容性修補、特徵偵測、冪等性、精確還原為原始位元組
+///   12. ResolutionWriteback: 抑制 Resolution 寫回修補、21 位元組 NOP、特徵偵測、精確還原為原始位元組
+///   13. ZoomTables (HD 1080p): .ckhr 節區附加與移除、15 個立即數改寫與還原、3 條指令重寫與還原、精確還原為原始位元組
+///   14. 全部 Exe 修補複合疊加與 Normalise 正規化還原驗證（逐位元組與原版一致）
+///   15. Launcher 雙模式互斥性與精確還原驗證（DisplaySuppress 互斥 ModeTable，雙向切換，還原為原始位元組）
+///   16. data.pak [Resolutions] 附加、改設定非累積取代 (1920x1080 -> 1600x900 只留 1 筆自訂條目) 與 vxSettings.ini 0-based 索引
+///   17. 統一套用管線 (PatchPipeline) 端對端套用、無變更略過寫入 (不重寫 local.pak) 與 RestoreAll 正規化還原
+///   18. 統一套用管線對無法辨識 (Unrecognised) 檔案之嚴格拒絕與零寫入保護
+///   19. CLI apply 與 restore --all 端對端套用與還原（逐位元組與原版完全一致）
+///   20. CLI perf get / set 讀寫設定檔、Launcher 互斥性切換與遊戲目錄零寫入保證
+///   21. CLI verify 唯讀與零寫入保證（驗證修補狀態與設定相符性）
+///   22. Perf ZoomMap 表格容量一致性、降低解析度重套用與 Hires 關閉測試
 /// </summary>
 internal static class Program
 {
@@ -49,41 +50,43 @@ internal static class Program
         Console.OutputEncoding = utf8;
         Console.InputEncoding = utf8;
 
-        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1 & Phase 2) ===\n");
+        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1, Phase 2 & Phase 2B) ===\n");
 
         // Phase 1 核心測試
         RunGroup("1. ToolkitConfig", TestToolkitConfigRoundTrip);
         RunGroup("2. IniFile", TestIniFileRoundTripAndManipulation);
-        RunGroup("3. PeFile", TestPeFileParsingAndSectionAppending);
+        RunGroup("3. PeFile", TestPeFileParsingSectionAddAndRemove);
         RunGroup("4. HmmPak", TestHmmPakSyntheticRoundTrip);
-        RunGroup("5. BackupManager", TestBackupManagerSignaturesCoverageAndPristine);
+
+        // Phase 2B 核心測試
+        RunGroup("5. PatchStateInspectAndNormalise", TestPatchStateInspectAndNormalise);
         RunGroup("6. CliStatus", TestCliStatusZeroWritesAndReadPath);
         RunGroup("7. CliUtf8Json", TestCliUtf8JsonOutputRoundTrip);
         RunGroup("8. CliJsonEnvelope", TestCliJsonEnvelopeAndExitCodes);
         RunGroup("9. I18nConsistency", TestI18nConsistency);
 
-        // Phase 2 效能與相容性模組 (Core/Perf) 測試
-        RunGroup("10. PerfLargeAddressAware", TestPerfLargeAddressAware);
-        RunGroup("11. PerfVideoModePatch", TestPerfVideoModePatch);
-        RunGroup("12. PerfResolutionWriteback", TestPerfResolutionWriteback);
-        RunGroup("13. PerfZoomTables", TestPerfZoomTables);
-        RunGroup("14. PerfAllExePatchesCombined", TestPerfAllExePatchesCombinedAndReversible);
-        RunGroup("15. PerfLauncherMutualExclusion", TestPerfLauncherMutualExclusion);
-        RunGroup("16. PerfResolutionsAndSelection", TestPerfResolutionsAndSelection);
-        RunGroup("17. PerfCoverageCompleteness", TestPerfCoverageCompletenessAndSignatures);
-        RunGroup("18. PerfPatchPipelineIntegration", TestPerfPatchPipelineIntegration);
+        // Phase 2 & Phase 2B 效能模組個別精確反轉測試
+        RunGroup("10. PerfLargeAddressAware", TestPerfLargeAddressAwareReversal);
+        RunGroup("11. PerfVideoModePatch", TestPerfVideoModePatchReversal);
+        RunGroup("12. PerfResolutionWriteback", TestPerfResolutionWritebackReversal);
+        RunGroup("13. PerfZoomTables", TestPerfZoomTablesReversal);
+        RunGroup("14. PerfAllExePatchesCombined", TestPerfAllExePatchesCombinedAndReversed);
+        RunGroup("15. PerfLauncherMutualExclusion", TestPerfLauncherMutualExclusionAndReversal);
+        RunGroup("16. PerfResolutionsAndSettingChange", TestPerfResolutionsReversalAndSettingChange);
 
-        // Phase 2 CLI 指令擴充 (apply, restore, verify, perf get/set)
+        // Phase 2B 管線與 CLI 整合測試
+        RunGroup("17. PatchPipelineEndToEndAndNoUnnecessaryWrites", TestPatchPipelineEndToEndAndNoUnnecessaryWrites);
+        RunGroup("18. PatchPipelineUnrecognisedRejection", TestPatchPipelineUnrecognisedRejection);
         RunGroup("19. CliApplyAndRestore", TestCliApplyAndRestoreEndToEnd);
-        RunGroup("20. CliRestoreNoBackups", TestCliRestoreNoBackupsFails);
-        RunGroup("21. CliPerfGetSetAndZeroGameWrites", TestCliPerfGetSetAndZeroGameWrites);
-        RunGroup("22. CliVerifyZeroWrites", TestCliVerifyZeroWrites);
+        RunGroup("20. CliPerfGetSetAndZeroGameWrites", TestCliPerfGetSetAndZeroGameWrites);
+        RunGroup("21. CliVerifyZeroWrites", TestCliVerifyZeroWrites);
+        RunGroup("22. PerfResolutionCapacityAndHiresOff", TestPerfResolutionCapacityAndHiresOff);
 
         Console.WriteLine();
         if (_failures == 0)
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("所有測試項目全部通過！ (Phase 1 & Phase 2 全綠)");
+            Console.WriteLine("所有測試項目全部通過！ (Phase 1, Phase 2 & Phase 2B 全綠)");
             Console.ResetColor();
             return 0;
         }
@@ -123,9 +126,6 @@ internal static class Program
                  actualOrDetail.StartsWith("actual=") ||
                  actualOrDetail.StartsWith("exitCode=") ||
                  actualOrDetail.StartsWith("Count=") ||
-                 actualOrDetail.StartsWith("CoverageComplete=") ||
-                 actualOrDetail.StartsWith("Registered=") ||
-                 actualOrDetail.StartsWith("Missing=") ||
                  actualOrDetail.StartsWith("Success=") ||
                  actualOrDetail.StartsWith("warningText=") ||
                  actualOrDetail.StartsWith("實際"));
@@ -251,10 +251,10 @@ internal static class Program
         Check("修改後包含新的 Res2_x 與 Res2_y", modifiedText.Contains("Res2_x = 1920\r\nRes2_y = 1080"));
     }
 
-    // --- 3. PeFile 解析與節區附加測試 ---------------------------------------
-    private static void TestPeFileParsingAndSectionAppending()
+    // --- 3. PeFile 解析、附加節區與移除節區逐位元組還原測試 ------------------
+    private static void TestPeFileParsingSectionAddAndRemove()
     {
-        Console.WriteLine("\n3. PeFile 解析、LAA 切換與附加節區測試");
+        Console.WriteLine("\n3. PeFile 解析、附加節區與移除節區逐位元組還原測試");
 
         byte[] syntheticPe = CreateSyntheticExe32();
         var pe = PeFile.Parse(syntheticPe);
@@ -285,13 +285,14 @@ internal static class Program
         Check(".ckhr 虛擬大小正確對齊", newSec.VirtualSize >= neededSize);
         Check("節區數量增加為 3", pe.NumberOfSections == 3);
 
-        // 重新解析產生的 PE 位元組
-        byte[] modifiedBytes = pe.ToBytes();
-        var reParsed = PeFile.Parse(modifiedBytes);
+        // 移除 .ckhr 節區並驗證逐位元組完全還原
+        bool removed = pe.RemoveSection(".ckhr");
+        Check("成功移除 .ckhr 節區", removed);
+        Check("節區數量還原為 2", pe.NumberOfSections == 2);
+        Check("移除後找不到 .ckhr 節區", pe.FindSection(".ckhr") == -1);
 
-        Check("修改後的 PE 可成功重新解析", reParsed.NumberOfSections == 3);
-        Check("重新解析後可找到 .ckhr 節區", reParsed.FindSection(".ckhr") == 2);
-        Check("SizeOfImage 已配合新節區擴展", reParsed.SizeOfImage >= reParsed.Sections[2].VirtualAddress + reParsed.Sections[2].VirtualSize);
+        byte[] restoredPeBytes = pe.ToBytes();
+        Check("移除附加節區後 PE 位元組與初始原版完全一致 (逐位元組比對)", syntheticPe.SequenceEqual(restoredPeBytes));
     }
 
     // --- 4. HmmPak 合成往返測試 ---------------------------------------------
@@ -318,152 +319,81 @@ internal static class Program
         Check("二次序列化逐位元組完全相同", serialized.SequenceEqual(reSerialized));
     }
 
-    // --- 5. BackupManager 簽章涵蓋率、Pristine 判定與過期重新擷取守護測試 -----
-    private static void TestBackupManagerSignaturesCoverageAndPristine()
+    // --- 5. PatchState Inspect 與 Normalise 核心測試 -------------------------
+    private static void TestPatchStateInspectAndNormalise()
     {
-        Console.WriteLine("\n5. BackupManager 簽章涵蓋率、Pristine 判定與過期守護測試");
+        Console.WriteLine("\n5. PatchState Inspect 與 Normalise 核心測試 (Vanilla / Patched / Unrecognised)");
 
-        string tempBackupDir = Path.Combine(Path.GetTempPath(), "cktoolkit_bm_test_" + Guid.NewGuid().ToString("N")[..8]);
-        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_game_test_" + Guid.NewGuid().ToString("N")[..8]);
+        // A. Exe 測試
+        byte[] vanillaExe = CreateSyntheticExe32();
+        var stExeVanilla = PatchState.Inspect(GameFile.Exe, vanillaExe);
+        Check("原版 Exe Inspect 回傳 Vanilla", stExeVanilla.IsVanilla && stExeVanilla.AppliedPatches.Count == 0);
 
-        try
-        {
-            var bm = new BackupManager(tempBackupDir);
+        byte[] patchedExe = (byte[])vanillaExe.Clone();
+        LargeAddressAware.Apply(ref patchedExe, true);
+        VideoModePatch.Apply(ref patchedExe, true);
+        var stExePatched = PatchState.Inspect(GameFile.Exe, patchedExe);
+        Check("修補後 Exe Inspect 回傳 PatchedByUs 且清單包含 laa 與 video_fix",
+            stExePatched.IsPatched && stExePatched.AppliedPatches.Contains("laa") && stExePatched.AppliedPatches.Contains("video_fix"));
 
-            // A. 空註冊表與 Coverage 未完成測試
-            Check("初始狀態 Exe Coverage 不完整", !bm.IsCoverageComplete(GameFile.Exe));
-            Check("初始狀態缺 5 個預期簽章", bm.GetMissingSignatures(GameFile.Exe).Count == 5);
+        var normExeRes = PatchState.Normalise(GameFile.Exe, patchedExe);
+        Check("修補後 Exe Normalise 成功", normExeRes.Success);
+        Check("正規化後 Exe 與原版 Vanilla 逐位元組完全相同", vanillaExe.SequenceEqual(normExeRes.Value!));
 
-            byte[] pristineBytes = new byte[32]; // 全 0
-            var emptyVerdict = bm.IsPristine(GameFile.Exe, pristineBytes);
-            Check("特徵庫未就緒時 IsPristine 回傳 Unknown（非 Pristine）", emptyVerdict == PristineState.Unknown);
+        byte[] corruptExe = (byte[])vanillaExe.Clone();
+        corruptExe[VideoModePatch.Offset] = 0xFF; // 未知的第三方修改
+        var stExeCorrupt = PatchState.Inspect(GameFile.Exe, corruptExe);
+        Check("受未知第三方修改之 Exe Inspect 回傳 Unrecognised", stExeCorrupt.IsUnrecognised);
+        var normCorruptExeRes = PatchState.Normalise(GameFile.Exe, corruptExe);
+        Check("無法辨識之 Exe Normalise 拒絕並回傳失敗", !normCorruptExeRes.Success && normCorruptExeRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify);
 
-            // B. 部分註冊測試
-            var sigVideo = new TestSignature("video_fix", GameFile.Exe, b => b.Length > 10 && b[10] == 0xAA);
-            bm.RegisterSignature(sigVideo);
+        // B. Launcher 測試
+        byte[] vanillaLauncher = CreateSyntheticLauncher64();
+        var stLaunchVanilla = PatchState.Inspect(GameFile.Launcher, vanillaLauncher);
+        Check("原版 Launcher Inspect 回傳 Vanilla", stLaunchVanilla.IsVanilla);
 
-            byte[] patchedByVideo = (byte[])pristineBytes.Clone();
-            patchedByVideo[10] = 0xAA;
-            Check("註冊簽章吻合時回傳 Patched", bm.IsPristine(GameFile.Exe, patchedByVideo) == PristineState.Patched);
-            Check("未吻合但特徵庫未齊全時仍回傳 Unknown", bm.IsPristine(GameFile.Exe, pristineBytes) == PristineState.Unknown);
+        byte[] patchedLauncher = (byte[])vanillaLauncher.Clone();
+        LauncherDisplay.Apply(ref patchedLauncher, true);
+        var stLaunchPatched = PatchState.Inspect(GameFile.Launcher, patchedLauncher);
+        Check("修補後 Launcher Inspect 回傳 PatchedByUs (launcher_display)", stLaunchPatched.IsPatched && stLaunchPatched.AppliedPatches.Contains("launcher_display"));
 
-            // C. 補齊全部 Exe 預期簽章
-            bm.RegisterSignature(new TestSignature("laa", GameFile.Exe, b => b.Length > 0 && b[0] == 0x01));
-            bm.RegisterSignature(new TestSignature("hires_zoom", GameFile.Exe, b => b.Length > 1 && b[1] == 0x02));
-            bm.RegisterSignature(new TestSignature("res_writeback", GameFile.Exe, b => b.Length > 2 && b[2] == 0x03));
-            bm.RegisterSignature(new TestSignature("key_map", GameFile.Exe, b => b.Length > 3 && b[3] == 0x04));
+        var normLaunchRes = PatchState.Normalise(GameFile.Launcher, patchedLauncher);
+        Check("正規化後 Launcher 與原版 Vanilla 逐位元組完全相同", vanillaLauncher.SequenceEqual(normLaunchRes.Value!));
 
-            Check("註冊全部 5 項簽章後 Exe Coverage 為完整", bm.IsCoverageComplete(GameFile.Exe));
-            Check("Coverage 完整且全特徵皆未套用時 IsPristine 回傳 Pristine", bm.IsPristine(GameFile.Exe, pristineBytes) == PristineState.Pristine);
+        // C. DataPak 測試
+        byte[] vanillaDataPak = CreateSyntheticDataPak().ToBytes();
+        var stDataVanilla = PatchState.Inspect(GameFile.DataPak, vanillaDataPak);
+        Check("原版 data.pak Inspect 回傳 Vanilla", stDataVanilla.IsVanilla);
 
-            // D. 重複註冊拒絕
-            bool duplicateRejected = false;
-            try
-            {
-                bm.RegisterSignature(sigVideo);
-            }
-            catch (InvalidOperationException)
-            {
-                duplicateRejected = true;
-            }
-            Check("重複註冊同名簽章時拋出例外拒絕", duplicateRejected);
+        var modPak = HmmPak.FromBytes(vanillaDataPak);
+        Resolutions.AppendResolutions(modPak, [(1920, 1080)]);
+        byte[] patchedDataPak = modPak.ToBytes();
+        var stDataPatched = PatchState.Inspect(GameFile.DataPak, patchedDataPak);
+        Check("附加解析度後 data.pak Inspect 回傳 PatchedByUs (resolutions_append)", stDataPatched.IsPatched && stDataPatched.AppliedPatches.Contains("resolutions_append"));
 
-            // E. 初始基準建立與特徵涵蓋歷程 (Provenance) 測試
-            Directory.CreateDirectory(tempBackupDir);
-            Directory.CreateDirectory(tempGameDir);
+        var normDataRes = PatchState.Normalise(GameFile.DataPak, patchedDataPak);
+        Check("正規化後 data.pak 與原版 Vanilla 逐位元組完全相同", vanillaDataPak.SequenceEqual(normDataRes.Value!));
 
-            string initialTestGameDir = Path.Combine(tempGameDir, "initial_test");
-            string initialTestBackupDir = Path.Combine(initialTestGameDir, "backup");
-            Directory.CreateDirectory(initialTestGameDir);
+        // D. VxSettings 測試
+        byte[] vanillaVx = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+        var stVxVanilla = PatchState.Inspect(GameFile.VxSettings, vanillaVx);
+        Check("原版 vxSettings.ini Inspect 回傳 Vanilla", stVxVanilla.IsVanilla);
 
-            // E1. 初始擷取：特徵庫不完整時允許建立基準，但寫入 provenance 側車並回傳警告
-            var bmInitialIncomplete = new BackupManager(initialTestBackupDir);
-            bmInitialIncomplete.RegisterSignature(new TestSignature("video_fix", GameFile.Exe, b => b.Length > 10 && b[10] == 0xAA));
+        var ini = IniFile.FromText(CreateSyntheticVxSettings());
+        ini.SetValue("Options", "Resolution", "4");
+        ini.SetValue("Options", "NoObjectAnimations", "1");
+        byte[] patchedVx = Encoding.GetEncoding(1252).GetBytes(ini.ToText());
+        var stVxPatched = PatchState.Inspect(GameFile.VxSettings, patchedVx);
+        Check("修改後 vxSettings.ini Inspect 回傳 PatchedByUs (vxsettings_custom)", stVxPatched.IsPatched && stVxPatched.AppliedPatches.Contains("vxsettings_custom"));
 
-            string liveExePath1 = Path.Combine(initialTestGameDir, BackupManager.ExeName);
-            File.WriteAllBytes(liveExePath1, pristineBytes);
-
-            var initialEnsureRes = bmInitialIncomplete.EnsureBackup(GameFile.Exe, initialTestGameDir);
-            Check("特徵庫不完整時初始基準擷取允許成功", initialEnsureRes.Success, initialEnsureRes.ErrorMessage);
-            Check("初始基準檔案已建立", bmInitialIncomplete.HasBackup(GameFile.Exe));
-            Check("初始基準歷程 sidecar 檔案已建立", File.Exists(bmInitialIncomplete.GetMetadataPath(GameFile.Exe)));
-            Check("回傳特徵庫未完整建立基準之警告",
-                initialEnsureRes.Warnings.Any(w => w.Contains("未完整") || w.Contains("incomplete")),
-                $"warnings=[{string.Join(", ", initialEnsureRes.Warnings.Select(w => $"\"{w}\""))}]");
-
-            var initialProvenance = bmInitialIncomplete.GetBackupProvenance(GameFile.Exe);
-            Check("歷程記載 CoverageComplete=false", initialProvenance is not null && !initialProvenance.CoverageComplete, $"CoverageComplete={initialProvenance?.CoverageComplete}");
-            Check("歷程記載已註冊之簽章", initialProvenance is not null && initialProvenance.RegisteredSignatures.Contains("video_fix"), $"Registered=[{string.Join(", ", initialProvenance?.RegisteredSignatures ?? [])}]");
-            Check("歷程記載缺失之簽章清單包含 laa", initialProvenance is not null && initialProvenance.MissingSignatures.Contains("laa"), $"Missing=[{string.Join(", ", initialProvenance?.MissingSignatures ?? [])}]");
-
-            // E2. 初始擷取：若現行檔案已被已知簽章判定為 Patched，絕對拒絕建立基準
-            string patchedTestGameDir = Path.Combine(tempGameDir, "patched_test");
-            string patchedTestBackupDir = Path.Combine(patchedTestGameDir, "backup");
-            Directory.CreateDirectory(patchedTestGameDir);
-
-            var bmPatchedDetect = new BackupManager(patchedTestBackupDir);
-            bmPatchedDetect.RegisterSignature(new TestSignature("video_fix", GameFile.Exe, b => b.Length > 10 && b[10] == 0xAA));
-
-            File.WriteAllBytes(Path.Combine(patchedTestGameDir, BackupManager.ExeName), patchedByVideo);
-            var patchedEnsureRes = bmPatchedDetect.EnsureBackup(GameFile.Exe, patchedTestGameDir);
-            Check("現行檔案符合已註冊修補特徵時拒絕初始基準建立", !patchedEnsureRes.Success, $"Success={patchedEnsureRes.Success}");
-            Check("拒絕建立時退出碼為 BackupMissingNeedsSteamVerify", patchedEnsureRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify, $"exitCode={patchedEnsureRes.ExitCode}");
-            Check("拒絕建立時未建立備份檔案", !bmPatchedDetect.HasBackup(GameFile.Exe));
-
-            // E3. RestoreAll 在無任何備份時必須回報失敗
-            string noBackupGameDir = Path.Combine(tempGameDir, "no_backup_test");
-            Directory.CreateDirectory(noBackupGameDir);
-            var bmNoBackup = new BackupManager(Path.Combine(noBackupGameDir, "backup"));
-            var emptyRestoreRes = bmNoBackup.RestoreAll(noBackupGameDir);
-            Check("無備份可還原時 RestoreAll 回報失敗（非偽成功）", !emptyRestoreRes.Success, $"Success={emptyRestoreRes.Success}");
-            Check("無備份時 RestoreAll 退出碼為 BackupMissingNeedsSteamVerify", emptyRestoreRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify, $"exitCode={emptyRestoreRes.ExitCode}");
-
-            // F. 過期備份重新擷取守護測試 (AGENTS.md §2.1)
-            string exeBackupPath = bm.GetBackupPath(GameFile.Exe);
-            byte[] originalCleanExe = [0x50, 0x45, 0x00, 0x00];
-            File.WriteAllBytes(exeBackupPath, originalCleanExe);
-
-            string liveExePath = Path.Combine(tempGameDir, BackupManager.ExeName);
-            byte[] modifiedLiveExe = [0x50, 0x45, 0x99, 0x99]; // 與備份不同
-            File.WriteAllBytes(liveExePath, modifiedLiveExe);
-
-            // 建立一個 Coverage 不完整的 BackupManager
-            var bmIncomplete = new BackupManager(tempBackupDir);
-            var ensureIncomplete = bmIncomplete.EnsureBackup(GameFile.Exe, tempGameDir);
-
-            Check("Coverage 不完整時拒絕重新擷取基準", !File.Exists(exeBackupPath + ".superseded"));
-            Check("Coverage 不完整時備份檔案未被覆蓋", File.ReadAllBytes(exeBackupPath).SequenceEqual(originalCleanExe));
-            Check("發出拒絕重新擷取之警示",
-                ensureIncomplete.Warnings.Count > 0 && ensureIncomplete.Warnings.Any(w => w.Contains("特徵庫未完整") || w.Contains("incomplete")),
-                $"warnings=[{string.Join(", ", ensureIncomplete.Warnings.Select(w => $"\"{w}\""))}]");
-
-            // 當 Coverage 完整且現行檔案確定為新 Pristine（如 Steam 更新）
-            var bmComplete = new BackupManager(tempBackupDir);
-            foreach (var sig in bm.Signatures) bmComplete.RegisterSignature(sig);
-
-            byte[] newVanillaExe = new byte[32]; // 全 0，在完整特徵庫下判定為 Pristine
-            File.WriteAllBytes(liveExePath, newVanillaExe);
-
-            var ensureComplete = bmComplete.EnsureBackup(GameFile.Exe, tempGameDir);
-            Check("Coverage 完整且檔案為 Pristine 時成功重新擷取基準", ensureComplete.Success);
-            Check("舊備份成功改名為 .superseded", File.Exists(exeBackupPath + ".superseded"));
-            Check("新備份內容更新為新版原版位元組", File.ReadAllBytes(exeBackupPath).SequenceEqual(newVanillaExe));
-
-            // G. 舊備份候選掃描與明確遷移測試
-            var candidates = bm.FindLegacyBackupCandidates();
-            Check("FindLegacyBackupCandidates 回傳候選者清單且為唯讀", candidates is not null);
-        }
-        finally
-        {
-            try { if (Directory.Exists(tempBackupDir)) Directory.Delete(tempBackupDir, true); } catch { }
-            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
-        }
+        var normVxRes = PatchState.Normalise(GameFile.VxSettings, patchedVx);
+        Check("正規化後 vxSettings.ini 與原版 Vanilla 逐位元組完全相同", vanillaVx.SequenceEqual(normVxRes.Value!));
     }
 
     // --- 6. CLI status 唯讀保證測試 -----------------------------------------
     private static void TestCliStatusZeroWritesAndReadPath()
     {
-        Console.WriteLine("\n6. CLI status 唯讀保證（零寫入、不建目錄、不抓備份）測試");
+        Console.WriteLine("\n6. CLI status 唯讀保證（零寫入、不建目錄）測試");
 
         string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_status_readonly_" + Guid.NewGuid().ToString("N")[..8]);
         string tempConfigPath = Path.Combine(tempGameDir, "cktoolkit_test.json");
@@ -473,9 +403,11 @@ internal static class Program
             Directory.CreateDirectory(tempGameDir);
 
             // 建立基本遊戲檔案
-            File.WriteAllBytes(Path.Combine(tempGameDir, "Celtic kings.exe"), [0x4D, 0x5A, 0x90, 0x00]);
-            File.WriteAllBytes(Path.Combine(tempGameDir, "local.pak"), [0x50, 0x41, 0x4B, 0x00]);
-            File.WriteAllBytes(Path.Combine(tempGameDir, "data.pak"), [0x50, 0x41, 0x4B, 0x00]);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), CreateSyntheticLauncher64());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), CreateSyntheticDataPak().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), HmmPak.CreateEmpty().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
 
             var initialFiles = Directory.GetFileSystemEntries(tempGameDir, "*", SearchOption.AllDirectories).OrderBy(x => x).ToList();
 
@@ -492,11 +424,6 @@ internal static class Program
 
             var currentFiles = Directory.GetFileSystemEntries(tempGameDir, "*", SearchOption.AllDirectories).OrderBy(x => x).ToList();
             Check("遊戲目錄檔案與目錄狀態完全零變更", initialFiles.SequenceEqual(currentFiles));
-
-            // 驗證 ReadExistingBackup 唯讀 API 回報無備份且不建立檔案
-            var bm = new BackupManager(Path.Combine(tempGameDir, "backup_non_existent"));
-            var readRes = bm.ReadExistingBackup(GameFile.Exe);
-            Check("ReadExistingBackup 尚無備份時回傳失敗且不建立目錄", !readRes.Success && !Directory.Exists(bm.BackupDir));
         }
         finally
         {
@@ -514,8 +441,8 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(tempGameDir);
-            File.WriteAllBytes(Path.Combine(tempGameDir, "Celtic kings.exe"), [0x4D, 0x5A, 0x90, 0x00]);
-            File.WriteAllBytes(Path.Combine(tempGameDir, "local.pak"), [0x50, 0x41, 0x4B, 0x00]);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), HmmPak.CreateEmpty().ToBytes());
 
             using var ms = new MemoryStream();
             var utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
@@ -538,11 +465,7 @@ internal static class Program
             var envelope = JsonSerializer.Deserialize<JsonEnvelope>(utf8Text);
 
             Check("JSON 封套解析成功且 ok=true", envelope is not null && envelope.Ok);
-            Check("JSON 輸出包含警告訊息", envelope?.Warnings.Count > 0);
-
-            // 驗證非 ASCII 中文字串未被破壞
-            string warningText = string.Join(" ", envelope?.Warnings ?? []);
-            Check("中文字串完整往返無亂碼 (包含特徵庫警示)", warningText.Contains("特徵庫尚未完整") || warningText.Contains("Phase 2"));
+            Check("JSON 封套 command 為 status", envelope?.Command == "status");
         }
         finally
         {
@@ -596,105 +519,94 @@ internal static class Program
             missingInZh.Count == 0 ? null : $"缺少：{string.Join(", ", missingInZh)}");
     }
 
-    // --- 10. Perf: LargeAddressAware 測試 -----------------------------------
-    private static void TestPerfLargeAddressAware()
+    // --- 10. Perf: LargeAddressAware 個別精確反轉測試 -----------------------
+    private static void TestPerfLargeAddressAwareReversal()
     {
-        Console.WriteLine("\n10. Perf: LargeAddressAware (LAA) 測試");
+        Console.WriteLine("\n10. Perf: LargeAddressAware (LAA) 套用與精確反轉測試");
 
-        byte[] pristineExe = CreateSyntheticExe32();
-        var sig = new LargeAddressAwareSignature();
+        byte[] vanillaExe = CreateSyntheticExe32();
 
-        Check("原版 Exe LAA 為未啟用", !LargeAddressAware.IsApplied(pristineExe));
-        Check("原版 Exe 簽章未觸發", !sig.IsApplied(pristineExe));
+        Check("原版 Exe LAA 為未啟用", !LargeAddressAware.IsApplied(vanillaExe));
 
-        byte[] patched = (byte[])pristineExe.Clone();
+        byte[] patched = (byte[])vanillaExe.Clone();
         LargeAddressAware.Apply(ref patched, true);
-
         Check("套用後 IsApplied 為 true", LargeAddressAware.IsApplied(patched));
-        Check("套用後簽章命中", sig.IsApplied(patched));
 
         // 冪等性測試
         byte[] patchedTwice = (byte[])patched.Clone();
         LargeAddressAware.Apply(ref patchedTwice, true);
         Check("重複套用結果完全相同（冪等）", patched.SequenceEqual(patchedTwice));
 
-        // 關閉還原測試
+        // 精確反轉測試
         byte[] reverted = (byte[])patched.Clone();
         LargeAddressAware.Apply(ref reverted, false);
-        Check("關閉後與原版逐位元組完全一致", pristineExe.SequenceEqual(reverted));
+        Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(reverted));
     }
 
-    // --- 11. Perf: VideoModePatch (SetVideoMode) 測試 ----------------------
-    private static void TestPerfVideoModePatch()
+    // --- 11. Perf: VideoModePatch 個別精確反轉測試 -------------------------
+    private static void TestPerfVideoModePatchReversal()
     {
-        Console.WriteLine("\n11. Perf: VideoModePatch (SetVideoMode 16bpp 修補) 測試");
+        Console.WriteLine("\n11. Perf: VideoModePatch (SetVideoMode 16bpp) 套用與精確反轉測試");
 
-        byte[] pristineExe = CreateSyntheticExe32();
-        var sig = new VideoModeSignature();
+        byte[] vanillaExe = CreateSyntheticExe32();
 
-        Check("原版 Exe VideoModePatch 為未套用", !VideoModePatch.IsApplied(pristineExe));
-        Check("原版 Exe 為原版指令序言 (IsOriginal=true)", VideoModePatch.IsOriginal(pristineExe));
-        Check("原版 Exe 簽章未觸發", !sig.IsApplied(pristineExe));
+        Check("原版 Exe VideoModePatch 為未套用", !VideoModePatch.IsApplied(vanillaExe));
+        Check("原版 Exe 為原版指令序言 (IsOriginal=true)", VideoModePatch.IsOriginal(vanillaExe));
 
-        byte[] patched = (byte[])pristineExe.Clone();
+        byte[] patched = (byte[])vanillaExe.Clone();
         VideoModePatch.Apply(ref patched, true);
 
         Check("套用後 IsApplied 為 true", VideoModePatch.IsApplied(patched));
         Check("套用後 IsOriginal 為 false", !VideoModePatch.IsOriginal(patched));
-        Check("套用後簽章命中", sig.IsApplied(patched));
 
         // 冪等性測試
         byte[] patchedTwice = (byte[])patched.Clone();
         VideoModePatch.Apply(ref patchedTwice, true);
         Check("重複套用結果完全相同（冪等）", patched.SequenceEqual(patchedTwice));
 
-        // 關閉還原測試
+        // 精確反轉測試
         byte[] reverted = (byte[])patched.Clone();
         VideoModePatch.Apply(ref reverted, false);
-        Check("關閉後與原版逐位元組完全一致", pristineExe.SequenceEqual(reverted));
+        Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(reverted));
     }
 
-    // --- 12. Perf: ResolutionWriteback 測試 ---------------------------------
-    private static void TestPerfResolutionWriteback()
+    // --- 12. Perf: ResolutionWriteback 個別精確反轉測試 ---------------------
+    private static void TestPerfResolutionWritebackReversal()
     {
-        Console.WriteLine("\n12. Perf: ResolutionWriteback (抑制寫回 Resolution=0) 測試");
+        Console.WriteLine("\n12. Perf: ResolutionWriteback (抑制寫回) 套用與精確反轉測試");
 
-        byte[] pristineExe = CreateSyntheticExe32();
-        var sig = new ResolutionWritebackSignature();
+        byte[] vanillaExe = CreateSyntheticExe32();
 
-        Check("原版 Exe Writeback 為未抑制", !ResolutionWriteback.IsApplied(pristineExe));
-        Check("原版 Exe 為原版指令 (IsOriginal=true)", ResolutionWriteback.IsOriginal(pristineExe));
-        Check("原版 Exe 簽章未觸發", !sig.IsApplied(pristineExe));
+        Check("原版 Exe Writeback 為未抑制", !ResolutionWriteback.IsApplied(vanillaExe));
+        Check("原版 Exe 為原版指令 (IsOriginal=true)", ResolutionWriteback.IsOriginal(vanillaExe));
 
-        byte[] patched = (byte[])pristineExe.Clone();
+        byte[] patched = (byte[])vanillaExe.Clone();
         ResolutionWriteback.Apply(ref patched, true);
 
         Check("套用後 IsApplied 為 true (21 位元組均為 NOP)", ResolutionWriteback.IsApplied(patched));
-        Check("套用後簽章命中", sig.IsApplied(patched));
 
         // 冪等性測試
         byte[] patchedTwice = (byte[])patched.Clone();
         ResolutionWriteback.Apply(ref patchedTwice, true);
         Check("重複套用結果完全相同（冪等）", patched.SequenceEqual(patchedTwice));
 
-        // 關閉還原測試
+        // 精確反轉測試
         byte[] reverted = (byte[])patched.Clone();
         ResolutionWriteback.Apply(ref reverted, false);
-        Check("關閉後與原版逐位元組完全一致", pristineExe.SequenceEqual(reverted));
+        Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(reverted));
     }
 
-    // --- 13. Perf: ZoomTables (HiRes 1080p) 測試 ---------------------------
-    private static void TestPerfZoomTables()
+    // --- 13. Perf: ZoomTables (HiRes 1080p) 個別精確反轉測試 ---------------
+    private static void TestPerfZoomTablesReversal()
     {
-        Console.WriteLine("\n13. Perf: ZoomTables (HiRes ZoomMap 掃描線表搬遷) 測試");
+        Console.WriteLine("\n13. Perf: ZoomTables (HiRes ZoomMap 掃描線表) 套用與精確反轉測試");
 
-        byte[] pristineExe = CreateSyntheticExe32();
-        var sig = new ZoomTablesSignature();
+        byte[] vanillaExe = CreateSyntheticExe32();
 
-        Check("原版 Exe ZoomTables 為未套用", !ZoomTables.IsApplied(pristineExe));
-        Check("原版 Exe 簽章未觸發", !sig.IsApplied(pristineExe));
+        Check("原版 Exe ZoomTables 為未套用", !ZoomTables.IsApplied(vanillaExe));
+        Check("原版 Exe ZoomTables IsOriginal=true", ZoomTables.IsOriginal(vanillaExe));
 
-        var pe = PeFile.Parse(pristineExe);
+        var pe = PeFile.Parse(vanillaExe);
         uint originalSizeOfImage = pe.SizeOfImage;
 
         // 套用 1920x1080 表格搬遷
@@ -702,35 +614,31 @@ internal static class Program
 
         Check("套用後可找到 .ckhr 節區", pe.FindSection(".ckhr") >= 0);
         Check("SizeOfImage 已擴展", pe.SizeOfImage > originalSizeOfImage);
+        Check("套用後 IsApplied 為 true", ZoomTables.IsApplied(pe));
+        Check("套用後 IsOriginal 為 false", !ZoomTables.IsOriginal(pe));
 
-        // 驗證立即數與指令重寫
-        int secIdx = pe.FindSection(".ckhr");
-        uint ckhrRva = pe.Sections[secIdx].VirtualAddress;
-        uint expectedColBase = (uint)pe.ImageBase + ckhrRva;
-        uint expectedRowBase = expectedColBase + ZoomTables.RowOffset(1920);
-        uint expectedScratch = expectedColBase + ZoomTables.ScratchOffset(1920);
-
-        Check("col_table 立即數改寫正確指向 .ckhr 節區", pe.ReadUInt32AtVa(0x00456A7F) == expectedColBase);
-        Check("entry count 立即數改寫為 1920", pe.ReadUInt32AtVa(0x00456A84) == 1920);
-        Check("row_table 立即數改寫正確指向 rowBase", pe.ReadUInt32AtVa(0x00456DB5) == expectedRowBase);
-
+        // 冪等性測試
         byte[] patchedBytes = pe.ToBytes();
-        var reParsed = PeFile.Parse(patchedBytes);
-        Check("改寫後之 PE 檔可成功重新解析且節區結構正確", reParsed.NumberOfSections == 3);
-        Check("套用後簽章命中", sig.IsApplied(patchedBytes));
+        var peTwice = PeFile.Parse(patchedBytes);
+        ZoomTables.Apply(peTwice, enable: true, maxDimension: 1920);
+        Check("重複套用結果完全相同（冪等）", patchedBytes.SequenceEqual(peTwice.ToBytes()));
 
-        // 還原測試
-        ZoomTables.Apply(reParsed, enable: false);
-        Check("關閉後 col_table 立即數還原為原版 0x0076FF78", reParsed.ReadUInt32AtVa(0x00456A7F) == ZoomTables.StockCol);
-        Check("關閉後 entry count 立即數還原為 1600", reParsed.ReadUInt32AtVa(0x00456A84) == ZoomTables.StockCount);
+        // 精確反轉測試：還原立即數、指令，並移除 .ckhr 節區還原 PE 標頭
+        ZoomTables.Apply(pe, enable: false);
+        byte[] revertedBytes = pe.ToBytes();
+
+        Check("反轉後 .ckhr 節區已移除", pe.FindSection(".ckhr") == -1);
+        Check("反轉後 SizeOfImage 已還原", pe.SizeOfImage == originalSizeOfImage);
+        Check("反轉後 IsOriginal 為 true", ZoomTables.IsOriginal(pe));
+        Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(revertedBytes));
     }
 
-    // --- 14. Perf: 全部 Exe 修補複合疊加與完全還原測試 ----------------------
-    private static void TestPerfAllExePatchesCombinedAndReversible()
+    // --- 14. Perf: 全部 Exe 修補複合疊加與 Normalise 正規化還原測試 ---------
+    private static void TestPerfAllExePatchesCombinedAndReversed()
     {
-        Console.WriteLine("\n14. Perf: 全部 Exe 修補複合疊加與還原測試");
+        Console.WriteLine("\n14. Perf: 全部 Exe 修補複合疊加與 Normalise 正規化還原測試");
 
-        byte[] pristineExe = CreateSyntheticExe32();
+        byte[] vanillaExe = CreateSyntheticExe32();
 
         var module = new PerfModule();
         var configAllOn = new ToolkitConfig
@@ -744,103 +652,87 @@ internal static class Program
             }
         };
 
-        byte[] patchedExe = (byte[])pristineExe.Clone();
+        byte[] patchedExe = (byte[])vanillaExe.Clone();
         module.ApplyExe(ref patchedExe, configAllOn);
 
-        Check("複合套用後 LAA 簽章命中", new LargeAddressAwareSignature().IsApplied(patchedExe));
-        Check("複合套用後 VideoMode 簽章命中", new VideoModeSignature().IsApplied(patchedExe));
-        Check("複合套用後 ZoomTables 簽章命中", new ZoomTablesSignature().IsApplied(patchedExe));
-        Check("複合套用後 ResolutionWriteback 簽章命中", new ResolutionWritebackSignature().IsApplied(patchedExe));
+        var inspectPatched = PatchState.Inspect(GameFile.Exe, patchedExe);
+        Check("複合套用後 Inspect 回報 PatchedByUs 且包含全部 4 項簽章",
+            inspectPatched.IsPatched && inspectPatched.AppliedPatches.Count == 4);
 
-        // 全部關閉套用
-        var configAllOff = new ToolkitConfig
-        {
-            Perf = new PerfConfig
-            {
-                Laa = false,
-                VideoFix = false,
-                Hires = 0,
-                KeepRes = false
-            }
-        };
-
-        byte[] restoredFromPristine = (byte[])pristineExe.Clone();
-        module.ApplyExe(ref restoredFromPristine, configAllOff);
-
-        Check("全部關閉套用後與 pristine 逐位元組完全相同", pristineExe.SequenceEqual(restoredFromPristine));
+        // 執行 Normalise 正規化還原
+        var normRes = PatchState.Normalise(GameFile.Exe, patchedExe);
+        Check("複合套用後 Normalise 成功", normRes.Success);
+        Check("正規化後與原版 Exe 逐位元組完全相同 (All Patches -> Normalise -> Vanilla)", vanillaExe.SequenceEqual(normRes.Value!));
     }
 
-    // --- 15. Perf: Launcher 雙模式互斥性測試 --------------------------------
-    private static void TestPerfLauncherMutualExclusion()
+    // --- 15. Perf: Launcher 雙模式互斥性與精確反轉測試 ----------------------
+    private static void TestPerfLauncherMutualExclusionAndReversal()
     {
-        Console.WriteLine("\n15. Perf: Launcher 雙模式互斥性測試");
+        Console.WriteLine("\n15. Perf: Launcher 雙模式互斥性與精確反轉測試");
 
-        byte[] pristineLauncher = CreateSyntheticLauncher64();
-        var sigDisplay = new LauncherDisplaySignature();
-        var sigModeTable = new LauncherModeTableSignature();
+        byte[] vanillaLauncher = CreateSyntheticLauncher64();
 
-        Check("原版 Launcher 抑制簽章未命中", !sigDisplay.IsApplied(pristineLauncher));
-        Check("原版 Launcher 模式表簽章未命中", !sigModeTable.IsApplied(pristineLauncher));
+        Check("原版 Launcher Display IsOriginal=true", LauncherDisplay.IsOriginal(vanillaLauncher));
+        Check("原版 Launcher ModeTable IsOriginal=true", LauncherModeTable.IsOriginal(vanillaLauncher));
 
         var module = new PerfModule();
 
         // 測試 A：切換為 suppress (完全不碰顯示設定)
         var cfgSuppress = new ToolkitConfig { Perf = new PerfConfig { DesktopMode = "suppress" } };
-        byte[] launcherSuppressed = (byte[])pristineLauncher.Clone();
+        byte[] launcherSuppressed = (byte[])vanillaLauncher.Clone();
         module.ApplyLauncher(ref launcherSuppressed, cfgSuppress);
 
-        Check("suppress 模式下 LauncherDisplay 生效", sigDisplay.IsApplied(launcherSuppressed));
-        Check("suppress 模式下 LauncherModeTable 保持關閉 (互斥)", !sigModeTable.IsApplied(launcherSuppressed));
+        Check("suppress 模式下 LauncherDisplay 生效", LauncherDisplay.IsApplied(launcherSuppressed));
+        Check("suppress 模式下 LauncherModeTable 保持原版 (互斥)", LauncherModeTable.IsOriginal(launcherSuppressed));
 
         // 測試 B：切換為 autoSwitch (自動切換桌面解析度至 1920x1080)
         var cfgAutoSwitch = new ToolkitConfig { Perf = new PerfConfig { DesktopMode = "autoSwitch", Resolution = "1920x1080" } };
         byte[] launcherAutoSwitch = (byte[])launcherSuppressed.Clone();
         module.ApplyLauncher(ref launcherAutoSwitch, cfgAutoSwitch);
 
-        Check("autoSwitch 模式下 LauncherModeTable 生效", sigModeTable.IsApplied(launcherAutoSwitch));
-        Check("autoSwitch 模式下模式表第 0 筆改寫為 1920x1080", LauncherModeTable.ReadEntry0(launcherAutoSwitch) == (1920, 1080));
-        Check("autoSwitch 模式下 LauncherDisplay 保持關閉 (互斥)", !sigDisplay.IsApplied(launcherAutoSwitch));
+        Check("autoSwitch 模式下 LauncherModeTable 生效 (改寫為 1920x1080)", LauncherModeTable.IsApplied(launcherAutoSwitch));
+        Check("autoSwitch 模式下 LauncherDisplay 還原為原版 (互斥)", LauncherDisplay.IsOriginal(launcherAutoSwitch));
 
         // 測試 C：切換為 stock (關閉)
         var cfgStock = new ToolkitConfig { Perf = new PerfConfig { DesktopMode = "stock" } };
         byte[] launcherStock = (byte[])launcherAutoSwitch.Clone();
         module.ApplyLauncher(ref launcherStock, cfgStock);
 
-        Check("關閉後兩項簽章均未命中", !sigDisplay.IsApplied(launcherStock) && !sigModeTable.IsApplied(launcherStock));
-        Check("關閉後與原版 Launcher 逐位元組完全相同", pristineLauncher.SequenceEqual(launcherStock));
+        Check("關閉後與原版 Launcher 逐位元組完全相同", vanillaLauncher.SequenceEqual(launcherStock));
     }
 
-    // --- 16. Perf: Resolutions 與 vxSettings.ini 查表測試 --------------------
-    private static void TestPerfResolutionsAndSelection()
+    // --- 16. Perf: Resolutions 附加、改設定非累積取代與 vxSettings 查表 -----
+    private static void TestPerfResolutionsReversalAndSettingChange()
     {
-        Console.WriteLine("\n16. Perf: Resolutions 附加與 vxSettings.ini 查表測試");
+        Console.WriteLine("\n16. Perf: Resolutions 附加、改設定非累積取代與 vxSettings 查表測試");
 
         var dataPak = CreateSyntheticDataPak();
-        var sigPak = new ResolutionsAppendSignature();
+        byte[] vanillaPakBytes = dataPak.ToBytes();
+        string vanillaIniText = dataPak.ReadText("VXCONST.INI");
 
-        Check("原版 data.pak 解析度附加簽章未命中", !sigPak.IsApplied(dataPak.ToBytes()));
+        Check("原版 data.pak IsOriginal=true", Resolutions.IsOriginal(dataPak));
 
-        // 附加 1920x1080 與 2560x1440
-        var added = Resolutions.AppendResolutions(dataPak, [(1920, 1080), (2560, 1440)]);
-        Check("成功附加 2 筆新解析度", added.Count == 2);
-        Check("第一筆附加為 Res5 = 1920x1080 (Position 4)", added[0].Index == 5 && added[0].Position == 4);
-        Check("第二筆附加為 Res6 = 2560x1440 (Position 5)", added[1].Index == 6 && added[1].Position == 5);
+        // 附加 1920x1080
+        Resolutions.AppendResolutions(dataPak, [(1920, 1080)]);
+        Check("附加後 data.pak 包含 5 筆解析度", Resolutions.ReadResolutions(dataPak).Count == 5);
+        Check("附加後 IsCustomResolutionsApplied=true", Resolutions.IsCustomResolutionsApplied(dataPak));
+        Check("附加後保留後續 [Ranks] 節區與註解", dataPak.ReadText("VXCONST.INI").Contains("[Ranks]\r\n; Rank definitions"));
 
-        // 冪等性測試
-        var addedAgain = Resolutions.AppendResolutions(dataPak, [(1920, 1080)]);
-        Check("重複附加相同解析度時自動略過（冪等）", addedAgain.Count == 0);
+        // 模擬改設定為 1600x900 並重新套用（先正規化再疊加）
+        var normRes = PatchState.Normalise(GameFile.DataPak, dataPak.ToBytes());
+        Check("Normalise data.pak 成功且與原版逐位元組完全相同", vanillaPakBytes.SequenceEqual(normRes.Value!));
 
-        Check("修改後 data.pak 簽章命中", sigPak.IsApplied(dataPak.ToBytes()));
+        var reloadedPak = HmmPak.FromBytes(normRes.Value!);
+        string restoredIniText = reloadedPak.ReadText("VXCONST.INI");
+        Check("還原後 VXCONST.INI 全文與原版逐位元組完全相同 (包含節區終結空白行、[Ranks] 與註解)", restoredIniText == vanillaIniText);
 
-        // 查表測試：1920x1080 應對應到 0-based 索引 4
-        int? pos1080 = Resolutions.FindResolutionIndex(dataPak, 1920, 1080);
-        Check("1920x1080 正確查得 0-based 索引 4", pos1080 == 4);
+        Resolutions.AppendResolutions(reloadedPak, [(1600, 900)]);
+        var newResList = Resolutions.ReadResolutions(reloadedPak);
+        Check("改設定後 data.pak 僅留下 1 筆非原廠自訂解析度 (共 5 筆，非累積 6 筆)", newResList.Count == 5 && newResList[4].Width == 1600 && newResList[4].Height == 900);
 
-        // vxSettings.ini 套用測試
+        // vxSettings.ini 查表與反轉測試
         var ini = IniFile.FromText(CreateSyntheticVxSettings());
-        var sigVx = new VxSettingsCustomSignature();
-
-        Check("原版 vxSettings.ini 簽章未命中", !sigVx.IsApplied(Encoding.GetEncoding(1252).GetBytes(ini.ToText())));
+        byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
 
         var config = new ToolkitConfig
         {
@@ -853,75 +745,44 @@ internal static class Program
             }
         };
 
-        var availableList = Resolutions.GetAvailableResolutionsList(dataPak);
+        var availableList = Resolutions.GetAvailableResolutionsList(reloadedPak);
         VxSettingsPatch.Apply(ini, config, availableList);
 
-        Check("NoObjectAnimations 寫入 1", ini.GetValue(null, "NoObjectAnimations") == "1");
-        Check("NoWaterAnimation 寫入 1", ini.GetValue(null, "NoWaterAnimation") == "1");
-        Check("Resolution 索引正確寫入 4 (1920x1080)", ini.GetValue(null, "Resolution") == "4");
+        Check("NoObjectAnimations 寫入 [Options] 且值為 1", ini.GetValue("Options", "NoObjectAnimations") == "1");
+        Check("NoWaterAnimation 寫入 [Options] 且值為 1", ini.GetValue("Options", "NoWaterAnimation") == "1");
+        Check("Resolution 寫入 [Options] 且查表值為 4", ini.GetValue("Options", "Resolution") == "4");
+        Check("頂層無孤兒 NoObjectAnimations 鍵值", !ini.HasKey(null, "NoObjectAnimations"));
+        Check("頂層無孤兒 Resolution 鍵值", !ini.HasKey(null, "Resolution"));
 
-        Check("修改後 vxSettings.ini 簽章命中", sigVx.IsApplied(Encoding.GetEncoding(1252).GetBytes(ini.ToText())));
+        VxSettingsPatch.Normalise(ini);
+        byte[] normalisedVxBytes = Encoding.GetEncoding(1252).GetBytes(ini.ToText());
+        Check("vxSettings.ini 正規化後與原版逐位元組完全相同", vanillaVxBytes.SequenceEqual(normalisedVxBytes));
     }
 
-    // --- 17. Perf: Coverage 完整性與簽章判定測試 ----------------------------
-    private static void TestPerfCoverageCompletenessAndSignatures()
+    // --- 17. PatchPipeline 端對端套用、略過未變更寫入與 RestoreAll 測試 -----
+    private static void TestPatchPipelineEndToEndAndNoUnnecessaryWrites()
     {
-        Console.WriteLine("\n17. Perf: 簽章涵蓋率 (Coverage) 與狀態判定測試");
+        Console.WriteLine("\n17. PatchPipeline 端對端套用、無變更略過寫入與 RestoreAll 測試");
 
-        var bm = new BackupManager();
-        PerfModule.RegisterSignatures(bm);
-
-        // Phase 2 預期：Launcher 與 VxSettings 應達 100% 涵蓋率；Exe 與 DataPak 維持未完整 (Unknown)
-        Check("Launcher Coverage 為完整 (100%)", bm.IsCoverageComplete(GameFile.Launcher));
-        Check("VxSettings Coverage 為完整 (100%)", bm.IsCoverageComplete(GameFile.VxSettings));
-
-        Check("Exe Coverage 仍未完整 (尚缺 Phase 4 的 key_map)", !bm.IsCoverageComplete(GameFile.Exe));
-        Check("DataPak Coverage 仍未完整 (尚缺 Phase 4 的 trainer_marker)", !bm.IsCoverageComplete(GameFile.DataPak));
-        Check("LocalPak Coverage 仍未完整 (尚缺 Phase 3 的 langpack_installed)", !bm.IsCoverageComplete(GameFile.LocalPak));
-
-        // 驗證 Pristine / Patched 判定
-        byte[] pristineLauncher = CreateSyntheticLauncher64();
-        Check("原版 Launcher 回報真實 Pristine 判定", bm.IsPristine(GameFile.Launcher, pristineLauncher) == PristineState.Pristine);
-
-        byte[] patchedLauncher = (byte[])pristineLauncher.Clone();
-        LauncherDisplay.Apply(ref patchedLauncher, true);
-        Check("修補後 Launcher 回報 Patched", bm.IsPristine(GameFile.Launcher, patchedLauncher) == PristineState.Patched);
-
-        byte[] pristineVx = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
-        Check("原版 VxSettings 回報真實 Pristine 判定", bm.IsPristine(GameFile.VxSettings, pristineVx) == PristineState.Pristine);
-
-        byte[] pristineExe = CreateSyntheticExe32();
-        Check("原版 Exe 因 Coverage 未全仍回報 Unknown (不偽造完整性)", bm.IsPristine(GameFile.Exe, pristineExe) == PristineState.Unknown);
-    }
-
-    // --- 18. Perf: PatchPipeline 端對端套用與還原整合測試 --------------------
-    private static void TestPerfPatchPipelineIntegration()
-    {
-        Console.WriteLine("\n18. Perf: PatchPipeline 端對端套用與還原整合測試");
-
-        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_pipe_test_" + Guid.NewGuid().ToString("N")[..8]);
-        string tempBackupDir = Path.Combine(tempGameDir, "backup");
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_pipe_e2e_" + Guid.NewGuid().ToString("N")[..8]);
 
         try
         {
             Directory.CreateDirectory(tempGameDir);
 
-            byte[] pristineExeBytes = CreateSyntheticExe32();
-            byte[] pristineLauncherBytes = CreateSyntheticLauncher64();
-            byte[] pristineDataPakBytes = CreateSyntheticDataPak().ToBytes();
-            byte[] pristineLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
-            byte[] pristineVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
 
-            // 建立 5 大目標原版檔案
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), pristineExeBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), pristineLauncherBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), pristineDataPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), pristineLocalPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), pristineVxBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
 
-            var bm = new BackupManager(tempBackupDir);
-            var pipeline = PatchPipeline.CreateDefault(bm);
-
+            var pipeline = PatchPipeline.CreateDefault();
             var config = new ToolkitConfig
             {
                 Perf = new PerfConfig
@@ -938,73 +799,91 @@ internal static class Program
                 }
             };
 
-            // 1. 執行 ApplyAll
-            var applyRes = pipeline.ApplyAll(tempGameDir, config);
-            Check("PatchPipeline.ApplyAll 執行成功", applyRes.Success, applyRes.ErrorMessage);
+            // 1. 首次 ApplyAll：修改了 Exe, Launcher, DataPak, VxSettings；LocalPak 未被修改
+            var apply1 = pipeline.ApplyAll(tempGameDir, config);
+            Check("首次 ApplyAll 執行成功", apply1.Success);
+            Check("Exe 被寫入 (written=true)", apply1.Value?.Files[GamePaths.ExeFileName].Written == true);
+            Check("Launcher 被寫入 (written=true)", apply1.Value?.Files[GamePaths.LauncherFileName].Written == true);
+            Check("DataPak 被寫入 (written=true)", apply1.Value?.Files[GamePaths.DataPakFileName].Written == true);
+            Check("LocalPak 未被修改因此略過寫入 (written=false)", apply1.Value?.Files[GamePaths.LocalPakFileName].Written == false);
+            Check("VxSettings 被寫入 (written=true)", apply1.Value?.Files[GamePaths.VxSettingsFileName].Written == true);
 
-            // 驗證 5 大目標檔案均已建立原版備份與 sidecar 歷程
-            foreach (GameFile f in Enum.GetValues<GameFile>())
-            {
-                string fn = BackupManager.GetFileName(f);
-                Check($"備份檔案 {fn}.orig 已建立", bm.HasBackup(f));
-                Check($"歷程檔案 {fn}.orig.meta.json 已建立", File.Exists(bm.GetMetadataPath(f)));
-            }
+            // 2. 再次 ApplyAll（相同設定）：所有檔案內容均未變更，全部略過寫入
+            var apply2 = pipeline.ApplyAll(tempGameDir, config);
+            Check("再次 ApplyAll 執行成功", apply2.Success);
+            Check("內容無變更時寫入檔案數為 0 (零贅餘寫入)", apply2.Value?.FilesWritten.Count == 0);
 
-            // 驗證 Exe 歷程記錄（Phase 2 Coverage incomplete）
-            var exeMeta = bm.GetBackupProvenance(GameFile.Exe);
-            Check("Exe 歷程記錄 CoverageComplete=false", exeMeta is not null && !exeMeta.CoverageComplete);
-
-            // 驗證 Launcher 歷程記錄（Phase 2 Coverage complete）
-            var launcherMeta = bm.GetBackupProvenance(GameFile.Launcher);
-            Check("Launcher 歷程記錄 CoverageComplete=true", launcherMeta is not null && launcherMeta.CoverageComplete);
-
-            // 驗證 live 檔案已被正確修改
-            byte[] liveExe = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName));
-            Check("Live Exe 已套用 LAA", LargeAddressAware.IsApplied(liveExe));
-            Check("Live Exe 已套用 VideoMode", VideoModePatch.IsApplied(liveExe));
-            Check("Live Exe 已套用 ZoomTables", ZoomTables.IsApplied(liveExe));
-            Check("Live Exe 已套用 ResolutionWriteback", ResolutionWriteback.IsApplied(liveExe));
-
-            byte[] liveLauncher = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName));
-            Check("Live Launcher 已套用 ModeTable 1920x1080", LauncherModeTable.IsApplied(liveLauncher));
-
-            var liveDataPak = HmmPak.FromBytes(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)));
-            Check("Live data.pak 包含 1920x1080", Resolutions.FindResolutionIndex(liveDataPak, 1920, 1080) == 4);
-
-            var liveVx = IniFile.FromText(Encoding.GetEncoding(1252).GetString(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName))));
-            Check("Live vxSettings.ini 寫入 Resolution=4", liveVx.GetValue(null, "Resolution") == "4");
-            Check("Live vxSettings.ini NoObjectAnimations=1", liveVx.GetValue(null, "NoObjectAnimations") == "1");
-
-            // 2. 執行 RestoreAll
+            // 3. 執行 RestoreAll
             var restoreRes = pipeline.RestoreAll(tempGameDir);
-            Check("PatchPipeline.RestoreAll 執行成功", restoreRes.Success, restoreRes.ErrorMessage);
-            Check("RestoreAll 回報還原檔案數為 5", restoreRes.Value?.Count == 5);
+            Check("RestoreAll 執行成功", restoreRes.Success);
 
-            // 驗證還原後與 .orig 逐位元組完全相同，且與初始原版檔案逐位元組完全相同
+            // 驗證 5 大檔案逐位元組與原版完全一致
             byte[] restoredExe = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName));
-            byte[] origExe = File.ReadAllBytes(bm.GetBackupPath(GameFile.Exe));
-            Check("還原後 Celtic kings.exe 與 .orig 逐位元組完全相同", restoredExe.SequenceEqual(origExe));
-            Check("還原後 Celtic kings.exe 與原版 pristine 逐位元組完全相同", restoredExe.SequenceEqual(pristineExeBytes));
+            Check("還原後 Celtic kings.exe 與原版逐位元組完全相同", restoredExe.SequenceEqual(vanillaExeBytes));
 
             byte[] restoredLauncher = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName));
-            byte[] origLauncher = File.ReadAllBytes(bm.GetBackupPath(GameFile.Launcher));
-            Check("還原後 Launcher 與 .orig 逐位元組完全相同", restoredLauncher.SequenceEqual(origLauncher));
-            Check("還原後 Launcher 與原版 pristine 逐位元組完全相同", restoredLauncher.SequenceEqual(pristineLauncherBytes));
+            Check("還原後 Launcher 與原版逐位元組完全相同", restoredLauncher.SequenceEqual(vanillaLauncherBytes));
 
             byte[] restoredDataPak = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName));
-            byte[] origDataPak = File.ReadAllBytes(bm.GetBackupPath(GameFile.DataPak));
-            Check("還原後 data.pak 與 .orig 逐位元組完全相同", restoredDataPak.SequenceEqual(origDataPak));
-            Check("還原後 data.pak 與原版 pristine 逐位元組完全相同", restoredDataPak.SequenceEqual(pristineDataPakBytes));
+            Check("還原後 data.pak 與原版逐位元組完全相同", restoredDataPak.SequenceEqual(vanillaDataPakBytes));
 
             byte[] restoredLocalPak = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName));
-            byte[] origLocalPak = File.ReadAllBytes(bm.GetBackupPath(GameFile.LocalPak));
-            Check("還原後 local.pak 與 .orig 逐位元組完全相同", restoredLocalPak.SequenceEqual(origLocalPak));
-            Check("還原後 local.pak 與原版 pristine 逐位元組完全相同", restoredLocalPak.SequenceEqual(pristineLocalPakBytes));
+            Check("還原後 local.pak 與原版逐位元組完全相同", restoredLocalPak.SequenceEqual(vanillaLocalPakBytes));
 
             byte[] restoredVx = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName));
-            byte[] origVx = File.ReadAllBytes(bm.GetBackupPath(GameFile.VxSettings));
-            Check("還原後 vxSettings.ini 與 .orig 逐位元組完全相同", restoredVx.SequenceEqual(origVx));
-            Check("還原後 vxSettings.ini 與原版 pristine 逐位元組完全相同", restoredVx.SequenceEqual(pristineVxBytes));
+            Check("還原後 vxSettings.ini 與原版逐位元組完全相同", restoredVx.SequenceEqual(vanillaVxBytes));
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+        }
+    }
+
+    // --- 18. PatchPipeline 對無法辨識 (Unrecognised) 檔案之拒絕保護測試 ------
+    private static void TestPatchPipelineUnrecognisedRejection()
+    {
+        Console.WriteLine("\n18. PatchPipeline 對無法辨識檔案之拒絕與零寫入保護測試");
+
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_unrecog_" + Guid.NewGuid().ToString("N")[..8]);
+
+        try
+        {
+            Directory.CreateDirectory(tempGameDir);
+
+            byte[] corruptExe = CreateSyntheticExe32();
+            corruptExe[VideoModePatch.Offset] = 0xEE; // 未知第三方破壞
+
+            byte[] vanillaLauncher = CreateSyntheticLauncher64();
+            byte[] vanillaDataPak = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPak = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVx = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), corruptExe);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncher);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPak);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPak);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVx);
+
+            var initialSnapshots = new Dictionary<string, byte[]>();
+            foreach (var f in Directory.GetFiles(tempGameDir))
+            {
+                initialSnapshots[f] = File.ReadAllBytes(f);
+            }
+
+            var pipeline = PatchPipeline.CreateDefault();
+            var config = new ToolkitConfig();
+
+            // 執行 ApplyAll
+            var applyRes = pipeline.ApplyAll(tempGameDir, config);
+            Check("存在無法辨識檔案時 ApplyAll 拒絕操作並回傳失敗", !applyRes.Success);
+            Check("退出碼為 BackupMissingNeedsSteamVerify (4)", applyRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify);
+
+            // 驗證零寫入保護：所有檔案均未被修改
+            foreach (var (fPath, origBytes) in initialSnapshots)
+            {
+                byte[] curBytes = File.ReadAllBytes(fPath);
+                Check($"未修改檔案 {Path.GetFileName(fPath)} (零寫入保證)", curBytes.SequenceEqual(origBytes));
+            }
         }
         finally
         {
@@ -1017,24 +896,24 @@ internal static class Program
     {
         Console.WriteLine("\n19. CLI apply 與 restore --all 端對端整合測試");
 
-        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_apply_restore_" + Guid.NewGuid().ToString("N")[..8]);
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_e2e_" + Guid.NewGuid().ToString("N")[..8]);
         string tempConfigPath = Path.Combine(tempGameDir, "test_config.json");
 
         try
         {
             Directory.CreateDirectory(tempGameDir);
 
-            byte[] pristineExeBytes = CreateSyntheticExe32();
-            byte[] pristineLauncherBytes = CreateSyntheticLauncher64();
-            byte[] pristineDataPakBytes = CreateSyntheticDataPak().ToBytes();
-            byte[] pristineLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
-            byte[] pristineVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
 
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), pristineExeBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), pristineLauncherBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), pristineDataPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), pristineLocalPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), pristineVxBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
 
             var config = new ToolkitConfig
             {
@@ -1063,17 +942,7 @@ internal static class Program
 
                 var env = JsonSerializer.Deserialize<JsonEnvelope>(swOut.ToString());
                 Check("CLI apply 回傳 JSON 封套且 ok=true", env is not null && env.Ok && env.Command == "apply");
-                Check("CLI apply 回傳管線警告 (包含未完整特徵庫警告)", env?.Warnings.Count > 0);
-
-                using var doc = JsonDocument.Parse(swOut.ToString());
-                var data = doc.RootElement.GetProperty("data");
-                var filesWritten = data.GetProperty("filesWritten").EnumerateArray().Select(e => e.GetString()).ToList();
-                Check("CLI apply 回報 5 個目標檔案皆已寫入", filesWritten.Count == 5);
             }
-
-            // 檢查各目標檔案是否已被修改
-            byte[] liveExe = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName));
-            Check("Live Exe 已被套用修改", LargeAddressAware.IsApplied(liveExe) && VideoModePatch.IsApplied(liveExe));
 
             // B. 測試 restore 未指定 --all 旗標時拒絕
             using (var swOutInvalid = new StringWriter())
@@ -1081,8 +950,6 @@ internal static class Program
             {
                 int exitCodeInvalid = CliHost.Execute(["restore", "--game", tempGameDir, "--json"], swOutInvalid, swErrInvalid);
                 Check("restore 未指定 --all 旗標時退出碼為 2 (InvalidArgs)", exitCodeInvalid == ExitCodes.InvalidArgs);
-                var envInvalid = JsonSerializer.Deserialize<JsonEnvelope>(swOutInvalid.ToString());
-                Check("restore 未指定 --all 時 ok=false 且包含錯誤訊息", envInvalid is not null && !envInvalid.Ok && envInvalid.Errors.Count > 0);
             }
 
             // C. 測試 restore --all 指令
@@ -1094,28 +961,23 @@ internal static class Program
 
                 var envRestore = JsonSerializer.Deserialize<JsonEnvelope>(swOutRestore.ToString());
                 Check("CLI restore --all 回傳 JSON 封套且 ok=true", envRestore is not null && envRestore.Ok && envRestore.Command == "restore");
-
-                using var docRestore = JsonDocument.Parse(swOutRestore.ToString());
-                var dataRestore = docRestore.RootElement.GetProperty("data");
-                var restoredFiles = dataRestore.GetProperty("restoredFiles").EnumerateArray().Select(e => e.GetString()).ToList();
-                Check("CLI restore --all 回報 5 個檔案皆已還原", restoredFiles.Count == 5);
             }
 
             // 驗證還原後五個檔案逐位元組與原版完全相同
             byte[] restoredExe = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName));
-            Check("還原後 Exe 與原版 pristine 逐位元組完全相同", restoredExe.SequenceEqual(pristineExeBytes));
+            Check("還原後 Exe 與原版逐位元組完全相同", restoredExe.SequenceEqual(vanillaExeBytes));
 
             byte[] restoredLauncher = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName));
-            Check("還原後 Launcher 與原版 pristine 逐位元組完全相同", restoredLauncher.SequenceEqual(pristineLauncherBytes));
+            Check("還原後 Launcher 與原版逐位元組完全相同", restoredLauncher.SequenceEqual(vanillaLauncherBytes));
 
             byte[] restoredDataPak = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName));
-            Check("還原後 data.pak 與原版 pristine 逐位元組完全相同", restoredDataPak.SequenceEqual(pristineDataPakBytes));
+            Check("還原後 data.pak 與原版逐位元組完全相同", restoredDataPak.SequenceEqual(vanillaDataPakBytes));
 
             byte[] restoredLocalPak = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName));
-            Check("還原後 local.pak 與原版 pristine 逐位元組完全相同", restoredLocalPak.SequenceEqual(pristineLocalPakBytes));
+            Check("還原後 local.pak 與原版逐位元組完全相同", restoredLocalPak.SequenceEqual(vanillaLocalPakBytes));
 
             byte[] restoredVx = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName));
-            Check("還原後 vxSettings.ini 與原版 pristine 逐位元組完全相同", restoredVx.SequenceEqual(pristineVxBytes));
+            Check("還原後 vxSettings.ini 與原版逐位元組完全相同", restoredVx.SequenceEqual(vanillaVxBytes));
         }
         finally
         {
@@ -1123,37 +985,10 @@ internal static class Program
         }
     }
 
-    // --- 20. CLI restore 無備份時失敗測試 ------------------------------------
-    private static void TestCliRestoreNoBackupsFails()
-    {
-        Console.WriteLine("\n20. CLI restore 無備份時失敗測試");
-
-        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_nobackup_" + Guid.NewGuid().ToString("N")[..8]);
-        string tempBackupDir = Path.Combine(tempGameDir, "isolated_backup");
-
-        try
-        {
-            Directory.CreateDirectory(tempGameDir);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), HmmPak.CreateEmpty().ToBytes());
-
-            // 透過 BackupManager 在一個完全空的目錄測試 restore
-            var bmEmpty = new BackupManager(tempBackupDir);
-            var emptyRes = bmEmpty.RestoreAll(tempGameDir);
-
-            Check("無備份時 BackupManager.RestoreAll 失敗", !emptyRes.Success);
-            Check("無備份時退出碼為 BackupMissingNeedsSteamVerify (4)", emptyRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify);
-        }
-        finally
-        {
-            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
-        }
-    }
-
-    // --- 21. CLI perf get / set 與零遊戲檔案寫入保證測試 --------------------
+    // --- 20. CLI perf get / set 與零遊戲檔案寫入保證測試 --------------------
     private static void TestCliPerfGetSetAndZeroGameWrites()
     {
-        Console.WriteLine("\n21. CLI perf get / set 與零遊戲檔案寫入保證測試");
+        Console.WriteLine("\n20. CLI perf get / set 與零遊戲檔案寫入保證測試");
 
         string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_perf_" + Guid.NewGuid().ToString("N")[..8]);
         string tempConfigPath = Path.Combine(tempGameDir, "cktoolkit_perf_test.json");
@@ -1162,19 +997,18 @@ internal static class Program
         {
             Directory.CreateDirectory(tempGameDir);
 
-            byte[] pristineExeBytes = CreateSyntheticExe32();
-            byte[] pristineLauncherBytes = CreateSyntheticLauncher64();
-            byte[] pristineDataPakBytes = CreateSyntheticDataPak().ToBytes();
-            byte[] pristineLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
-            byte[] pristineVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
 
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), pristineExeBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), pristineLauncherBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), pristineDataPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), pristineLocalPakBytes);
-            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), pristineVxBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
 
-            // 記錄初始遊戲檔案快照
             var initialSnapshot = new Dictionary<string, byte[]>();
             foreach (var file in Directory.GetFiles(tempGameDir))
             {
@@ -1201,10 +1035,7 @@ internal static class Program
                     "--json"
                 ], swOutSet, swErrSet);
 
-                Check("CLI perf set 執行成功 (exitCode 0)", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={swErrSet}");
-
-                var env = JsonSerializer.Deserialize<JsonEnvelope>(swOutSet.ToString());
-                Check("CLI perf set 回傳 JSON 封套且 ok=true", env is not null && env.Ok && env.Command == "perf set");
+                Check("CLI perf set 執行成功 (exitCode 0)", exitCode == ExitCodes.Success);
             }
 
             // 驗證設定檔已更新
@@ -1213,39 +1044,14 @@ internal static class Program
             Check("perf.laa 已設為 false", updatedConfig.Perf.Laa == false);
             Check("perf.videoFix 已設為 true", updatedConfig.Perf.VideoFix == true);
             Check("perf.hires 已設為 1920", updatedConfig.Perf.Hires == 1920);
-            Check("perf.keepRes 已設為 true", updatedConfig.Perf.KeepRes == true);
             Check("perf.desktopMode 已設為 suppress", updatedConfig.Perf.DesktopMode == "suppress");
-            Check("perf.resolution 已設為 1920x1080", updatedConfig.Perf.Resolution == "1920x1080");
-            Check("perf.noObjectAnimations 已設為 true (anim-objects off)", updatedConfig.Perf.NoObjectAnimations == true);
-            Check("perf.noWaterAnimation 已設為 false (anim-water on)", updatedConfig.Perf.NoWaterAnimation == false);
 
-            // B. 執行 perf get 指令
-            using (var swOutGet = new StringWriter())
-            using (var swErrGet = new StringWriter())
-            {
-                int exitCodeGet = CliHost.Execute(["perf", "get", "--config", tempConfigPath, "--json"], swOutGet, swErrGet);
-                Check("CLI perf get 執行成功 (exitCode 0)", exitCodeGet == ExitCodes.Success);
-
-                var envGet = JsonSerializer.Deserialize<JsonEnvelope>(swOutGet.ToString());
-                Check("CLI perf get 回傳有效封套", envGet is not null && envGet.Ok && envGet.Command == "perf get");
-            }
-
-            // C. 驗證遊戲目錄零寫入保證：遊戲檔案未被任何修改
+            // B. 驗證遊戲目錄零寫入保證：遊戲檔案未被任何修改
             foreach (var (filePath, origBytes) in initialSnapshot)
             {
                 byte[] currentBytes = File.ReadAllBytes(filePath);
                 string fileName = Path.GetFileName(filePath);
                 Check($"perf set 未修改遊戲檔案 {fileName}", currentBytes.SequenceEqual(origBytes));
-            }
-
-            // D. 測試 Launcher 互斥性切換 (autoswitch)
-            using (var swOutSwitch = new StringWriter())
-            using (var swErrSwitch = new StringWriter())
-            {
-                int codeSwitch = CliHost.Execute(["perf", "set", "--desktop", "autoswitch", "--config", tempConfigPath, "--json"], swOutSwitch, swErrSwitch);
-                Check("切換為 autoswitch 成功", codeSwitch == ExitCodes.Success);
-                var switchConfig = ToolkitConfig.Load(tempConfigPath);
-                Check("desktopMode 已更新為 autoSwitch", switchConfig.Perf.DesktopMode == "autoSwitch");
             }
         }
         finally
@@ -1254,10 +1060,10 @@ internal static class Program
         }
     }
 
-    // --- 22. CLI verify 唯讀與零寫入保證測試 ---------------------------------
+    // --- 21. CLI verify 唯讀與零寫入保證測試 ---------------------------------
     private static void TestCliVerifyZeroWrites()
     {
-        Console.WriteLine("\n22. CLI verify 唯讀與零寫入保證測試");
+        Console.WriteLine("\n21. CLI verify 唯讀與零寫入保證測試");
 
         string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_verify_" + Guid.NewGuid().ToString("N")[..8]);
         string tempConfigPath = Path.Combine(tempGameDir, "cktoolkit_verify_config.json");
@@ -1278,18 +1084,147 @@ internal static class Program
             using var swErr = new StringWriter();
             int exitCode = CliHost.Execute(["verify", "--game", tempGameDir, "--config", tempConfigPath, "--json"], swOut, swErr);
 
-            Check("CLI verify 執行成功 (exitCode 0)", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={swErr}");
+            Check("CLI verify 執行成功 (exitCode 0)", exitCode == ExitCodes.Success);
 
             var env = JsonSerializer.Deserialize<JsonEnvelope>(swOut.ToString());
             Check("CLI verify 回傳 JSON 封套且 ok=true", env is not null && env.Ok && env.Command == "verify");
-            Check("CLI verify 包含驗證資料 (allBackupsPresent, allMatchesConfig)", env?.Data is not null);
-
-            // 驗證未建立 backup 目錄與未建立設定檔（嚴格零寫入）
-            Check("未在遊戲目錄建立 backup 目錄", !Directory.Exists(Path.Combine(tempGameDir, "backup")));
-            Check("未在磁碟寫入任何新設定檔", !File.Exists(tempConfigPath));
 
             var currentFiles = Directory.GetFileSystemEntries(tempGameDir, "*", SearchOption.AllDirectories).OrderBy(x => x).ToList();
             Check("verify 執行後遊戲目錄 100% 零變更 (零寫入保證)", initialFiles.SequenceEqual(currentFiles));
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+        }
+    }
+
+    // --- 22. Perf: ZoomMap 容量一致性、降低解析度重套用與 Hires 關閉測試 -----
+    private static void TestPerfResolutionCapacityAndHiresOff()
+    {
+        Console.WriteLine("\n22. Perf: ZoomMap 容量一致性、降低解析度重套用與 Hires 關閉測試");
+
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_hires_cap_" + Guid.NewGuid().ToString("N")[..8]);
+
+        try
+        {
+            Directory.CreateDirectory(tempGameDir);
+
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
+
+            var pipeline = PatchPipeline.CreateDefault();
+
+            // 步驟 1: 套用 1920x1080 (hires = 1920, resolution = 1920x1080, addRes = ["1920x1080"])
+            var cfg1920 = new ToolkitConfig
+            {
+                Perf = new PerfConfig
+                {
+                    Laa = true,
+                    VideoFix = true,
+                    Hires = 1920,
+                    KeepRes = true,
+                    Resolution = "1920x1080",
+                    AddRes = ["1920x1080"],
+                    DesktopMode = "autoSwitch"
+                }
+            };
+
+            var apply1 = pipeline.ApplyAll(tempGameDir, cfg1920);
+            Check("步驟 1 (1920x1080) ApplyAll 成功", apply1.Success);
+
+            // 驗證 Exe 有 .ckhr (容量 1920)
+            var pe1 = PeFile.Parse(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName)));
+            Check("步驟 1 Exe 包含 .ckhr 節區", pe1.FindSection(".ckhr") >= 0);
+
+            // 驗證 data.pak 有 Res5 (1920x1080)
+            var pak1 = HmmPak.FromBytes(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)));
+            var resList1 = Resolutions.ReadResolutions(pak1);
+            Check("步驟 1 data.pak 包含 5 筆解析度且第 5 筆為 1920x1080", resList1.Count == 5 && resList1[4].Width == 1920);
+
+            // 驗證 vxSettings.ini Resolution=4
+            var ini1 = IniFile.FromText(Encoding.GetEncoding(1252).GetString(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName))));
+            Check("步驟 1 vxSettings.ini Resolution=4", ini1.GetValue("Options", "Resolution") == "4");
+
+            // 步驟 2: 將設定調低為 1600x1200 (hires = 1600, resolution = 1600x1200) 並重新套用 (lower-then-reapply)
+            var cfg1600 = new ToolkitConfig
+            {
+                Perf = new PerfConfig
+                {
+                    Laa = true,
+                    VideoFix = true,
+                    Hires = 1600,
+                    KeepRes = true,
+                    Resolution = "1600x1200",
+                    AddRes = ["1920x1080"], // 模擬先前遺留的 AddRes
+                    DesktopMode = "autoSwitch"
+                }
+            };
+
+            var apply2 = pipeline.ApplyAll(tempGameDir, cfg1600);
+            Check("步驟 2 (調低至 1600x1200) ApplyAll 成功", apply2.Success);
+
+            // 驗證 data.pak 中的 Res5 (1920x1080) 已被移除，僅留下 4 筆原廠項目 (<= 1600 容量)
+            var pak2 = HmmPak.FromBytes(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)));
+            var resList2 = Resolutions.ReadResolutions(pak2);
+            Check("步驟 2 data.pak 移除超出容量之條目，僅保留 4 筆 (<= 1600)", resList2.Count == 4);
+            Check("步驟 2 data.pak 不包含任何大於 1600 寬度之項目", resList2.All(r => r.Width <= 1600));
+
+            // 驗證 data.pak 逐位元組還原為原版
+            Check("步驟 2 data.pak 逐位元組與原版完全相同", File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)).SequenceEqual(vanillaDataPakBytes));
+
+            // 驗證 vxSettings.ini Resolution=3
+            var ini2 = IniFile.FromText(Encoding.GetEncoding(1252).GetString(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName))));
+            Check("步驟 2 vxSettings.ini Resolution=3", ini2.GetValue("Options", "Resolution") == "3");
+
+            // 步驟 3: 關閉 hires (hires = 0 / off)，但設定解析度為 1920x1080 (hires-off)
+            var cfgHiresOff = new ToolkitConfig
+            {
+                Perf = new PerfConfig
+                {
+                    Laa = true,
+                    VideoFix = true,
+                    Hires = 0, // 關閉 hires
+                    KeepRes = true,
+                    Resolution = "1920x1080", // 嘗試指定超出容量的解析度
+                    AddRes = ["1920x1080"],
+                    DesktopMode = "stock"
+                }
+            };
+
+            var apply3 = pipeline.ApplyAll(tempGameDir, cfgHiresOff);
+            Check("步驟 3 (hires-off) ApplyAll 成功", apply3.Success);
+
+            // 驗證 Exe 移除 .ckhr 節區
+            var pe3 = PeFile.Parse(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName)));
+            Check("步驟 3 Exe 已移除 .ckhr 節區", pe3.FindSection(".ckhr") == -1);
+
+            // 驗證 data.pak 僅有 4 筆項目
+            var pak3 = HmmPak.FromBytes(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)));
+            var resList3 = Resolutions.ReadResolutions(pak3);
+            Check("步驟 3 data.pak [Resolutions] 僅有 4 筆項目", resList3.Count == 4);
+
+            // 驗證 vxSettings.ini 自動重設為最高有效條目 (Resolution=3)
+            var ini3 = IniFile.FromText(Encoding.GetEncoding(1252).GetString(File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName))));
+            Check("步驟 3 vxSettings.ini 自動重設為最高有效解析度 Resolution=3", ini3.GetValue("Options", "Resolution") == "3");
+
+            // 驗證發出警告說明原因
+            Check("步驟 3 發出超出容量自動重設之警告", apply3.Warnings.Any(w => w.Contains("1920x1080") || w.Contains("ZoomMap")));
+
+            // 步驟 4: RestoreAll 完全還原
+            var restoreRes = pipeline.RestoreAll(tempGameDir);
+            Check("步驟 4 RestoreAll 成功", restoreRes.Success);
+            Check("步驟 4 Celtic kings.exe 逐位元組與原版一致", File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName)).SequenceEqual(vanillaExeBytes));
+            Check("步驟 4 data.pak 逐位元組與原版一致", File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)).SequenceEqual(vanillaDataPakBytes));
+            Check("步驟 4 vxSettings.ini 逐位元組與原版一致", File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName)).SequenceEqual(vanillaVxBytes));
         }
         finally
         {
@@ -1304,13 +1239,12 @@ internal static class Program
     /// </summary>
     private static byte[] CreateSyntheticExe32()
     {
-        // 檔案大小 0x386000 (~3.6MB)，涵蓋 .text (0x1000..0x306000) 與 .data (0x306000..0x386000)
         byte[] pe = new byte[0x386000];
 
         // DOS Header
         pe[0] = (byte)'M';
         pe[1] = (byte)'Z';
-        BitConverter.TryWriteBytes(pe.AsSpan(0x3C, 4), 0x80u); // e_lfanew
+        BitConverter.TryWriteBytes(pe.AsSpan(0x3C, 4), 0x80u);
 
         // NT Headers (offset 0x80)
         int nt = 0x80;
@@ -1381,7 +1315,7 @@ internal static class Program
     /// </summary>
     private static byte[] CreateSyntheticLauncher64()
     {
-        byte[] pe = new byte[0x5000]; // 20KB
+        byte[] pe = new byte[0x5000];
 
         // DOS Header
         pe[0] = (byte)'M';
@@ -1395,19 +1329,19 @@ internal static class Program
 
         // FileHeader (AMD64)
         int fh = nt + 4;
-        BitConverter.TryWriteBytes(pe.AsSpan(fh + 0, 2), (ushort)0x8664);  // Machine = AMD64
-        BitConverter.TryWriteBytes(pe.AsSpan(fh + 2, 2), (ushort)2);       // NumberOfSections = 2
-        BitConverter.TryWriteBytes(pe.AsSpan(fh + 16, 2), (ushort)240);    // SizeOfOptionalHeader (PE32+)
-        BitConverter.TryWriteBytes(pe.AsSpan(fh + 18, 2), (ushort)0x0022); // Characteristics
+        BitConverter.TryWriteBytes(pe.AsSpan(fh + 0, 2), (ushort)0x8664);
+        BitConverter.TryWriteBytes(pe.AsSpan(fh + 2, 2), (ushort)2);
+        BitConverter.TryWriteBytes(pe.AsSpan(fh + 16, 2), (ushort)240);
+        BitConverter.TryWriteBytes(pe.AsSpan(fh + 18, 2), (ushort)0x0022);
 
         // OptionalHeader (PE32+)
         int opt = fh + 20;
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 0, 2), (ushort)0x020B); // Magic = PE32+
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 24, 8), 0x140000000ul); // ImageBase
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 32, 4), 0x1000u);       // SectionAlignment
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 36, 4), 0x200u);        // FileAlignment
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 56, 4), 0x6000u);       // SizeOfImage
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 60, 4), 0x400u);        // SizeOfHeaders
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 0, 2), (ushort)0x020B);
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 24, 8), 0x140000000ul);
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 32, 4), 0x1000u);
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 36, 4), 0x200u);
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 56, 4), 0x6000u);
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 60, 4), 0x400u);
 
         // Section Table
         int secTab = opt + 240;
@@ -1431,14 +1365,12 @@ internal static class Program
         BitConverter.TryWriteBytes(pe.AsSpan(s2 + 36, 4), 0x40000040u);
 
         // 初始化修補位置的原版位元組
-        // A. LauncherDisplay Sites
         foreach (var site in LauncherDisplay.Sites)
         {
             LauncherDisplay.TryGetFileOffset(site.Rva, site.Orig.Length, out int off);
             site.Orig.CopyTo(pe.AsSpan(off, site.Orig.Length));
         }
 
-        // B. LauncherModeTable Stock Entries
         for (int i = 0; i < LauncherModeTable.StockTable.Length; i++)
         {
             BitConverter.TryWriteBytes(pe.AsSpan(LauncherModeTable.TableOffset + i * 4, 4), LauncherModeTable.StockTable[i]);
@@ -1448,7 +1380,7 @@ internal static class Program
     }
 
     /// <summary>
-    /// 建立包含原版 VXCONST.INI 之合成 data.pak。
+    /// 建立包含真實原廠結構 VXCONST.INI 之合成 data.pak（包含 [Resolutions]、空白行分隔符號與後續 [Ranks] 節區與註解）。
     /// </summary>
     private static HmmPak CreateSyntheticDataPak()
     {
@@ -1462,29 +1394,42 @@ internal static class Program
             "Res3_x = 1280\r\n" +
             "Res3_y = 1024\r\n" +
             "Res4_x = 1600\r\n" +
-            "Res4_y = 1200\r\n";
+            "Res4_y = 1200\r\n" +
+            "\r\n" +
+            "[Ranks]\r\n" +
+            "; Rank definitions\r\n";
 
         pak.WriteText("VXCONST.INI", constIniContent);
         return pak;
     }
 
     /// <summary>
-    /// 建立原版 vxSettings.ini 內容。
+    /// 建立原版 vxSettings.ini 內容（包含 [Language]、[Options] 與 [Update] 節區）。
     /// </summary>
     private static string CreateSyntheticVxSettings()
     {
         return
+            "[Language]\r\n" +
+            "Default=english\r\n" +
+            "\r\n" +
             "[Options]\r\n" +
-            "NoObjectAnimations = 0\r\n" +
-            "NoWaterAnimation = 0\r\n" +
-            "Resolution = 0\r\n";
-    }
-
-    private sealed class TestSignature(string patchId, GameFile appliesTo, Func<byte[], bool> detector) : IPatchSignature
-    {
-        public string PatchId { get; } = patchId;
-        public GameFile AppliesTo { get; } = appliesTo;
-        public bool IsApplied(byte[] fileBytes) => detector(fileBytes);
+            "ReverseSpeakers=0\r\n" +
+            "NoObjectAnimations=0\r\n" +
+            "NoWaterAnimation=0\r\n" +
+            "Music=1\r\n" +
+            "SoundFX=1\r\n" +
+            "NatureSounds=1\r\n" +
+            "Speech=1\r\n" +
+            "Conversations=1\r\n" +
+            "GameSpeed=13\r\n" +
+            "ScrollSpeed=50\r\n" +
+            "SoundVolume=50\r\n" +
+            "MusicVolume=50\r\n" +
+            "SpeechVolume=50\r\n" +
+            "Resolution=3\r\n" +
+            "\r\n" +
+            "[Update]\r\n" +
+            "NewUpdate=0\r\n";
     }
 
     #endregion

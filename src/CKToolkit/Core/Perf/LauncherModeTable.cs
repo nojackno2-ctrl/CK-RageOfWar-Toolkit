@@ -67,6 +67,16 @@ public static class LauncherModeTable
     }
 
     /// <summary>
+    /// 檢查給定之 Launcher 位元組是否為原版模式表第 0 筆 (1600x1200)。
+    /// </summary>
+    public static bool IsOriginal(byte[] launcherBytes)
+    {
+        if (!CheckFingerprint(launcherBytes)) return false;
+        var (w, h) = ReadEntry0(launcherBytes);
+        return w == StockTable[0] && h == StockTable[1];
+    }
+
+    /// <summary>
     /// 改寫或還原 Launcher 模式表第 0 筆。
     /// </summary>
     public static void Apply(ref byte[] launcherBytes, bool enable, int width = 1920, int height = 1080)
@@ -79,14 +89,4 @@ public static class LauncherModeTable
         BitConverter.TryWriteBytes(launcherBytes.AsSpan(TableOffset, 4), w);
         BitConverter.TryWriteBytes(launcherBytes.AsSpan(TableOffset + 4, 4), h);
     }
-}
-
-/// <summary>
-/// BackupManager 之 launcher_mode_table 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class LauncherModeTableSignature : IPatchSignature
-{
-    public string PatchId => "launcher_mode_table";
-    public GameFile AppliesTo => GameFile.Launcher;
-    public bool IsApplied(byte[] fileBytes) => LauncherModeTable.IsApplied(fileBytes);
 }

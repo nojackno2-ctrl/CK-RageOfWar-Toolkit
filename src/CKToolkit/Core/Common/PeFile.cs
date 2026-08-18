@@ -352,4 +352,49 @@ public sealed class PeFile
 
         return _sections.First(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>
+    /// 移除指定名稱之節區（供 HiRes .ckhr 節區還原使用）。
+    /// </summary>
+    public bool RemoveSection(string name)
+    {
+        int index = FindSection(name);
+        if (index < 0) return false;
+
+        // 將目標 Section Header (40 位元組) 清零
+        int h = _sections[index].HeaderOffset;
+        _data.AsSpan(h, 40).Clear();
+
+        // 若不是最後一個節區，將後續節區標頭向前搬移 40 位元組
+        if (index < _sections.Count - 1)
+        {
+            for (int i = index; i < _sections.Count - 1; i++)
+            {
+                int src = _sections[i + 1].HeaderOffset;
+                int dst = SectionTableOffset + i * 40;
+                Array.Copy(_data, src, _data, dst, 40);
+            }
+            int lastHeader = SectionTableOffset + (_sections.Count - 1) * 40;
+            _data.AsSpan(lastHeader, 40).Clear();
+        }
+
+        // 更新 FileHeader 的 NumberOfSections
+        ushort updatedSectionCount = (ushort)(NumberOfSections - 1);
+        BitConverter.TryWriteBytes(_data.AsSpan(FileHeaderOffset + 2, 2), updatedSectionCount);
+
+        // 計算剩餘節區之最高 RVA 邊界以重新計算 SizeOfImage
+        uint maxRvaTop = 0;
+        for (int i = 0; i < _sections.Count; i++)
+        {
+            if (i == index) continue;
+            var s = _sections[i];
+            uint top = AlignUp(s.VirtualAddress + s.VirtualSize, SectionAlignment);
+            if (top > maxRvaTop) maxRvaTop = top;
+        }
+        BitConverter.TryWriteBytes(_data.AsSpan(SizeOfImageOffset, 4), maxRvaTop);
+
+        // 重新解析快取
+        Parse();
+        return true;
+    }
 }

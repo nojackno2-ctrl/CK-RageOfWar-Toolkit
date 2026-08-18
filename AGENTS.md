@@ -22,45 +22,52 @@
 
 ## 2. 修補紀律（三個前身專案的血淚，違反就會弄壞使用者的遊戲）
 
-### 2.1 統一備份層 —— 本專案存在的最大理由
-三個前身專案各自維護備份、各自判定「原版」，導致它們互相把對方的成果當成原廠檔案存起來，
-使用者按「還原原版」拿回的可能不是原版。整合後：
+### 2.1 不保留任何遊戲檔案副本（使用者決定，2026-08-18）
+**本工具不得建立 `backup/` 目錄，不得複製任何遊戲檔案。** 這是 Steam 版專用工具，
+使用者隨時可以用「驗證遊戲檔案完整性」取回原廠檔案，那就是唯一且足夠的安全網。
 
-- **只有一個 `backup/` 目錄，只有一套 pristine 判定。**
-- 五個備份基準：`Celtic kings.exe.orig`、`Celtic kings Launcher.exe.orig`、
-  `data.pak.orig`、`local.pak.orig`、`vxSettings.ini.orig`。
-- **特徵涵蓋率（Coverage）規則**：五大檔案皆有預期簽章清單。在該檔案的所有預期簽章全部註冊前，
-  `IsPristine` 一律回傳 `PristineState.Unknown`，絕不因註冊表為空而宣稱原版。
-  CLI `status` 必須顯示 `unknown` 並發出特徵庫未就緒之警示。
-- **過期備份重擷取之安全守護**：判定某檔案是否 pristine 時，必須檢查全部模組的所有修補特徵。
-  若現行檔案與備份不同，「重新擷取為基準並將舊備份更名為 `.superseded`」之機制**僅在特徵庫 Coverage 100% 完整時才允許執行**。
-  特徵庫不完整時必須拒絕重新擷取並大聲警告，防止將已修補檔案誤判為更新而覆蓋掉唯一的乾淨原版備份。
-- **唯讀狀態查詢保證**：`status` 查詢必須 100% 無副作用（零寫入）。嚴格禁止建立 `backup/` 目錄、禁止擷取基準、禁止自動儲存設定檔。讀取備份與建立基準必須走不同 API。
-- **舊備份嚴禁隱式遷移**：前身專案目錄包含陳舊與被修改的檔案，嚴禁於建構子或查詢中自動遷移。
-  舊備份遷移必須為明確的選擇性操作，且遷移前必須驗證特徵完整性與 Pristine 狀態，非原版者拒絕遷移。
-- 若檔案已被修改或無法證明為原版，且沒有備份 → **拒絕修補與建立基準**，要求使用者先用 Steam 驗證檔案完整性。
+取代備份的機制是**精確反轉**：每個修補都必須能從被修補後的位元組單獨反轉回原版，
+不依賴任何外部副本。反轉所需的原版常數（原始指令位元組、`[Resolutions]` 的原廠四筆、
+Tweaks 的原廠預設值、語言包安裝前的字型範圍）全部寫在程式碼裡。
 
-### 2.2 一律從 pristine 重建，一次寫入
-每個目標檔案在套用時都從 `.orig` 完整重建，依序疊加所有啟用的修改，最後只寫入一次：
+- **無法辨識就拒絕**：若某檔案的狀態既不是原版、也不是本工具產生的已知組合
+  （例如被第三方工具改過），一律**拒絕操作**並告知使用者執行 Steam 驗證檔案完整性。
+  絕不猜測、絕不「盡力而為」地寫入。
+- **狀態查詢必須 100% 無副作用**：`status` 與 `verify` 零寫入，不建立任何目錄或檔案。
+- **簽章註冊表仍然保留**，但用途從「判定能否安全備份」改為「判定目前套用了什麼、
+  以及能否安全反轉」。每個修補都必須註冊偵測簽章，漏註冊會讓正規化漏掉該修補。
+
+### 2.2 正規化後疊加，一次寫入
+沒有 pristine 副本，所以每次套用都先把現行檔案**正規化**回原版狀態，再疊加設定要的修補：
 
 ```
-Celtic kings.exe   : pristine → LAA → SetVideoMode → HiRes(.ckhr) → ResWriteback → KeyMap → write
-Celtic kings Launcher.exe : pristine → (DisplaySuppress ⊻ ModeTable) → write
-data.pak           : pristine → Trainer tweaks → Perf [Resolutions] append → write
-local.pak          : pristine → LanguagePack install → write
-vxSettings.ini     : 單一寫入者，同時擁有 Resolution / 動畫開關 / [Language] Default
+讀取現行檔案 → 反轉所有已偵測到的本工具修補（正規化）→ 依序疊加啟用的修補 → 只寫入一次
 ```
 
-> **注意**：效能前身專案的 `AGENTS.md` 曾規定 `addResolutions` 與 `writeLargeAddressAware`
-> **不得**從 pristine 重建，必須直接改動態檔。那條規則的成因是它看不見另外兩個工具的修改，
-> 從 pristine 重建會把別人的成果洗掉。**整合後這個成因消失了**，因為現在只有一條管線、
-> 一次寫入、所有模組都在同一次重建裡疊加。所以本專案**採用 pristine 重建**。
-> 不要因為讀到舊筆記就把它改回直接改動態檔——那會讓修補失去冪等性。
+| 目標檔案 | 疊加順序 |
+|---|---|
+| `Celtic kings.exe` | LAA → SetVideoMode → HiRes(.ckhr) → ResWriteback → KeyMap |
+| `Celtic kings Launcher.exe` | DisplaySuppress ⊻ ModeTable（互斥） |
+| `data.pak` | Trainer tweaks → Perf `[Resolutions]` |
+| `local.pak` | LanguagePack |
+| `vxSettings.ini` | Resolution / 動畫開關 / `[Language] Default`（單一寫入者） |
 
-### 2.3 冪等與可逆
+這個設計同時解決了三件事：冪等（套兩次等於套一次）、改設定不累積
+（1920 改成 1600 是取代而不是再附加一筆）、關閉選項能真正還原位元組。
+
+> **歷史註記**：效能前身專案的 `AGENTS.md` 曾規定 `addResolutions` 與
+> `writeLargeAddressAware` 不得從 pristine 重建。那條規則的成因是它看不見另外兩個工具的
+> 修改。整合後只剩一條管線，成因消失。現在連 pristine 副本都不保留，改用正規化——
+> 效果相同但不需要任何遊戲檔案副本。
+
+### 2.3 冪等與可逆（無備份下的驗收標準）
 - 每個修改都必須冪等：套用兩次與套用一次結果完全相同。
-- 每個修改都必須有乾淨的 off 路徑，關閉後檔案位元組級還原。
-- 「全部關閉」的結果必須與 `.orig` 逐位元組相同。SelfTest 必須驗證這一點。
+- 每個修改都必須能精確反轉：套用後再反轉，必須與套用前逐位元組相同。
+- 「全部關閉」等同於完整反轉，結果必須與原版逐位元組相同。
+- SelfTest 必須對每個修補獨立驗證「套用→反轉→原位元組」，這是取代備份的唯一保障，
+  任何一項失守就等於使用者只能靠 Steam 還原。
+- **反轉不了的修補不准進入本專案。** 若某功能無法從結果反推原狀（例如破壞性改寫），
+  必須改設計，或明確標示為「僅能以 Steam 驗證檔案完整性還原」並在 UI 上告知使用者。
 
 ### 2.4 解析度存寬高，不存索引
 `vxSettings.ini` 的 `Resolution` 是 `data.pak` 內 `VXCONST.INI` `[Resolutions]` 清單的**索引**。

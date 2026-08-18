@@ -83,13 +83,3 @@ public static class ResolutionWriteback
         }
     }
 }
-
-/// <summary>
-/// BackupManager 之 res_writeback 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class ResolutionWritebackSignature : IPatchSignature
-{
-    public string PatchId => "res_writeback";
-    public GameFile AppliesTo => GameFile.Exe;
-    public bool IsApplied(byte[] fileBytes) => ResolutionWriteback.IsApplied(fileBytes);
-}

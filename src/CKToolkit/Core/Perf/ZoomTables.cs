@@ -135,6 +135,42 @@ public static class ZoomTables
     }
 
     /// <summary>
+    /// 檢查給定之 Exe 是否為原版 ZoomMap 掃描線表狀態。
+    /// </summary>
+    public static bool IsOriginal(byte[] exeBytes)
+    {
+        try
+        {
+            var pe = PeFile.Parse(exeBytes);
+            return IsOriginal(pe);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool IsOriginal(PeFile pe)
+    {
+        if (pe.FindSection(SectionName) >= 0) return false;
+
+        foreach (var site in Sites)
+        {
+            if (!pe.TryVaToFileOffset(site.Va, out int off)) return false;
+            if (pe.ReadUInt32(off) != site.Orig) return false;
+        }
+
+        foreach (var rw in Rewrites)
+        {
+            if (!pe.TryVaToFileOffset(rw.Va, out int off)) return false;
+            var cur = pe.ReadBytes(off, rw.Orig.Length);
+            if (!cur.AsSpan().SequenceEqual(rw.Orig)) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// 套用或還原 HiRes ZoomMap 掃描線表搬遷修補。
     /// </summary>
     /// <param name="pe">PE 檔案物件</param>
@@ -153,7 +189,7 @@ public static class ZoomTables
         {
             if (secIndex >= 0 || IsApplied(pe))
             {
-                // 還原立即數與重寫指令為原版
+                // 1. 還原立即數與重寫指令為原版
                 foreach (var site in Sites)
                 {
                     pe.WriteUInt32AtVa(site.Va, site.Orig);
@@ -161,6 +197,12 @@ public static class ZoomTables
                 foreach (var rw in Rewrites)
                 {
                     pe.WriteBytesAtVa(rw.Va, rw.Orig);
+                }
+
+                // 2. 移除附加之 .ckhr 節區，還原節區數量與 SizeOfImage
+                if (secIndex >= 0)
+                {
+                    pe.RemoveSection(SectionName);
                 }
             }
             return;
@@ -215,14 +257,4 @@ public static class ZoomTables
         Apply(pe, enable, maxDimension);
         exeBytes = pe.ToBytes();
     }
-}
-
-/// <summary>
-/// BackupManager 之 hires_zoom 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class ZoomTablesSignature : IPatchSignature
-{
-    public string PatchId => "hires_zoom";
-    public GameFile AppliesTo => GameFile.Exe;
-    public bool IsApplied(byte[] fileBytes) => ZoomTables.IsApplied(fileBytes);
 }

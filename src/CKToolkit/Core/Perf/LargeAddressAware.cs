@@ -70,13 +70,3 @@ public static class LargeAddressAware
         BitConverter.TryWriteBytes(exeBytes.AsSpan(characteristicsOffset, 2), ch);
     }
 }
-
-/// <summary>
-/// BackupManager 之 LAA 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class LargeAddressAwareSignature : IPatchSignature
-{
-    public string PatchId => "laa";
-    public GameFile AppliesTo => GameFile.Exe;
-    public bool IsApplied(byte[] fileBytes) => LargeAddressAware.IsApplied(fileBytes);
-}

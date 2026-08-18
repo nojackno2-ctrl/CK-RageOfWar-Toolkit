@@ -75,16 +75,22 @@ public sealed class PerfModule : IPatchModule
 
     /// <summary>
     /// 對 data.pak 內的 VXCONST.INI 附加自訂解析度清單。
+    /// 嚴格確保 [Resolutions] 不包含寬度大於當前 ZoomMap 表格容量之條目。
     /// </summary>
     public void ApplyDataPak(HmmPak pak, ToolkitConfig config)
     {
+        int zoomMapCapacity = config.Perf.Hires >= 1600 ? config.Perf.Hires : 1600;
+
+        // 確保 [Resolutions] 不包含寬度大於當前 ZoomMap 容量之條目
+        Resolutions.EnforceCapacity(pak, zoomMapCapacity);
+
         if (config.Perf.AddRes is null || config.Perf.AddRes.Count == 0) return;
 
         var wanted = new List<(int Width, int Height)>();
         foreach (string resStr in config.Perf.AddRes)
         {
             var (w, h) = ParseDimensions(resStr, 0, 0);
-            if (w > 0 && h > 0)
+            if (w > 0 && h > 0 && w <= zoomMapCapacity)
             {
                 wanted.Add((w, h));
             }
@@ -92,7 +98,7 @@ public sealed class PerfModule : IPatchModule
 
         if (wanted.Count > 0)
         {
-            Resolutions.AppendResolutions(pak, wanted);
+            Resolutions.AppendResolutions(pak, wanted, zoomMapCapacity);
         }
     }
 
@@ -107,30 +113,12 @@ public sealed class PerfModule : IPatchModule
     /// <summary>
     /// 對 vxSettings.ini 套用動畫開關與 Resolution 索引。
     /// </summary>
-    public void ApplyVxSettings(IniFile ini, ToolkitConfig config, IReadOnlyList<string>? availableResolutions)
+    public void ApplyVxSettings(IniFile ini, ToolkitConfig config, IReadOnlyList<string>? availableResolutions, List<string>? warnings = null)
     {
-        VxSettingsPatch.Apply(ini, config, availableResolutions);
+        VxSettingsPatch.Apply(ini, config, availableResolutions, warnings);
     }
 
-    /// <summary>
-    /// 向 BackupManager 註冊 Perf 模組所屬之全部 8 個修補特徵偵測器。
-    /// </summary>
-    public static void RegisterSignatures(BackupManager backupManager)
-    {
-        backupManager.RegisterSignature(new LargeAddressAwareSignature());
-        backupManager.RegisterSignature(new VideoModeSignature());
-        backupManager.RegisterSignature(new ZoomTablesSignature());
-        backupManager.RegisterSignature(new ResolutionWritebackSignature());
-
-        backupManager.RegisterSignature(new LauncherDisplaySignature());
-        backupManager.RegisterSignature(new LauncherModeTableSignature());
-
-        backupManager.RegisterSignature(new ResolutionsAppendSignature());
-
-        backupManager.RegisterSignature(new VxSettingsCustomSignature());
-    }
-
-    private static (int Width, int Height) ParseDimensions(string text, int defaultW, int defaultH)
+    public static (int Width, int Height) ParseDimensions(string text, int defaultW, int defaultH)
     {
         if (string.IsNullOrWhiteSpace(text)) return (defaultW, defaultH);
 

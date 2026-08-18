@@ -67,13 +67,3 @@ public static class VideoModePatch
         }
     }
 }
-
-/// <summary>
-/// BackupManager 之 video_fix 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class VideoModeSignature : IPatchSignature
-{
-    public string PatchId => "video_fix";
-    public GameFile AppliesTo => GameFile.Exe;
-    public bool IsApplied(byte[] fileBytes) => VideoModePatch.IsApplied(fileBytes);
-}

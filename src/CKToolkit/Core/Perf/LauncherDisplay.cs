@@ -66,6 +66,20 @@ public static class LauncherDisplay
     }
 
     /// <summary>
+    /// 檢查給定之 Launcher 位元組是否為原版顯示模式切換呼叫。
+    /// </summary>
+    public static bool IsOriginal(byte[] launcherBytes)
+    {
+        foreach (var site in Sites)
+        {
+            if (!TryGetFileOffset(site.Rva, site.Orig.Length, out int off)) return false;
+            if (launcherBytes.Length < off + site.Orig.Length) return false;
+            if (!launcherBytes.AsSpan(off, site.Orig.Length).SequenceEqual(site.Orig)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// 套用或還原顯示模式切換抑制修補。
     /// </summary>
     public static void Apply(ref byte[] launcherBytes, bool enable)
@@ -79,14 +93,4 @@ public static class LauncherDisplay
             bytesToWrite.CopyTo(launcherBytes.AsSpan(off, bytesToWrite.Length));
         }
     }
-}
-
-/// <summary>
-/// BackupManager 之 launcher_display 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class LauncherDisplaySignature : IPatchSignature
-{
-    public string PatchId => "launcher_display";
-    public GameFile AppliesTo => GameFile.Launcher;
-    public bool IsApplied(byte[] fileBytes) => LauncherDisplay.IsApplied(fileBytes);
 }

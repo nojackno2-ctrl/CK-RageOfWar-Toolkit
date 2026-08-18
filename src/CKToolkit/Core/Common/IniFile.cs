@@ -212,14 +212,22 @@ public sealed class IniFile
         string sec = (section ?? string.Empty).Trim();
         string k = key.Trim();
 
-        var existing = _lines.FirstOrDefault(l => l.Type == LineType.KeyValue &&
-                                                  string.Equals(l.Section, sec, StringComparison.OrdinalIgnoreCase) &&
-                                                  string.Equals(l.Key, k, StringComparison.OrdinalIgnoreCase));
+        var matches = _lines.Where(l => l.Type == LineType.KeyValue &&
+                                        string.Equals(l.Section, sec, StringComparison.OrdinalIgnoreCase) &&
+                                        string.Equals(l.Key, k, StringComparison.OrdinalIgnoreCase))
+                            .ToList();
 
-        if (existing is not null)
+        if (matches.Count > 0)
         {
-            existing.Value = value;
-            existing.RawText = $"{existing.KeyPrefix}{existing.Key}{existing.EqualsSeparator}{value}{existing.LineEnding}";
+            var first = matches[0];
+            first.Value = value;
+            first.RawText = $"{first.KeyPrefix}{first.Key}{first.EqualsSeparator}{value}{first.LineEnding}";
+
+            // 若有任何多餘的重複鍵值，予以清除
+            for (int i = 1; i < matches.Count; i++)
+            {
+                _lines.Remove(matches[i]);
+            }
             return;
         }
 
@@ -238,11 +246,32 @@ public sealed class IniFile
 
     private void InsertKeyIntoSection(string section, string key, string value)
     {
+        string separator = "=";
+        var sampleLine = _lines.FirstOrDefault(l => l.Type == LineType.KeyValue && string.Equals(l.Section, section, StringComparison.OrdinalIgnoreCase))
+                      ?? _lines.FirstOrDefault(l => l.Type == LineType.KeyValue);
+        if (sampleLine is not null)
+        {
+            separator = sampleLine.EqualsSeparator;
+        }
+
         if (section.Length == 0)
         {
-            // 頂層無節區：插入在第一個 SectionHeader 之前，或文件尾端
+            // 頂層無節區：插入在頂層最後一個 KeyValue 之後（若無則在第一個 SectionHeader 之前或文件尾端）
             int firstHeaderIndex = _lines.FindIndex(l => l.Type == LineType.SectionHeader);
-            int insertIndex = firstHeaderIndex >= 0 ? firstHeaderIndex : _lines.Count;
+            int topLevelEnd = firstHeaderIndex >= 0 ? firstHeaderIndex : _lines.Count;
+
+            int lastKeyValIndex = -1;
+            for (int i = topLevelEnd - 1; i >= 0; i--)
+            {
+                if (_lines[i].Type == LineType.KeyValue)
+                {
+                    lastKeyValIndex = i;
+                    break;
+                }
+            }
+
+            int insertIndex = lastKeyValIndex >= 0 ? lastKeyValIndex + 1 : topLevelEnd;
+            string lineEnding = sampleLine?.LineEnding ?? _defaultLineEnding;
 
             var newLine = new IniLine
             {
@@ -250,10 +279,10 @@ public sealed class IniFile
                 Section = string.Empty,
                 Key = key,
                 Value = value,
-                LineEnding = _defaultLineEnding,
-                KeyPrefix = string.Empty,
-                EqualsSeparator = " = ",
-                RawText = $"{key} = {value}{_defaultLineEnding}"
+                LineEnding = lineEnding,
+                KeyPrefix = sampleLine?.KeyPrefix ?? string.Empty,
+                EqualsSeparator = separator,
+                RawText = $"{sampleLine?.KeyPrefix ?? string.Empty}{key}{separator}{value}{lineEnding}"
             };
 
             _lines.Insert(insertIndex, newLine);
@@ -267,7 +296,21 @@ public sealed class IniFile
         {
             // 找到該節區的結束位置（下一個 SectionHeader 之前）
             int nextHeaderIndex = _lines.FindIndex(headerIndex + 1, l => l.Type == LineType.SectionHeader);
-            int insertPos = nextHeaderIndex >= 0 ? nextHeaderIndex : _lines.Count;
+            int sectionEnd = nextHeaderIndex >= 0 ? nextHeaderIndex : _lines.Count;
+
+            // 尋找此節區內最後一個 KeyValue 行的位置（在空白行與註解之前插入）
+            int lastKeyValIndex = -1;
+            for (int i = sectionEnd - 1; i > headerIndex; i--)
+            {
+                if (_lines[i].Type == LineType.KeyValue)
+                {
+                    lastKeyValIndex = i;
+                    break;
+                }
+            }
+
+            int insertPos = lastKeyValIndex >= 0 ? lastKeyValIndex + 1 : headerIndex + 1;
+            string lineEnding = sampleLine?.LineEnding ?? _defaultLineEnding;
 
             var newLine = new IniLine
             {
@@ -275,10 +318,10 @@ public sealed class IniFile
                 Section = section,
                 Key = key,
                 Value = value,
-                LineEnding = _defaultLineEnding,
-                KeyPrefix = string.Empty,
-                EqualsSeparator = " = ",
-                RawText = $"{key} = {value}{_defaultLineEnding}"
+                LineEnding = lineEnding,
+                KeyPrefix = sampleLine?.KeyPrefix ?? string.Empty,
+                EqualsSeparator = separator,
+                RawText = $"{sampleLine?.KeyPrefix ?? string.Empty}{key}{separator}{value}{lineEnding}"
             };
 
             _lines.Insert(insertPos, newLine);
@@ -307,8 +350,8 @@ public sealed class IniFile
                 Value = value,
                 LineEnding = _defaultLineEnding,
                 KeyPrefix = string.Empty,
-                EqualsSeparator = " = ",
-                RawText = $"{key} = {value}{_defaultLineEnding}"
+                EqualsSeparator = separator,
+                RawText = $"{key}{separator}{value}{_defaultLineEnding}"
             });
         }
     }

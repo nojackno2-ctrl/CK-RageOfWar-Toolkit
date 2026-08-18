@@ -81,71 +81,57 @@ src/CKToolkit.SelfTest/   主控台專案，dotnet run 即跑
 
 ---
 
-## 3. 統一備份層 `BackupManager`
+## 3. 精確反轉與正規化層 `PatchState` (Phase 2B)
 
-備份目錄：`<exe 所在目錄>/backup/`（不是遊戲目錄——遊戲目錄會被 Steam 驗證清掉）。
+**設計核心**：本工具**不保存遊戲檔案備份複本**、不建立 `backup/` 目錄。
+所有修補操作均具備逐位元組之精確逆向工程反轉邏輯，依據現行檔案位元組自身判定修補狀態並可將其正規化（Normalise）回原廠原版（Vanilla）。
 
 ```csharp
 public enum GameFile { Exe, Launcher, DataPak, LocalPak, VxSettings }
-public enum PristineState { Unknown, Pristine, Patched }
+public enum FileStateKind { Vanilla, PatchedByUs, Unrecognised }
 
-// ★ 唯讀查詢 API（嚴格無副作用：不建目錄、不抓取備份、不寫設定）
-bool            HasBackup(GameFile f);
-PristineState   IsPristine(GameFile f, byte[] fileBytes);
-PristineState   GetFilePristineState(string gameDir, GameFile f);
-bool            IsCoverageComplete(GameFile f);
-Result<byte[]>  ReadExistingBackup(GameFile f); // 尚無備份時回傳 Fail，絕不自動擷取
+public sealed class FileState
+{
+    public FileStateKind Kind { get; }
+    public IReadOnlyList<string> AppliedPatches { get; }
+    public bool IsVanilla => Kind == FileStateKind.Vanilla;
+    public bool IsPatched => Kind == FileStateKind.PatchedByUs;
+    public bool IsUnrecognised => Kind == FileStateKind.Unrecognised;
+}
 
-// ★ 基準建立與套用準備路徑（僅限套用管線與明確指令）
-Result          EnsureBackup(GameFile f, string gameDir);
-Result<byte[]>  ReadPristine(GameFile f, string gameDir); // 有備份直接讀取，無備份則驗證並擷取
-Result<List<string>> RestoreAll(string gameDir);
+public static class PatchState
+{
+    // ★ 唯讀查詢 API（嚴格無副作用：零寫入、不建目錄、不抓檔案）
+    public static FileState Inspect(GameFile file, byte[] liveBytes);
 
-// ★ 舊備份候選掃描與明確遷移（絕不自動/隱式遷移）
-IReadOnlyList<LegacyBackupCandidate> FindLegacyBackupCandidates();
-Result MigrateLegacyBackup(LegacyBackupCandidate candidate, bool overwrite = false);
+    // ★ 精確正規化反轉路徑（將現行檔案位元組精確反轉回原廠原版 Vanilla）
+    public static Result<byte[]> Normalise(GameFile file, byte[] liveBytes);
+}
 ```
 
-### 3.1 特徵涵蓋率（Coverage）與 Pristine 判定紀律
-- 各目標檔案預期之修補簽章清單：
-  - `Exe`：`laa`、`video_fix`、`hires_zoom`、`res_writeback`、`key_map`（5 項）。
-  - `Launcher`：`launcher_display`、`launcher_mode_table`（2 項）。
-  - `DataPak`：`resolutions_append`、`trainer_marker`（2 項）。
-  - `LocalPak`：`langpack_installed`（1 項）。
-  - `VxSettings`：`vxsettings_custom`（1 項）。
-- **Coverage 完整性**：唯有當某檔案的所有預期簽章皆已註冊至 `BackupManager`，`IsCoverageComplete` 才為 true。
-- **未就緒時一律回傳 Unknown**：在 Coverage 未完整前，即使檔案位元組未命中任何已註冊簽章，`IsPristine` 也必須回傳 `PristineState.Unknown`，絕不以空註冊表判定為原版。CLI `status` 必須顯示 `unknown` 並發出特徵庫未就緒之警示。
+### 3.1 檔案修補狀態與嚴格保護紀律
+- **Vanilla（原版）**：檔案位元組與原廠出廠狀態完全一致。
+- **PatchedByUs（已由本工具修補）**：檔案僅包含本工具已知且可精確反轉之修補特徵（回傳修補 ID 清單）。
+- **Unrecognised（無法辨識）**：檔案被第三方工具修改、損毀或不符合已知特徵。**嚴格拒絕寫入或套用**，終止流程並要求使用者執行 Steam「驗證遊戲檔案完整性」。
 
-### 3.2 備份過期重擷取之安全守護
-- 若現行檔案與備份不同：
-  - **若 Coverage 不完整**：**嚴格拒絕重新擷取基準**，並發出強烈警告以防將已修改檔案誤判為更新而覆蓋掉唯一的原版備份。
-  - **若 Coverage 完整且檔案為 Pristine**：說明發生了 Steam 遊戲更新，將舊備份更名為 `.superseded` 後重新擷取基準。
-
-### 3.3 唯讀狀態查詢保證
-- `status` 指令與檢視路徑必須為 100% 唯讀：不得建立 `backup/` 目錄、不得抓取遊戲檔案為備份、不得自動儲存設定檔。
-
-### 3.4 舊備份明確遷移
-- 舊專案目錄可能包含陳舊或被修改的檔案，**嚴禁在建構子或查詢中隱式/自動遷移**。
-- 提供 `FindLegacyBackupCandidates()` 掃描候選檔案（路徑、大小、修改時間），並由呼叫端明確發起 `MigrateLegacyBackup()`，且遷移前必須驗證特徵完整性與 Pristine 狀態。
+### 3.2 唯讀查詢保證
+- `status`、`verify` 指令與檢視路徑為 100% 唯讀：不得建立任何目錄、不得寫入任何檔案。
 
 ---
 
-## 4. 統一套用管線 `PatchPipeline.ApplyAll(ToolkitConfig)`
+## 4. 統一套用管線 `PatchPipeline`
 
-嚴格依序，每個檔案從 pristine 重建後只寫入一次：
+嚴格依序：`Celtic kings.exe` -> `Celtic kings Launcher.exe` -> `data.pak` -> `local.pak` -> `vxSettings.ini`。
 
-1. `EnsureBackups()`
-2. **Exe** = pristine -> LAA -> SetVideoMode -> HiRes ZoomMap -> ResolutionWriteback -> KeyMap -> 寫入
-3. **Launcher** = pristine -> (DisplaySuppress 互斥 ModeTable) -> 寫入
-4. **data.pak** = pristine -> Trainer tweaks -> Perf `[Resolutions]` 附加 -> 寫入
-5. **local.pak** = pristine -> 語言包安裝 -> 寫入
-6. **vxSettings.ini** = pristine 為基底 -> Resolution 索引（由步驟 4 之後的清單重新查表）
-   -> `NoObjectAnimations` / `NoWaterAnimation` -> `[Language] Default` -> 寫入
+每個檔案處理流程：
+1. **事前檢查**：先讀取並檢查所有目標檔案是否均存在且可辨識（若有任何檔案無法辨識，嚴格零寫入並退出）。
+2. **正規化**：`live bytes -> PatchState.Normalise(file, liveBytes) -> vanilla bytes`。
+3. **疊加修改**：在 vanilla bytes 上依序疊加目前已啟用之修補功能。
+4. **變更檢查與原子寫入**：
+   - 若最終位元組與現行檔案 `liveBytes` **完全相同**，**嚴格略過寫入**（如未安裝語言包時絕不重寫 4.8MB 的 `local.pak`）。
+   - 若內容有變更，一律「先寫 `.cktmp` 再取代」，中途失敗不留半殘檔案。
 
-寫檔一律「先寫 `.cktmp` 再取代」，中途失敗不留半殘檔案。
-遊戲正在執行導致寫入失敗時，回報明確訊息要求關閉遊戲。
-
-`RestoreAll()` 的結果必須與五個 `.orig` 逐位元組相同。
+`RestoreAll()` 將所有目標檔案透過 `PatchState.Normalise` 精確還原為逐位元組 Vanilla。
 
 ---
 
@@ -334,7 +320,7 @@ CKToolkit.exe --game <dir>                      # 全域旗標，覆寫遊戲目
 { "ok": true, "command": "status", "data": {}, "warnings": [], "errors": [] }
 ```
 
-- 退出碼：0 成功、1 一般失敗、2 參數錯誤、3 找不到遊戲、4 備份缺失需 Steam 驗證、5 檔案被佔用。
+- 退出碼：0 成功、1 一般失敗、2 參數錯誤、3 找不到遊戲、4 檔案無法辨識需 Steam 驗證、5 檔案被佔用。
 - **永不互動**：任何需要使用者決定的情況一律以錯誤回報，不得停下來等輸入。
 - `--json` 的結構是對 AI 代理的公開契約，變更要視為破壞性變更。
 
@@ -344,18 +330,20 @@ CKToolkit.exe --game <dir>                      # 全域旗標，覆寫遊戲目
 
 沿用修改器 SelfTest 的風格（主控台、逐項印出、統計失敗數、非零退出碼）。必測：
 
-1. 全部關閉套用後，五個目標檔案與 `.orig` 逐位元組相同。
-2. 套用兩次與套用一次結果相同（冪等）。
-3. `IsPristine` 對「只被另一模組改過」的檔案回傳 false（跨模組偵測，這是整合的核心迴歸）。
-4. `data.pak` 同時含修改器 tweaks 與 Perf 附加解析度時，兩者都在。
-5. `Resolution` 索引在 `data.pak` 重建後被正確重算。
-6. 啟動器兩種桌面模式互斥。
-7. KeyMap 驗證表對得上原版鍵碼；14 個作弊項全部有唯一按鍵。
-8. 語言包載入：內建 zh-TW 可載入；缺欄位的 `pack.json` 被拒絕並給明確訊息。
-9. 字型光柵化字元集由 `font.ranges` 決定（餵一個假語言包，驗證產出的字形數）。
-10. `LocXml` 自閉合標籤不會污染鍵值。
-11. CLI 每個指令的 `--json` 輸出符合封套結構；每個錯誤路徑回傳正確退出碼。
-12. i18n：zh-TW 與 en 的字串鍵完全一致，沒有遺漏或多餘。
+1. 每個修補個別精確反轉：Vanilla -> Apply -> Reverse -> 與原版逐位元組相同。
+2. 所有修補複合套用後執行 Normalise 正規化，五個目標檔案與原版逐位元組相同。
+3. 套用兩次與套用一次結果相同（冪等）。
+4. 變更設定重新套用（如 1920x1080 改為 1600x900）時，`data.pak` 只留下 1 筆非原廠自訂條目，非累積。
+5. `PatchState.Inspect` 對原版回傳 Vanilla、對修補檔案回傳 PatchedByUs 與修補 ID、對未知修改回傳 Unrecognised。
+6. 檔案包含 Unrecognised 修改時，`ApplyAll` 拒絕寫入且零寫入。
+7. 檔案內容若未變更，管線嚴格略過寫入（不重寫 4.8MB 的 `local.pak`）。
+8. 啟動器兩種桌面模式互斥。
+9. KeyMap 驗證表對得上原版鍵碼；14 個作弊項全部有唯一按鍵。
+10. 語言包載入：內建 zh-TW 可載入；缺欄位的 `pack.json` 被拒絕並給明確訊息。
+11. 字型光柵化字元集由 `font.ranges` 決定（餵一個假語言包，驗證產出的字形數）。
+12. `LocXml` 自閉合標籤不會污染鍵值。
+13. CLI 每個指令的 `--json` 輸出符合封套結構；每個錯誤路徑回傳正確退出碼。
+14. i18n：zh-TW 與 en 的字串鍵完全一致，沒有遺漏或多餘。
 
 ---
 
@@ -365,8 +353,8 @@ CKToolkit.exe --game <dir>                      # 全域旗標，覆寫遊戲目
 - [ ] 語言：安裝 / 移除 / 狀態 / 匯出範本 4 條路徑通，內建 zh-TW 與前身輸出的 `local.pak` 一致
 - [ ] 修改器：14 作弊 + 全部 Tweaks + 兩種按鍵配置，產生的 VS 腳本與前身逐字相同
 - [ ] 分析器：能對執行中的遊戲取樣並產出分段報告
-- [ ] 統一備份：跨模組 pristine 偵測正確，還原後逐位元組還原
+- [x] 精確反轉與正規化：完全不保存備份複本，逐位元組精確反轉，Unrecognised 安全防護
 - [ ] 雙語：兩份字串表鍵一致，切換即時生效
 - [ ] CLI：全部指令有 `--json`，無參數開 GUI
-- [ ] SelfTest 全綠
+- [x] SelfTest 全綠 (Phase 1, Phase 2, Phase 2B)
 - [ ] README 中英雙語，含安裝 / 使用 / 免責聲明

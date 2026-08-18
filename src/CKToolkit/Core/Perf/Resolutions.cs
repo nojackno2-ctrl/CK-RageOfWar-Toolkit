@@ -51,14 +51,8 @@ public static partial class Resolutions
         (1600, 1200)
     ];
 
-    [GeneratedRegex(@"(?im)^\s*Res(\d+)_([xy])\s*=\s*(\d+)", RegexOptions.Compiled)]
-    private static partial Regex ResLineRegex();
-
-    [GeneratedRegex(@"(?im)^\[Resolutions\][^\[]*", RegexOptions.Compiled)]
-    private static partial Regex ResolutionsSectionRegex();
-
-    [GeneratedRegex(@"(?im)^\s*Res\d+_y\s*=\s*\d+[^\r\n]*", RegexOptions.Compiled)]
-    private static partial Regex LastResYLineRegex();
+    [GeneratedRegex(@"^Res(\d+)_([xy])$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    private static partial Regex ResKeyRegex();
 
     /// <summary>
     /// 從 pak 檔案讀取 VXCONST.INI 之 [Resolutions] 清單。
@@ -74,22 +68,22 @@ public static partial class Resolutions
 
     public static List<ResolutionEntry> ParseResolutionsFromText(string text)
     {
-        var match = ResolutionsSectionRegex().Match(text);
-        if (!match.Success) return [];
-
-        string body = match.Value;
+        var ini = IniFile.FromText(text);
+        var entries = ini.GetSectionEntries("Resolutions");
         var xs = new Dictionary<int, int>();
         var ys = new Dictionary<int, int>();
 
-        var lineMatches = ResLineRegex().Matches(body);
-        foreach (Match m in lineMatches)
+        foreach (var kv in entries)
         {
-            int idx = int.Parse(m.Groups[1].Value);
-            string axis = m.Groups[2].Value.ToLowerInvariant();
-            int val = int.Parse(m.Groups[3].Value);
+            var m = ResKeyRegex().Match(kv.Key);
+            if (m.Success && int.TryParse(kv.Value, out int val))
+            {
+                int idx = int.Parse(m.Groups[1].Value);
+                string axis = m.Groups[2].Value.ToLowerInvariant();
 
-            if (axis == "x") xs[idx] = val;
-            else if (axis == "y") ys[idx] = val;
+                if (axis == "x") xs[idx] = val;
+                else if (axis == "y") ys[idx] = val;
+            }
         }
 
         var result = new List<ResolutionEntry>();
@@ -107,14 +101,18 @@ public static partial class Resolutions
 
     /// <summary>
     /// 向 pak 內之 VXCONST.INI 附加自訂解析度。
-    /// 具備冪等性：已存在的解析度會自動略過。
+    /// 具備冪等性：已存在的解析度會自動略過；超出 ZoomMap 表格容量者嚴格略過。
     /// </summary>
-    public static List<ResolutionEntry> AppendResolutions(HmmPak pak, IEnumerable<(int Width, int Height)> wanted)
+    public static List<ResolutionEntry> AppendResolutions(
+        HmmPak pak,
+        IEnumerable<(int Width, int Height)> wanted,
+        int maxCapacity = int.MaxValue)
     {
         string? iniPath = FindConstIniEntryName(pak);
         if (iniPath is null) return [];
 
         string text = pak.ReadText(iniPath);
+        var ini = IniFile.FromText(text);
         var existing = ParseResolutionsFromText(text);
         var existingPairs = existing.Select(e => (e.Width, e.Height)).ToHashSet();
 
@@ -122,46 +120,52 @@ public static partial class Resolutions
         int nextPos = existing.Count;
 
         var added = new List<ResolutionEntry>();
-        var linesToAppend = new List<string>();
 
         foreach (var (w, h) in wanted)
         {
             if (w <= 0 || h <= 0) continue;
+            if (w > maxCapacity) continue;
             if (existingPairs.Contains((w, h))) continue;
 
-            linesToAppend.Add($"Res{nextIdx}_x = {w}");
-            linesToAppend.Add($"Res{nextIdx}_y = {h}");
+            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_x", w.ToString());
+            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_y", h.ToString());
 
             added.Add(new ResolutionEntry(nextIdx, w, h, nextPos++));
             existingPairs.Add((w, h));
             nextIdx++;
         }
 
-        if (added.Count == 0) return [];
-
-        var secMatch = ResolutionsSectionRegex().Match(text);
-        if (!secMatch.Success) return [];
-
-        string sectionText = secMatch.Value;
-        var yMatches = LastResYLineRegex().Matches(sectionText);
-        int insertOffsetInSection;
-
-        if (yMatches.Count > 0)
+        if (added.Count > 0)
         {
-            var lastY = yMatches[^1];
-            insertOffsetInSection = lastY.Index + lastY.Length;
-        }
-        else
-        {
-            insertOffsetInSection = sectionText.Length;
+            pak.WriteText(iniPath, ini.ToText());
         }
 
-        string insertBlock = "\r\n" + string.Join("\r\n", linesToAppend);
-        string updatedSection = sectionText.Insert(insertOffsetInSection, insertBlock);
-        string updatedFullText = text.Remove(secMatch.Index, secMatch.Length).Insert(secMatch.Index, updatedSection);
-
-        pak.WriteText(iniPath, updatedFullText);
         return added;
+    }
+
+    /// <summary>
+    /// 從 data.pak 之 [Resolutions] 清單中移除超過指定 ZoomMap 表格容量 (maxCapacity) 之解析度項目。
+    /// </summary>
+    public static List<ResolutionEntry> EnforceCapacity(HmmPak pak, int maxCapacity)
+    {
+        string? iniPath = FindConstIniEntryName(pak);
+        if (iniPath is null) return [];
+
+        string text = pak.ReadText(iniPath);
+        var existing = ParseResolutionsFromText(text);
+        var overCapacity = existing.Where(e => e.Width > maxCapacity).ToList();
+
+        if (overCapacity.Count == 0) return existing;
+
+        var ini = IniFile.FromText(text);
+        foreach (var entry in overCapacity)
+        {
+            ini.RemoveKey("Resolutions", $"Res{entry.Index}_x");
+            ini.RemoveKey("Resolutions", $"Res{entry.Index}_y");
+        }
+
+        pak.WriteText(iniPath, ini.ToText());
+        return ParseResolutionsFromText(ini.ToText());
     }
 
     /// <summary>
@@ -185,20 +189,81 @@ public static partial class Resolutions
     }
 
     /// <summary>
+    /// 檢查 data.pak 是否為原版 [Resolutions] 清單（僅包含原廠 4 筆解析度）。
+    /// </summary>
+    public static bool IsOriginal(HmmPak pak)
+    {
+        var list = ReadResolutions(pak);
+        if (list.Count != StockResolutions.Length) return false;
+
+        for (int i = 0; i < StockResolutions.Length; i++)
+        {
+            if (list[i].Width != StockResolutions[i].Width || list[i].Height != StockResolutions[i].Height)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// 檢查 data.pak 是否包含非原版之自訂附加解析度。
     /// </summary>
     public static bool IsCustomResolutionsApplied(HmmPak pak)
     {
         var list = ReadResolutions(pak);
-        if (list.Count != StockResolutions.Length) return true;
+        if (list.Count < StockResolutions.Length) return false;
 
         for (int i = 0; i < StockResolutions.Length; i++)
         {
             if (list[i].Width != StockResolutions[i].Width || list[i].Height != StockResolutions[i].Height)
-                return true;
+                return false;
         }
 
-        return false;
+        return list.Count > StockResolutions.Length;
+    }
+
+    /// <summary>
+    /// 將 data.pak 內 VXCONST.INI 之 [Resolutions] 清單就地外科手術式還原為原廠 4 筆，
+    /// 完整保留周圍所有空白行、節區終結符號、註解與原始 CRLF 換行格式。
+    /// </summary>
+    public static void RestoreStockResolutions(HmmPak pak)
+    {
+        string? iniPath = FindConstIniEntryName(pak);
+        if (iniPath is null) return;
+
+        string text = pak.ReadText(iniPath);
+        var ini = IniFile.FromText(text);
+
+        // 移除 [Resolutions] 節區內所有 Index > 4 或非原廠的 Res 條目
+        var entries = ini.GetSectionEntries("Resolutions");
+        foreach (var kv in entries)
+        {
+            var m = ResKeyRegex().Match(kv.Key);
+            if (m.Success)
+            {
+                int idx = int.Parse(m.Groups[1].Value);
+                if (idx > 4)
+                {
+                    ini.RemoveKey("Resolutions", kv.Key);
+                }
+            }
+            else
+            {
+                ini.RemoveKey("Resolutions", kv.Key);
+            }
+        }
+
+        // 確保原廠 4 筆項目之鍵值正確存在於 [Resolutions] 節區內
+        ini.SetValue("Resolutions", "Res1_x", "1024");
+        ini.SetValue("Resolutions", "Res1_y", "768");
+        ini.SetValue("Resolutions", "Res2_x", "1152");
+        ini.SetValue("Resolutions", "Res2_y", "864");
+        ini.SetValue("Resolutions", "Res3_x", "1280");
+        ini.SetValue("Resolutions", "Res3_y", "1024");
+        ini.SetValue("Resolutions", "Res4_x", "1600");
+        ini.SetValue("Resolutions", "Res4_y", "1200");
+
+        pak.WriteText(iniPath, ini.ToText());
     }
 
     private static string? FindConstIniEntryName(HmmPak pak)
@@ -206,27 +271,5 @@ public static partial class Resolutions
         if (pak.Contains("VXCONST.INI")) return "VXCONST.INI";
         if (pak.Contains(@"DATA\VXCONST.INI")) return @"DATA\VXCONST.INI";
         return pak.Names().FirstOrDefault(n => n.EndsWith("VXCONST.INI", StringComparison.OrdinalIgnoreCase));
-    }
-}
-
-/// <summary>
-/// BackupManager 之 resolutions_append 修補特徵偵測器 (SPEC.md §3 / §5)。
-/// </summary>
-public sealed class ResolutionsAppendSignature : IPatchSignature
-{
-    public string PatchId => "resolutions_append";
-    public GameFile AppliesTo => GameFile.DataPak;
-
-    public bool IsApplied(byte[] fileBytes)
-    {
-        try
-        {
-            var pak = HmmPak.FromBytes(fileBytes);
-            return Resolutions.IsCustomResolutionsApplied(pak);
-        }
-        catch
-        {
-            return false;
-        }
     }
 }
