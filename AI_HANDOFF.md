@@ -26,7 +26,7 @@
 
 ## 當前狀態
 
-**階段：骨架與規格已就緒，程式碼尚未開始。**
+**階段：Phase 1 已完成。骨架與 Core/Common 核心已就緒，等待 Phase 2 (Core/Perf)。**
 
 已完成：
 
@@ -39,16 +39,33 @@
   - `docs/reverse-engineering-notes.md` — 效能專案 67KB 逆向筆記（不可再生）
   - `docs/` — HMMSYS pak 格式、VS 腳本速查、內建主控台、config.ini 解壓內容
   - `tools/{perf,lang,trainer}/` — Python 交叉驗證 oracle
+- **Phase 1 — 方案骨架 + `Core/Common` 實作完成**：
+  - `CKToolkit.sln`（包含 `CKToolkit` 與 `CKToolkit.SelfTest` 兩專案）
+  - `src/CKToolkit/CKToolkit.csproj` (.NET 10 WinForms x64 nullable enable TreatWarningsAsErrors)
+  - `src/CKToolkit/app.manifest` (asInvoker, Win 10/11, PerMonitorV2 DPI)
+  - `src/CKToolkit/Program.cs`（無參數開啟 WinForms GUI，有參數轉入 CLI）
+  - `src/CKToolkit/Gui/MainForm.cs`（Phase 1 骨架視窗）
+  - `src/CKToolkit/Cli/CliHost.cs`（AttachConsole、JSON 封套、exit codes、status/help/version）
+  - `src/CKToolkit/I18n/`（`Strings.cs` + 內嵌資源 `strings.zh-TW.json` / `strings.en.json`）
+  - `src/CKToolkit/Core/Common/` 核心元件：
+    - `Result.cs`（統一 Ok/Fail 與 ExitCodes）
+    - `GamePaths.cs`（Steam 註冊表 + `libraryfolders.vdf` 庫搜尋 + 5 大目標檔案路徑）
+    - `IniFile.cs`（保留註解與 CRLF 格式、節區鍵值操作與清單附加）
+    - `PeFile.cs`（32/64 位元 PE 解析、LAA 切換、動態節區附加、RVA/VA 位移換算）
+    - `HmmPak.cs`（HMMSYS PackFile 讀寫、前綴壓縮、時間戳保持與往返序列化）
+    - `BackupManager.cs`（統一備份層、跨模組 Pristine 簽章註冊表、過期偵測、舊備份遷移）
+    - `PatchPipeline.cs`（統一套用管線、IPatchModule 介面、原子寫入 `.cktmp`、還原與驗證）
+    - `ToolkitConfig.cs`（`cktoolkit.json` DTO、格式序列化與三前身專案設定自動遷移）
+  - `src/CKToolkit.SelfTest/`（7 大項 Phase 1 自動檢查全數實作）
 
 待辦（依序）：
 
-1. Phase 1 — 方案骨架 + `Core/Common`（統一備份層、管線、PeFile、HmmPak、Ini、Config）
-2. Phase 2 — `Core/Perf`（自 C++ 移植，9 項功能 + 分析器）
-3. Phase 3 — `Core/Lang`（自 C# 4.8 移植 + 泛化為語言包）
-4. Phase 4 — `Core/Trainer`（自 .NET 10 移植，多為直接重用）
-5. Phase 5 — GUI（5 分頁 + 雙語 i18n）
-6. Phase 6 — CLI（AI 代理介面，JSON 封套）
-7. Phase 7 — SelfTest + 雙語 README + GitHub 發布
+1. Phase 2 — `Core/Perf`（自 C++ 移植，9 項功能 + 分析器）
+2. Phase 3 — `Core/Lang`（自 C# 4.8 移植 + 泛化為語言包）
+3. Phase 4 — `Core/Trainer`（自 .NET 10 移植，多為直接重用）
+4. Phase 5 — GUI（5 分頁 + 雙語 i18n）
+5. Phase 6 — CLI（AI 代理介面，JSON 封套擴充）
+6. Phase 7 — SelfTest 全量整合 + 雙語 README + GitHub 發布
 
 ## 施工方式
 
@@ -68,3 +85,37 @@
 | 2026-08-18 | 中文化泛化為語言包機制 | 使用者要求可擴充其他語言；字元範圍由 `pack.json` 驅動，不寫死 CJK |
 | 2026-08-18 | HD 出廠凍結 1920x1080 | 實測上限，2048x1152 以上進遊戲即崩潰 |
 | 2026-08-18 | 桌面解析度出廠預設為自動切換 | 使用者決定，推翻先前的「絕對禁止自動切換」 |
+
+---
+
+## Phase 1 完成紀錄
+
+- **產出項目**：
+  1. `CKToolkit.sln` — 方案檔，包含主專案與自我測試專案。
+  2. `src/CKToolkit/CKToolkit.csproj` 與 `app.manifest` — 符合 SPEC.md §1 要求之建置設定。
+  3. `src/CKToolkit/Program.cs`、`MainForm.cs`、`CliHost.cs` — 雙模進入點與 CLI JSON 封套。
+  4. `src/CKToolkit/I18n/`（`Strings.cs`、`strings.zh-TW.json`、`strings.en.json`）— 雙語語系字串。
+  5. `src/CKToolkit/Core/Common/` — 核心模組（`Result`、`GamePaths`、`IniFile`、`PeFile`、`HmmPak`、`BackupManager`、`PatchPipeline`、`ToolkitConfig`）。
+  6. `src/CKToolkit.SelfTest/` — Phase 1 7 大項自我驗證測試。
+- **規格差異說明**：
+  - 完全遵循 `docs/SPEC.md` 與 `docs/phases/PHASE1.md`，無任何規格偏差。
+- **Phase 1 建置與缺陷修正紀錄 (2026-08-18)**：
+  - 啟用 `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` 解決 `[LibraryImport]` source generation (SYSLIB1062)。
+  - `src/CKToolkit/I18n/Strings.cs`：移除靜態類別中的非法索引子 `this[string key]` (CS0106/CS0720)，提供 `Get(string key)` / `Get(string key, params object[] args)` 與 `T` 多載。
+  - `src/CKToolkit/Core/Common/Result.cs`：移除 `Result<T>.Ok` 贅餘的 `new` 修飾詞 (CS0109)。
+  - `src/CKToolkit.SelfTest/Program.cs`：加入明確的 `using System.Linq;`，並將 `SequenceEqual([0x01, ...])` 泛型型別推導引發 CS1929 的無目標型別集合運算式改為明確型別 `new byte[] { 0x01, ... }`。
+  - `src/CKToolkit/CKToolkit.csproj`：將 `EmbeddedResource` 改為明確宣告 `WithCulture="false"` 與 `LogicalName`，阻止 MSBuild 將 `.zh-TW.` / `.en.` 誤判為語系資源而編譯進附屬組件 (satellite assemblies)。
+  - `src/CKToolkit/I18n/Strings.cs`：`LoadResource` 遇到資源缺失或解析失敗時拋出明確 `InvalidOperationException`（包含尋找的資源名與實際存在的 manifest resource 清單），消除靜默失敗。
+  - **Round 4 四大缺陷修復**：
+    1. **DEFECT 1 (Status 唯讀性)**：重構 `BackupManager`，移除建構子自動建立目錄與自動遷移行為；區分唯讀查詢 API (`ReadExistingBackup`, `HasBackup`, `GetFilePristineState`) 與套用寫入 API (`EnsureBackup`, `ReadPristine`)，確保 `status` 查詢 100% 零寫入。
+    2. **DEFECT 2 (基準建立驗證與舊備份遷移)**：基準建立嚴格要求特徵涵蓋率 100% 且通過驗證；舊備份遷移改為純唯讀候選掃描 (`FindLegacyBackupCandidates`) 與明確驗證遷移 API (`MigrateLegacyBackup`)，絕不隱式自動採用。
+    3. **DEFECT 3 (特徵涵蓋率 Coverage 與過期重新擷取守護)**：引入 `PristineState` (Unknown, Pristine, Patched) 與 `ExpectedSignatureIds`。特徵庫未齊全前 `IsPristine` 一律回傳 `Unknown`，CLI `status` 標註 unknown 並提示警告；過期備份重擷取機制 (`.superseded`) 嚴格限制在 Coverage 100% 下才可觸發，特徵不全時嚴格拒絕重擷取以保護乾淨備份。
+    4. **DEFECT 4 (CLI UTF-8 輸出編碼)**：`Program.cs` 與 `CliHost.cs` 全面強制設定 Console 與 StandardOutput/Error 編碼為無 BOM 之 UTF-8 (`new UTF8Encoding(false)`)，解決重新導向與終端機 Big5/CP950 亂碼。
+  - `CKToolkit.SelfTest`：擴充為 9 大項自動測試，全數覆蓋 status 零寫入、Coverage 未就緒回傳 Unknown、過期備份重擷取守護、UTF-8 JSON 輸出往返驗證。
+- **Phase 2 (Core/Perf) 注意事項**：
+  - `PatchPipeline` 已備妥 `IPatchModule` 介面，Phase 2 可直接建立 `PerfModule : IPatchModule` 註冊至管線。
+  - `BackupManager` 已備妥 `IPatchSignature` 介面，Phase 2 需針對 Exe (LAA, VideoFix, ZoomTables, ResWriteback) 與 Launcher (DisplaySuppress, ModeTable) 註冊相應特徵簽章以補齊 Coverage。
+  - `PeFile` 具備 `LargeAddressAware` 讀寫、`AddSection(".ckhr", size, ...)` 與 `VaToFileOffset(ulong va)`，可直接支援 ZoomMap 搬遷。
+  - `IniFile` 的 `AppendToListSection("Resolutions", ...)` 已備妥供 `data.pak` 內的 `VXCONST.INI` 新增解析度項目。
+
+

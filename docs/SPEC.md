@@ -37,7 +37,11 @@ dotnet publish src/CKToolkit -c Release -r win-x64 --self-contained true -p:Publ
 `PublishTrimmed` 必須為 false（WinForms 的反射會被裁剪破壞）。
 
 `app.manifest`：`requestedExecutionLevel level="asInvoker"`（不要求管理員；寫入失敗時
-給明確錯誤，不要靜默失敗），並宣告 Windows 10/11 supportedOS 與 `dpiAware/PerMonitorV2`。
+給明確錯誤，不要靜默失敗）、`supportedOS`、`longPathAware`。
+
+**DPI 不要寫在 manifest 裡。** WinForms 由 `<ApplicationHighDpiMode>PerMonitorV2</...>`
+專案屬性負責（它會產生 `Application.SetHighDpiMode` 呼叫）。manifest 再宣告一次
+`dpiAware` / `dpiAwareness` 會觸發診斷 WFO0003，在 `TreatWarningsAsErrors` 下是致命錯誤。
 
 ---
 
@@ -80,26 +84,49 @@ src/CKToolkit.SelfTest/   主控台專案，dotnet run 即跑
 ## 3. 統一備份層 `BackupManager`
 
 備份目錄：`<exe 所在目錄>/backup/`（不是遊戲目錄——遊戲目錄會被 Steam 驗證清掉）。
-若偵測到前身專案的舊備份目錄，提供一次性遷移。
 
 ```csharp
 public enum GameFile { Exe, Launcher, DataPak, LocalPak, VxSettings }
+public enum PristineState { Unknown, Pristine, Patched }
 
-bool   HasBackup(GameFile f);
-bool   IsPristine(GameFile f);      // ★ 必須檢查「所有模組」的修補特徵，不只自己那組
-byte[] ReadPristine(GameFile f);    // 沒備份且 pristine -> 先擷取
-void   EnsureBackup(GameFile f);    // 已改過又沒備份 -> 擲出，要求 Steam 驗證檔案完整性
-void   RestoreAll();
+// ★ 唯讀查詢 API（嚴格無副作用：不建目錄、不抓取備份、不寫設定）
+bool            HasBackup(GameFile f);
+PristineState   IsPristine(GameFile f, byte[] fileBytes);
+PristineState   GetFilePristineState(string gameDir, GameFile f);
+bool            IsCoverageComplete(GameFile f);
+Result<byte[]>  ReadExistingBackup(GameFile f); // 尚無備份時回傳 Fail，絕不自動擷取
+
+// ★ 基準建立與套用準備路徑（僅限套用管線與明確指令）
+Result          EnsureBackup(GameFile f, string gameDir);
+Result<byte[]>  ReadPristine(GameFile f, string gameDir); // 有備份直接讀取，無備份則驗證並擷取
+Result<List<string>> RestoreAll(string gameDir);
+
+// ★ 舊備份候選掃描與明確遷移（絕不自動/隱式遷移）
+IReadOnlyList<LegacyBackupCandidate> FindLegacyBackupCandidates();
+Result MigrateLegacyBackup(LegacyBackupCandidate candidate, bool overwrite = false);
 ```
 
-`IsPristine(Exe)` 必須同時回答：LAA 未設、SetVideoMode 未修、ZoomMap 表未搬移、
-Resolution 回寫未抑制、**按鍵表未重對應**。少檢查任何一項都是 bug。
+### 3.1 特徵涵蓋率（Coverage）與 Pristine 判定紀律
+- 各目標檔案預期之修補簽章清單：
+  - `Exe`：`laa`、`video_fix`、`hires_zoom`、`res_writeback`、`key_map`（5 項）。
+  - `Launcher`：`launcher_display`、`launcher_mode_table`（2 項）。
+  - `DataPak`：`resolutions_append`、`trainer_marker`（2 項）。
+  - `LocalPak`：`langpack_installed`（1 項）。
+  - `VxSettings`：`vxsettings_custom`（1 項）。
+- **Coverage 完整性**：唯有當某檔案的所有預期簽章皆已註冊至 `BackupManager`，`IsCoverageComplete` 才為 true。
+- **未就緒時一律回傳 Unknown**：在 Coverage 未完整前，即使檔案位元組未命中任何已註冊簽章，`IsPristine` 也必須回傳 `PristineState.Unknown`，絕不以空註冊表判定為原版。CLI `status` 必須顯示 `unknown` 並發出特徵庫未就緒之警示。
 
-`IsPristine(DataPak)` 必須同時回答：`VXCONST.INI` 的 `[Resolutions]` 未被附加、
-**修改器的標記檔不存在**。
+### 3.2 備份過期重擷取之安全守護
+- 若現行檔案與備份不同：
+  - **若 Coverage 不完整**：**嚴格拒絕重新擷取基準**，並發出強烈警告以防將已修改檔案誤判為更新而覆蓋掉唯一的原版備份。
+  - **若 Coverage 完整且檔案為 Pristine**：說明發生了 Steam 遊戲更新，將舊備份更名為 `.superseded` 後重新擷取基準。
 
-備份過期偵測：若 `IsPristine == true` 但現行檔案與備份不同 -> 那是遊戲更新造成的，
-把舊備份改名為 `.superseded` 後重新擷取基準，並在 log 明確告知。
+### 3.3 唯讀狀態查詢保證
+- `status` 指令與檢視路徑必須為 100% 唯讀：不得建立 `backup/` 目錄、不得抓取遊戲檔案為備份、不得自動儲存設定檔。
+
+### 3.4 舊備份明確遷移
+- 舊專案目錄可能包含陳舊或被修改的檔案，**嚴禁在建構子或查詢中隱式/自動遷移**。
+- 提供 `FindLegacyBackupCandidates()` 掃描候選檔案（路徑、大小、修改時間），並由呼叫端明確發起 `MigrateLegacyBackup()`，且遷移前必須驗證特徵完整性與 Pristine 狀態。
 
 ---
 
