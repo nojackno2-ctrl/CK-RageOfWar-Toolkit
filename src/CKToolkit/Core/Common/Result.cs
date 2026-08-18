@@ -39,12 +39,6 @@ public class Result
 
     public static Result Fail(string message, int exitCode = ExitCodes.GeneralFailure, IReadOnlyList<string>? warnings = null) =>
         new(false, exitCode, message, warnings);
-
-    public static Result<T> Ok<T>(T value, IReadOnlyList<string>? warnings = null) =>
-        Result<T>.Ok(value, warnings);
-
-    public static Result<T> Fail<T>(string message, int exitCode = ExitCodes.GeneralFailure, IReadOnlyList<string>? warnings = null) =>
-        Result<T>.Fail(message, exitCode, warnings);
 }
 
 /// <summary>

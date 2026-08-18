@@ -1,6 +1,20 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
+
+/// <summary>
+/// 備份基準建立歷程與特徵涵蓋紀錄 (SPEC.md §3)。
+/// </summary>
+public sealed class BackupProvenance
+{
+    public DateTime CapturedAtUtc { get; set; }
+    public bool CoverageComplete { get; set; }
+    public List<string> RegisteredSignatures { get; set; } = [];
+    public List<string> MissingSignatures { get; set; } = [];
+}
 
 /// <summary>
 /// 遊戲核心五大檔案列舉。
@@ -56,6 +70,42 @@ public sealed class LegacyBackupCandidate
     public long Size { get; init; }
     public DateTime LastModified { get; init; }
     public string SourceProject { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// 個別檔案還原結果資訊 (SPEC.md §10)。
+/// </summary>
+public sealed class FileRestoreResult
+{
+    [JsonPropertyName("file")]
+    public string File { get; set; } = string.Empty;
+
+    [JsonPropertyName("restored")]
+    public bool Restored { get; set; }
+
+    [JsonPropertyName("byteEqualityVerified")]
+    public bool ByteEqualityVerified { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 還原所有檔案報告 (SPEC.md §10)。
+/// </summary>
+public sealed class RestoreReport
+{
+    [JsonPropertyName("gameDir")]
+    public string GameDir { get; set; } = string.Empty;
+
+    [JsonPropertyName("restoredFiles")]
+    public List<string> RestoredFiles { get; set; } = [];
+
+    [JsonPropertyName("files")]
+    public Dictionary<string, FileRestoreResult> Files { get; set; } = new();
+
+    [JsonIgnore]
+    public int Count => RestoredFiles.Count;
 }
 
 /// <summary>
@@ -119,7 +169,28 @@ public sealed class BackupManager
     public string GetBackupPath(GameFile file) =>
         Path.Combine(_backupDir, GetFileName(file) + ".orig");
 
+    public string GetMetadataPath(GameFile file) =>
+        GetBackupPath(file) + ".meta.json";
+
     public bool HasBackup(GameFile file) => File.Exists(GetBackupPath(file));
+
+    /// <summary>
+    /// 讀取備份基準建立之歷程中繼資料。
+    /// </summary>
+    public BackupProvenance? GetBackupProvenance(GameFile file)
+    {
+        string metaPath = GetMetadataPath(file);
+        if (!File.Exists(metaPath)) return null;
+        try
+        {
+            string json = File.ReadAllText(metaPath, Encoding.UTF8);
+            return JsonSerializer.Deserialize<BackupProvenance>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // ---- 唯讀讀取備份 API --------------------------------------------------
 
@@ -271,6 +342,7 @@ public sealed class BackupManager
         string fileName = GetFileName(file);
         string livePath = Path.Combine(gameDir, fileName);
         string backupPath = GetBackupPath(file);
+        string metaPath = GetMetadataPath(file);
 
         if (HasBackup(file))
         {
@@ -310,10 +382,25 @@ public sealed class BackupManager
                     {
                         // 確定為乾淨原版且與備份不同 -> 遊戲已被 Steam 更新
                         string supersededPath = backupPath + ".superseded";
+                        string supersededMetaPath = metaPath + ".superseded";
                         try
                         {
                             File.Copy(backupPath, supersededPath, overwrite: true);
+                            if (File.Exists(metaPath))
+                            {
+                                File.Copy(metaPath, supersededMetaPath, overwrite: true);
+                            }
+
                             File.Copy(livePath, backupPath, overwrite: true);
+
+                            var provenance = new BackupProvenance
+                            {
+                                CapturedAtUtc = DateTime.UtcNow,
+                                CoverageComplete = true,
+                                RegisteredSignatures = GetSignatures(file).Select(s => s.PatchId).ToList(),
+                                MissingSignatures = []
+                            };
+                            File.WriteAllText(metaPath, JsonSerializer.Serialize(provenance, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
                         }
                         catch (Exception ex)
                         {
@@ -328,7 +415,7 @@ public sealed class BackupManager
             return Result.Ok();
         }
 
-        // 尚無備份
+        // 尚無備份（首次擷取初始基準）
         if (!File.Exists(livePath))
         {
             return Result.Fail(Strings.Get("Error_GameNotFound") + $" ({livePath})", ExitCodes.GameNotFound);
@@ -344,34 +431,57 @@ public sealed class BackupManager
             return Result.Fail(Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})", ExitCodes.FileLocked);
         }
 
-        if (!IsCoverageComplete(file))
+        // 1. 若任何已註冊簽章已判定為 Patched，絕對拒絕建立基準並要求 Steam 驗證完整性
+        var relevantSigs = GetSignatures(file);
+        foreach (var sig in relevantSigs)
         {
-            // 特徵庫不完整時，無法證明來源為原版，嚴格拒絕建立基準
-            return Result.Fail(
-                Strings.Get("Error_CannotEstablishBaselineIncompleteCoverage", fileName),
-                ExitCodes.BackupMissingNeedsSteamVerify);
+            try
+            {
+                if (sig.IsApplied(currentBytes))
+                {
+                    return Result.Fail(
+                        Strings.Get("Error_BackupMissingIntegrityNeeded", fileName),
+                        ExitCodes.BackupMissingNeedsSteamVerify);
+                }
+            }
+            catch
+            {
+                return Result.Fail(
+                    Strings.Get("Error_BackupMissingIntegrityNeeded", fileName),
+                    ExitCodes.BackupMissingNeedsSteamVerify);
+            }
         }
 
-        var currentState = IsPristine(file, currentBytes);
-        if (currentState != PristineState.Pristine)
+        // 2. 初始擷取：允許建立基準，但若 Coverage 未完整則記錄歷程並發出警告
+        bool isCoverageComplete = IsCoverageComplete(file);
+        var warnings = new List<string>();
+
+        if (!isCoverageComplete)
         {
-            return Result.Fail(
-                Strings.Get("Error_BackupMissingIntegrityNeeded", fileName),
-                ExitCodes.BackupMissingNeedsSteamVerify);
+            warnings.Add(Strings.Get("Warning_BaselineCapturedIncompleteCoverage", fileName));
         }
 
-        // 明確建立基準
         try
         {
             Directory.CreateDirectory(_backupDir);
             File.Copy(livePath, backupPath, overwrite: false);
+
+            var provenance = new BackupProvenance
+            {
+                CapturedAtUtc = DateTime.UtcNow,
+                CoverageComplete = isCoverageComplete,
+                RegisteredSignatures = relevantSigs.Select(s => s.PatchId).ToList(),
+                MissingSignatures = GetMissingSignatures(file).ToList()
+            };
+            File.WriteAllText(metaPath, JsonSerializer.Serialize(provenance, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
         }
         catch (Exception ex)
         {
             return Result.Fail(Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})", ExitCodes.FileLocked);
         }
 
-        return Result.Ok([Strings.Get("Backup_BaselineEstablished", fileName)]);
+        warnings.Insert(0, Strings.Get("Backup_BaselineEstablished", fileName));
+        return Result.Ok(warnings);
     }
 
     /// <summary>
@@ -422,11 +532,13 @@ public sealed class BackupManager
     }
 
     /// <summary>
-    /// 從備份還原所有目標檔案至遊戲目錄。
+    /// 從備份還原所有目標檔案至遊戲目錄，並逐位元組驗證還原結果。
     /// </summary>
-    public Result<List<string>> RestoreAll(string gameDir)
+    public Result<RestoreReport> RestoreAll(string gameDir)
     {
-        var restored = new List<string>();
+        var report = new RestoreReport { GameDir = gameDir };
+        var warnings = new List<string>();
+        var missingBackups = new List<string>();
 
         foreach (GameFile f in Enum.GetValues<GameFile>())
         {
@@ -434,25 +546,63 @@ public sealed class BackupManager
             string backupPath = GetBackupPath(f);
             string targetPath = Path.Combine(gameDir, fileName);
 
-            if (!File.Exists(backupPath)) continue;
+            if (!File.Exists(backupPath))
+            {
+                missingBackups.Add(fileName);
+                report.Files[fileName] = new FileRestoreResult
+                {
+                    File = fileName,
+                    Restored = false,
+                    ByteEqualityVerified = false,
+                    Status = "no_backup"
+                };
+                continue;
+            }
 
             string tempPath = targetPath + ".cktmp";
             try
             {
                 File.Copy(backupPath, tempPath, overwrite: true);
                 File.Move(tempPath, targetPath, overwrite: true);
-                restored.Add(fileName);
+
+                byte[] restoredBytes = File.ReadAllBytes(targetPath);
+                byte[] backupBytes = File.ReadAllBytes(backupPath);
+                bool verified = restoredBytes.AsSpan().SequenceEqual(backupBytes);
+
+                report.Files[fileName] = new FileRestoreResult
+                {
+                    File = fileName,
+                    Restored = true,
+                    ByteEqualityVerified = verified,
+                    Status = verified ? "restored_verified" : "restored_mismatch"
+                };
+                report.RestoredFiles.Add(fileName);
             }
             catch (Exception ex)
             {
                 try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-                return Result<List<string>>.Fail(
+                return Result<RestoreReport>.Fail(
                     Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
                     ExitCodes.FileLocked);
             }
         }
 
-        return Result<List<string>>.Ok(restored);
+        if (report.RestoredFiles.Count == 0)
+        {
+            return Result<RestoreReport>.Fail(
+                Strings.Get("Error_NoBackupsToRestore"),
+                ExitCodes.BackupMissingNeedsSteamVerify);
+        }
+
+        if (missingBackups.Count > 0)
+        {
+            foreach (var mf in missingBackups)
+            {
+                warnings.Add(Strings.Get("Warning_BackupMissingForFile", mf));
+            }
+        }
+
+        return Result<RestoreReport>.Ok(report, warnings);
     }
 
     // ---- 舊備份明確掃描與遷移 (SPEC.md §3) -----------------------------------
@@ -552,6 +702,15 @@ public sealed class BackupManager
         {
             Directory.CreateDirectory(_backupDir);
             File.Copy(candidate.SourcePath, targetBackup, overwrite: true);
+
+            var provenance = new BackupProvenance
+            {
+                CapturedAtUtc = DateTime.UtcNow,
+                CoverageComplete = true,
+                RegisteredSignatures = GetSignatures(candidate.File).Select(s => s.PatchId).ToList(),
+                MissingSignatures = []
+            };
+            File.WriteAllText(GetMetadataPath(candidate.File), JsonSerializer.Serialize(provenance, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
         }
         catch (Exception ex)
         {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
 
@@ -193,7 +194,7 @@ public sealed class ToolkitConfig
                     if (GamePaths.IsGameDir(path) && string.IsNullOrEmpty(config.GameDir))
                     {
                         config.GameDir = path;
-                        config.MigrationsApplied.Add($"已自中文化舊記錄遷移遊戲路徑：{path}");
+                        config.MigrationsApplied.Add(Strings.Get("Migration_Detected_LangPath", path));
                         break;
                     }
                 }
@@ -223,7 +224,7 @@ public sealed class ToolkitConfig
                         config.Perf.Resolution = res;
                     if (ini.TryGetValue(null, "desktop", out string? desk) && !string.IsNullOrWhiteSpace(desk))
                         config.Perf.DesktopMode = desk;
-                    config.MigrationsApplied.Add($"已自效能專案 ckpatcher.cfg 遷移設定");
+                    config.MigrationsApplied.Add(Strings.Get("Migration_Detected_Perf"));
                     break;
                 }
                 catch { }
@@ -279,7 +280,7 @@ public sealed class ToolkitConfig
                         }
                     }
 
-                    config.MigrationsApplied.Add($"已自修改器專案 settings.json 遷移設定");
+                    config.MigrationsApplied.Add(Strings.Get("Migration_Detected_Trainer"));
                     break;
                 }
                 catch { }
