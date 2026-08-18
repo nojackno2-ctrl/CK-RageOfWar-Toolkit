@@ -1,0 +1,23 @@
+# Build outputs
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+dist/
+publish/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Runtime state (never commit a user's game paths or backups)
+backup/
+cktoolkit.json
+ckprofile.txt
+*.orig
+*.superseded
+
+# Third-party archives (licence forbids redistribution)
+*.zip
+Imperivm1-HD-4-multi*
