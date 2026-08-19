@@ -1,0 +1,102 @@
+CKPatcher 取樣報告 (遊戲已結束)
+時間長度 2 秒，樣本 4224，其中在遊戲程式碼內 77 (1.8%)
+主模組 00400000 - 008CB000
+
+=== 每個執行緒的 CPU 時間 (看有沒有用到多核心) ===
+   tid 6560    CPU     2.00 s  ( 99.8% of one core)  遊戲碼內樣本 77
+   tid 2036    CPU     0.11 s  (  5.5% of one core)  遊戲碼內樣本 0
+   tid 32072   CPU     0.03 s  (  1.6% of one core)  遊戲碼內樣本 0
+   tid 37208   CPU     0.02 s  (  0.8% of one core)  遊戲碼內樣本 0
+   tid 14584   CPU     0.02 s  (  0.8% of one core)  遊戲碼內樣本 0
+   tid 35620   CPU     0.02 s  (  0.8% of one core)  遊戲碼內樣本 0
+   tid 8404    CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 14428   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 8376    CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 32404   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 29140   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 33544   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 37756   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 31756   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 37164   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 33232   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 33112   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 25508   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 30680   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 34228   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 37148   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 33516   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 36820   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 16580   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 34336   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 15292   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 8436    CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 33172   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 30184   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 26608   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 16192   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 14396   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+   tid 38700   CPU     0.00 s  (  0.0% of one core)  遊戲碼內樣本 0
+
+=== 分段 (拿最早一段和最晚一段對照，就能看出隨單位數成長的部分) ===
+
+-- 第 1 段  0-2 秒  遊戲碼內樣本 77 --
+   006DB6C0   10.39%        8  .text
+   00426850    6.49%        5  .text
+   004267E0    5.19%        4  .text
+   006C45F0    5.19%        4  .text
+   00405080    3.90%        3  .text
+   00407DA0    3.90%        3  .text
+   004265F0    3.90%        3  .text
+   00426840    3.90%        3  .text
+
+=== 全場彙總: 最熱的位址 (每格 16 bytes) ===
+   006DB6C0   10.39%        8  .text
+   00426850    6.49%        5  .text
+   004267E0    5.19%        4  .text
+   006C45F0    5.19%        4  .text
+   00405080    3.90%        3  .text
+   00407DA0    3.90%        3  .text
+   004265F0    3.90%        3  .text
+   00426840    3.90%        3  .text
+   0044D800    3.90%        3  .text
+   006BEE30    3.90%        3  .text
+   006C87F0    3.90%        3  .text
+   004050D0    2.60%        2  .text
+   004050F0    2.60%        2  .text
+   00407500    2.60%        2  .text
+   00407B50    2.60%        2  .text
+   00408960    2.60%        2  .text
+   0041F5E0    2.60%        2  .text
+   0041F880    2.60%        2  .text
+   0041F8A0    2.60%        2  .text
+   00426830    2.60%        2  .text
+   0044C2C0    2.60%        2  .text
+   00405090    1.30%        1  .text
+   004050E0    1.30%        1  .text
+   00407510    1.30%        1  .text
+   00407DB0    1.30%        1  .text
+   00407F00    1.30%        1  .text
+   00408390    1.30%        1  .text
+   00408580    1.30%        1  .text
+   00408980    1.30%        1  .text
+   00426600    1.30%        1  .text
+   00426610    1.30%        1  .text
+   004267D0    1.30%        1  .text
+   0044C2D0    1.30%        1  .text
+   0044D830    1.30%        1  .text
+   0045F0A0    1.30%        1  .text
+   006BEE40    1.30%        1  .text
+
+=== 全場彙總: 以 4 KB 為單位 ===
+   00426000   25.97%       20  .text
+   00407000   12.99%       10  .text
+   00405000   11.69%        9  .text
+   006DB000   10.39%        8  .text
+   0041F000    7.79%        6  .text
+   00408000    6.49%        5  .text
+   0044D000    5.19%        4  window + display mode
+   006BE000    5.19%        4  .text
+   006C4000    5.19%        4  .text
+   0044C000    3.90%        3  .text
+   006C8000    3.90%        3  .text
+   0045F000    1.30%        1  .text
