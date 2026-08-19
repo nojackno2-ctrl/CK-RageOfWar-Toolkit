@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
+using CKToolkit.Core.Runtime;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
@@ -199,6 +200,9 @@ public static partial class CliHost
 
             case "profile":
                 return HandleProfile(commands.Skip(1).ToList(), isJson, stdout, stderr);
+
+            case "run":
+                return HandleRun(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
 
             default:
                 return HandleUnknown(primaryCmd, isJson, stdout, stderr);
@@ -2002,6 +2006,211 @@ public static partial class CliHost
             stdout.WriteLine(reportText);
         }
 
+        return ExitCodes.Success;
+    }
+
+    /// <summary>
+    /// 帶診斷層啟動遊戲。
+    ///
+    /// 引擎自己呼叫 SetErrorMode 與 SetUnhandledExceptionFilter，崩潰永遠走不到 WER，
+    /// 使用者只看到遊戲憑空消失。本指令注入 ckperf.dll，在引擎的任何處理常式之前
+    /// 掛上向量化例外處理常式，把真正的錯誤位址攔下來寫成報告。
+    ///
+    /// 對遊戲檔案零寫入：只改被啟動行程的記憶體，磁碟上的執行檔一個位元組都不動。
+    /// </summary>
+    private static int HandleRun(
+        List<string> options,
+        string? gameOverride,
+        string? configOverride,
+        bool isJson,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var diag = new DiagnosticsOptions();
+        bool plain = false;
+        bool attach = false;
+        bool watch = false;
+        int watchSeconds = 300;
+
+        for (int i = 0; i < options.Count; i++)
+        {
+            string token = options[i];
+            int eq = token.IndexOf('=');
+            string flag = (eq > 0 ? token[..eq] : token).ToLowerInvariant();
+            string? val = eq > 0 ? token[(eq + 1)..] : null;
+
+            string? TakeValue()
+            {
+                if (val is not null) return val;
+                if (i + 1 < options.Count) return options[++i];
+                return null;
+            }
+
+            switch (flag)
+            {
+                case "--plain":        plain = true; break;
+                case "--attach":       attach = true; break;
+                case "--watch":        watch = true; break;
+
+                case "--watch-seconds":
+                {
+                    string? v = TakeValue();
+                    if (!int.TryParse(v, out int n) || n < 5 || n > 3600)
+                        return OutputError("run", Strings.Get("Error_InvalidArgs", $"--watch-seconds 需為 5..3600 的整數，收到 '{v}'"),
+                                           ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                    watchSeconds = n;
+                    watch = true;
+                    break;
+                }
+
+                case "--no-crash":     diag.CrashReports = false; break;
+                case "--no-dump":      diag.MiniDumps = false; break;
+                case "--no-telemetry": diag.Telemetry = false; break;
+                case "--no-frames":    diag.FrameTiming = false; break;
+
+                case "--maxreports":
+                {
+                    string? v = TakeValue();
+                    if (!int.TryParse(v, out int n) || n < 1 || n > 1000)
+                        return OutputError("run", Strings.Get("Error_InvalidArgs", $"--maxreports 需為 1..1000 的整數，收到 '{v}'"),
+                                           ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                    diag.MaxReports = n;
+                    break;
+                }
+
+                case "--telemetry-ms":
+                {
+                    string? v = TakeValue();
+                    if (!int.TryParse(v, out int n) || n < 100 || n > 60000)
+                        return OutputError("run", Strings.Get("Error_InvalidArgs", $"--telemetry-ms 需為 100..60000 的整數，收到 '{v}'"),
+                                           ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                    diag.TelemetryMs = n;
+                    break;
+                }
+
+                default:
+                    return OutputError("run", Strings.Get("Error_InvalidArgs", $"未知的選項 '{token}'"),
+                                       ExitCodes.InvalidArgs, isJson, stdout, stderr);
+            }
+        }
+
+        int modes = (plain ? 1 : 0) + (attach ? 1 : 0) + (watch ? 1 : 0);
+        if (modes > 1)
+            return OutputError("run", Strings.Get("Error_InvalidArgs", "--plain / --attach / --watch 三者互斥，一次只能指定一個"),
+                               ExitCodes.InvalidArgs, isJson, stdout, stderr);
+
+        var config = ToolkitConfig.Load(configOverride);
+        string? gameDir = GamePaths.FindGameDir(gameOverride, config.GameDir);
+        if (gameDir is null || !GamePaths.IsGameDir(gameDir))
+            return OutputError("run", Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound, isJson, stdout, stderr);
+
+        if (plain)
+        {
+            // 無插樁對照組。要判斷診斷層本身有沒有影響效能，就需要這個。
+            try
+            {
+                // UseShellExecute = true 是刻意的：false 會讓遊戲繼承本行程的
+                // 標準輸出控制代碼，呼叫端的管線就要等到遊戲結束才收得到 EOF，
+                // 表現出來就是「指令卡住不返回」。
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = Path.Combine(gameDir, GamePaths.ExeFileName),
+                    WorkingDirectory = gameDir,
+                    UseShellExecute = true
+                };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                int plainPid = proc?.Id ?? 0;
+                if (isJson)
+                {
+                    stdout.WriteLine(JsonSerializer.Serialize(new JsonEnvelope
+                    {
+                        Ok = true,
+                        Command = "run",
+                        Data = new { pid = plainPid, instrumented = false, gameDir }
+                    }, JsonEnvelopeOptions));
+                }
+                else
+                {
+                    stdout.WriteLine($"已啟動遊戲（未插樁），pid {plainPid}。");
+                }
+                return ExitCodes.Success;
+            }
+            catch (Exception ex)
+            {
+                return OutputError("run", $"啟動遊戲失敗：{ex.Message}", ExitCodes.GeneralFailure, isJson, stdout, stderr);
+            }
+        }
+
+        // 配置清單先寫，啟動後寫。萬一啟動失敗，至少留下當時的狀態可查。
+        string manifestPath;
+        var manifestWarnings = new List<string>();
+        try
+        {
+            Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
+            manifestPath = RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, config, diag);
+        }
+        catch (Exception ex)
+        {
+            manifestPath = string.Empty;
+            manifestWarnings.Add($"寫出執行配置清單失敗：{ex.Message}");
+        }
+
+        var progress = new List<string>();
+        void Report(string m)
+        {
+            progress.Add(m);
+            // 等待模式可能一等好幾分鐘，逐句印出來才知道它還活著。
+            if (!isJson && watch) stdout.WriteLine($"  {m}");
+        }
+
+        Result<RunOutcome> result =
+            attach ? GameRunner.AttachToRunningGame(diag, Report)
+          : watch  ? GameRunner.WaitForGameAndAttach(diag, TimeSpan.FromSeconds(watchSeconds), default, Report)
+                   : GameRunner.LaunchWithDiagnostics(gameDir, diag, Report);
+
+        if (result.IsError)
+            return OutputError("run", result.ErrorMessage!, result.ExitCode, isJson, stdout, stderr,
+                               [.. manifestWarnings, .. result.Warnings]);
+
+        RunOutcome outcome = result.Value!;
+        string logPath = Path.Combine(outcome.OutputDirectory, "ckperf.log");
+        var allWarnings = new List<string>(manifestWarnings);
+        allWarnings.AddRange(result.Warnings);
+
+        if (isJson)
+        {
+            stdout.WriteLine(JsonSerializer.Serialize(new JsonEnvelope
+            {
+                Ok = true,
+                Command = "run",
+                Warnings = allWarnings,
+                Data = new
+                {
+                    pid = outcome.ProcessId,
+                    instrumented = true,
+                    injectedBeforeEntryPoint = outcome.InjectedBeforeEntryPoint,
+                    gameDir,
+                    outputDirectory = outcome.OutputDirectory,
+                    logFile = logPath,
+                    configManifest = manifestPath,
+                    crashReportGlob = Path.Combine(outcome.OutputDirectory, "ckcrash-*.txt"),
+                    detail = outcome.Detail,
+                    steps = progress
+                }
+            }, JsonEnvelopeOptions));
+        }
+        else
+        {
+            if (!watch) foreach (string s in progress) stdout.WriteLine($"  {s}");
+            stdout.WriteLine(attach || watch
+                ? $"已掛載到遊戲行程 pid {outcome.ProcessId}。{outcome.Detail}"
+                : $"遊戲已啟動，pid {outcome.ProcessId}。{outcome.Detail}");
+            stdout.WriteLine($"診斷輸出：{outcome.OutputDirectory}");
+            stdout.WriteLine($"  執行記錄  ckperf.log");
+            stdout.WriteLine($"  配置清單  {RunManifest.FileName}");
+            stdout.WriteLine($"  故障報告  ckcrash-*.txt（只有在真的發生例外時才會出現）");
+            foreach (string w in allWarnings) stdout.WriteLine($"  ! {w}");
+        }
         return ExitCodes.Success;
     }
 

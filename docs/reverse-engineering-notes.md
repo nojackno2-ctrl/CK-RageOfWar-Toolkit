@@ -836,3 +836,160 @@ have settled immediately.
    problem needs solving (or the switch needs to happen only via a full process relaunch) before this path
    can offer anything better than "set the Windows desktop resolution yourself before launching."
 
+
+## The high-unit-count crash, root-caused (2026-08-19)
+
+First fault captured by `ckperf.dll`'s vectored exception handler. pid 35668, alive
+117 seconds (78 s user + 38 s kernel), died at 20:53:18.
+
+```
+eip 0x0068FDA6   mov dword ptr [ecx], eax     ecx = 0
+ACCESS_VIOLATION writing 0x00000000
+working set 137 MB, largest free block 2046 MB   <- NOT memory exhaustion
+```
+
+### The function
+
+`0x0068F9E0` is a script-VM command implementation (cdecl, `sub esp,0x64`, plain `ret`).
+It pops three operands off the VM operand stack -- the stack pointer lives at `[esi]`
+and each pop is `[esi] -= n; value = *[esi]` -- and resolves each to a real object via
+`0x00481A20(dword id, word type)`.
+
+**Each resolution is null-checked, and a failed resolution is deliberately recorded as a
+null pointer:**
+
+```
+0068FA0D  call 0x481a20          ; resolve reference #1
+0068FA17  cmp  eax, ebp          ; ebp == 0 here
+0068FA19  je   0x68fa27
+0068FA21  mov  [esp+0x20], eax   ; resolved   -> real pointer
+0068FA27  mov  [esp+0x20], ebp   ; unresolved -> NULL, execution continues
+```
+
+The identical shape repeats for reference #2 into `[esp+0x1C]` (`0068FA4E` / `0068FA56` /
+`0068FA5C`) and #3 into `[esp+0x18]` (`0068FA83` / `0068FA8B` / `0068FA91`).
+
+### The bug
+
+Both exit paths then dereference all three pointers **without checking**:
+
+| Range | Length | What it does |
+|---|---|---|
+| `0068FACB`–`0068FAE6` | 28 bytes | early exit: writes 0 through all three |
+| `0068FD9E`–`0068FDC5` | 40 bytes | normal exit: writes the computed results through all three |
+
+The captured fault is the first store of the normal exit, on the `[esp+0x18]` slot,
+i.e. **reference #3 failed to resolve**.
+
+So: a script that writes back into a reference which has become invalid since it was
+read takes the whole process down. The most obvious way for that to happen is a unit
+dying between the script reading it and the script writing to it. That is exactly why
+the crash gets likelier the more units are alive -- more units means more deaths per
+tick, so more chances for a captured reference to go stale mid-script.
+
+### Corroborating stack
+
+The raw stack scan puts `0x005DF460` on the stack **three times**
+(`0x005DF5EE` at +0x0074, +0x0140, +0x0258). That is the function that references
+`"WARNING: Atomic section instruction limit exceeded!"` at `.data:0x0073FC4C` -- the
+script VM's execution loop, re-entered recursively. `0x00690640` also appears twice
+(return addresses `0x00690A89` and `0x00690D1F`, its two call sites into `0x0068F9E0`).
+`0x00690A50` is visibly a VM opcode handler: it pops four operands off `[esi]` and
+forwards them as arguments.
+
+### What this rules out
+
+- **Not** memory or address-space exhaustion: 137 MB working set, 2046 MB largest free
+  block, LAA active.
+- **Not** the `FSPtrPool` fixed-capacity pool (`.data:0x00725C80`). That remains a
+  plausible cause for *other* crashes but it is not this one.
+- **Not** caused by the toolkit's tweaks directly. `hero_max_army = 2000` and
+  `pop_growth_rate = 100` raise the unit count and therefore the *probability* of
+  hitting this race, but the missing null check is the engine's.
+
+### The fix (runtime, `src/CKPerf/guard.cpp`)
+
+Both exit sequences are re-implemented in a `VirtualAlloc`'d code cave with each store
+guarded by `test reg,reg / jnz`, and every suppressed store increments a counter that is
+reported in the log and in every subsequent crash report. Original bytes are verified
+before patching; a mismatch refuses the patch outright.
+
+Skipping a store means one script variable does not receive its update. That is a much
+smaller problem than terminating the process, but it *is* a behaviour change, hence the
+counter and the `guard=0` switch.
+
+**Nothing is written to disk.** The patch exists only in the injected process, so "off"
+is simply "do not inject" -- there is no reversal path to maintain and no interaction
+with the `AGENTS.md` §2 file-patch discipline.
+
+### Second crash: same bug class, different site (2026-08-19 21:11:07)
+
+pid 31380, alive 114 seconds. `guard: 0` -- the site-specific cave from the first crash
+never fired, so that hypothesis is still unconfirmed.
+
+```
+eip 0x005D99A4   mov dword ptr [eax], esi     eax = 0
+```
+
+`0x005D9960` is a two-operand script store command. It pops a value and a reference off
+the VM stack, resolves the reference, and writes the value into the object's field:
+
+```
+005D9960  sub  esp, 8
+005D9963  mov  eax, [esp+0xC]      ; the VM stack-pointer holder
+005D9967  mov  edx, [eax]
+005D9969  add  edx, -4
+005D996C  mov  [eax], edx          ; pop the value
+005D9971  mov  esi, [ecx]          ; esi = value to store
+005D9973  add  ecx, -6
+005D9976  mov  [eax], ecx          ; pop the 6-byte reference (dword id + word type)
+005D9988  call 0x481a20            ; resolve it
+005D9990  test eax, eax
+005D9992  je   0x5D99A2            ; resolution FAILED
+005D9994  mov  edx, [esp+6]        ; field offset
+005D9998  mov  [eax+edx], esi      ; success: store into the field
+005D999B  xor  eax, eax
+005D999D  pop  esi
+005D999E  add  esp, 8
+005D99A1  ret
+005D99A2  xor  eax, eax            ; failure: destination pointer = NULL
+005D99A4  mov  [eax], esi          ; ...and store through it anyway   <-- always faults
+005D99A6  pop  esi
+005D99A7  add  esp, 8
+005D99AA  ret
+```
+
+This is `dst = ok ? &obj->field : NULL; *dst = value;` compiled literally, with the
+compiler constant-folding the null case into `xor eax,eax` + a store through it. Unlike
+the first site there is no race: **every failed resolution here kills the process.**
+
+Stack top is `0x005DF5EE` again -- the script VM loop. Memory was flat at 127 MB.
+
+### Consequence: stop patching sites, repair the fault class
+
+Two crashes, two different addresses, one shape: the engine computes a write-back
+destination that can be NULL and stores through it unchecked. Site-by-site code caves do
+not scale against that, so `src/CKPerf/nullstore.cpp` repairs the *fault* instead --
+a store into the null page from game code is decoded, skipped, and execution resumes at
+the next instruction.
+
+Deliberately narrow: writes only (a skipped read would leave a register holding garbage,
+which corrupts quietly instead of crashing loudly), null page only, game code only, and
+only plain MOV forms the length decoder is certain about. Everything else still crashes
+and still gets a full report.
+
+The mechanism is verified at startup by executing a real null store from a scratch page
+and checking that it was skipped; if that cannot be proven the repair disables itself
+rather than resuming execution at an address it may have computed wrongly.
+
+Every distinct site is recorded with a hit count and reported in the log and in every
+crash report. **That table is the actual deliverable** -- it maps every place the engine
+does this, which is what a proper per-site fix would need.
+
+### Performance observation from the same session
+
+Framerate in a real battle was 37-61 fps (frame 17-28 ms), so the average is fine -- but
+**every single second contained 3-5 frames over 50 ms, with the worst between 200 ms and
+500 ms**. The blit stayed at 0.1-0.4 ms, i.e. under 1% of the frame. Whatever causes the
+stutter is neither the framerate nor the presentation path; it is a periodic spike in the
+simulation. That is where the performance track should start.

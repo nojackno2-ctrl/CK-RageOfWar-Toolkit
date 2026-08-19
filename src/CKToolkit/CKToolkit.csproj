@@ -29,6 +29,10 @@
     <EmbeddedResource Include="I18n\strings.zh-TW.json" WithCulture="false" LogicalName="CKToolkit.I18n.strings.zh-TW.json" />
     <EmbeddedResource Include="I18n\strings.en.json" WithCulture="false" LogicalName="CKToolkit.I18n.strings.en.json" />
     <EmbeddedResource Include="..\..\assets\langpacks\**\*" WithCulture="false" LogicalName="CKToolkit.LangPacks.%(RecursiveDir)%(Filename)%(Extension)" />
+    <!-- The injected 32-bit diagnostic layer. Built separately by
+         tools/perf/build-ckperf.ps1, because `dotnet build` cannot build a vcxproj;
+         the result is checked in under assets/ so the C# build never needs MSVC. -->
+    <EmbeddedResource Include="..\..\assets\ckperf\ckperf.dll" WithCulture="false" LogicalName="CKToolkit.Runtime.ckperf.dll" />
   </ItemGroup>
 
 </Project>

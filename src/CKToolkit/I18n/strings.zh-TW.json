@@ -150,5 +150,13 @@
   "Error_TrainerInvalidKey": "不支援的按鍵代號「{0}」。",
   "Error_TrainerDuplicateKey": "按鍵「{0}」同時被多個啟用的作弊項目（「{1}」與「{2}」）使用。作弊項目按鍵必須維持一對一。",
   "Profile_Success": "取樣分析完成。",
-  "Profile_ReportWritten": "分析報告已寫入：{0}"
+  "Profile_ReportWritten": "分析報告已寫入：{0}",
+  "Gui_Diag_Launch": "帶診斷啟動遊戲",
+  "Gui_Diag_Attach": "掛載到執行中的遊戲",
+  "Gui_Diag_Hint": "診斷層只讀不寫，對遊戲檔案零修改。閃退時會把真正的錯誤位址寫成報告。",
+  "Gui_Log_DiagLaunching": "正在以診斷層啟動遊戲…",
+  "Gui_Log_DiagAttaching": "正在掛載到執行中的遊戲…",
+  "Gui_Log_DiagReady": "診斷層已就位（pid {0}）。閃退後把 {1} 裡的 ckcrash-*.txt 交給我。",
+  "Gui_Log_DiagFolder": "診斷輸出目錄：{0}",
+  "Gui_Diag_OpenFolder": "開啟診斷資料夾"
 }

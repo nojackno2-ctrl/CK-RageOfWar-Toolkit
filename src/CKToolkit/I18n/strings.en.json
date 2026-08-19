@@ -150,5 +150,13 @@
   "Error_TrainerInvalidKey": "Unsupported key code '{0}'.",
   "Error_TrainerDuplicateKey": "Key '{0}' is bound to multiple enabled cheats ('{1}' and '{2}'). Cheat keys must remain one-to-one.",
   "Profile_Success": "Profiling completed successfully.",
-  "Profile_ReportWritten": "Profile report written to: {0}"
+  "Profile_ReportWritten": "Profile report written to: {0}",
+  "Gui_Diag_Launch": "Launch with diagnostics",
+  "Gui_Diag_Attach": "Attach to running game",
+  "Gui_Diag_Hint": "The diagnostic layer only observes; it modifies no game file. On a crash it records the real fault address.",
+  "Gui_Log_DiagLaunching": "Launching the game with the diagnostic layer...",
+  "Gui_Log_DiagAttaching": "Attaching to the running game...",
+  "Gui_Log_DiagReady": "Diagnostics are in place (pid {0}). After a crash, collect ckcrash-*.txt from {1}.",
+  "Gui_Log_DiagFolder": "Diagnostics folder: {0}",
+  "Gui_Diag_OpenFolder": "Open diagnostics folder"
 }
