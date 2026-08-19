@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using CKToolkit.I18n;
 
@@ -79,8 +79,12 @@ public sealed class CheatConfig
 /// </summary>
 public sealed class TrainerConfig
 {
+    /// <summary>
+    /// 是否啟用修改器。預設必須為 false —— 與語言包同理（見 <see cref="LangConfig.Pack"/>）：
+    /// 只想開 HD 的使用者不該在第一次 apply 就被裝上作弊腳本與按鍵重對應。
+    /// </summary>
     [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 
     [JsonPropertyName("numpadKeys")]
     public bool NumpadKeys { get; set; } = true;
@@ -94,17 +98,13 @@ public sealed class TrainerConfig
     [JsonPropertyName("keepVanilla")]
     public bool KeepVanilla { get; set; } = true;
 
+    /// <summary>啟用的作弊項目。預設為空——使用者沒勾就不該有任何作弊生效。</summary>
     [JsonPropertyName("cheats")]
-    public List<CheatConfig> Cheats { get; set; } =
-    [
-        new() { Id = "gold_fill", Enabled = true, Key = "F2" }
-    ];
+    public List<CheatConfig> Cheats { get; set; } = [];
 
+    /// <summary>數值調整。預設為空，代表全部維持遊戲原廠數值。</summary>
     [JsonPropertyName("tweaks")]
-    public Dictionary<string, decimal> Tweaks { get; set; } = new(StringComparer.Ordinal)
-    {
-        ["hero_max_army"] = 100m
-    };
+    public Dictionary<string, decimal> Tweaks { get; set; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -140,6 +140,13 @@ public sealed class ToolkitConfig
     [JsonIgnore]
     public List<string> MigrationsApplied { get; set; } = [];
 
+    /// <summary>
+    /// 設定檔存在但無法解析時的錯誤訊息，null 代表載入正常。
+    /// CLI 與 GUI 必須把它顯示出來——見 <see cref="Load"/> 的說明。
+    /// </summary>
+    [JsonIgnore]
+    public string? LoadError { get; set; }
+
     public static string DefaultConfigPath =>
         Path.Combine(AppContext.BaseDirectory, "cktoolkit.json");
 
@@ -167,9 +174,15 @@ public sealed class ToolkitConfig
                 string json = File.ReadAllText(target);
                 return FromJson(json);
             }
-            catch
+            catch (Exception ex)
             {
-                // 解析失敗退回預設
+                // ⚠ 絕對不能靜默退回預設值。設定檔壞掉時若不出聲，使用者會看到
+                // 一個「什麼都沒設定」的工具，以為自己的設定不見了，或更糟——
+                // 以為修改已經套用了但其實跑的是預設值。
+                // 這裡把錯誤帶回去，由 CLI / GUI 顯示，並且保留原檔不覆寫。
+                var broken = CreateDefault();
+                broken.LoadError = Strings.Get("Error_ConfigParseFailed", target, ex.Message);
+                return broken;
             }
         }
 

@@ -1,15 +1,16 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
+using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
 namespace CKToolkit.SelfTest;
 
 /// <summary>
-/// Phase 1, Phase 2, Phase 2B & Phase 3 自我驗證測試套件。
+/// Phase 1, Phase 2, Phase 2B, Phase 3, Phase 4 & Phase 6 自我驗證測試套件。
 ///
 /// 涵蓋檢查項目：
 ///   Phase 1:
@@ -49,6 +50,11 @@ namespace CKToolkit.SelfTest;
 ///   28. vxSettings.ini: [Language] Default 設定與 Normalise 原版反轉
 ///   29. LangInstaller: 語言包範本 (export-template) 骨架匯出
 ///   30. CLI lang: list, install, uninstall, export-template 端對端整合測試
+///
+///   Phase 4 & Phase 6 修改器模組、取樣分析器與 CLI 指令：
+///   31. TrainerKeyMapReversal: 小鍵盤按鍵映射與精確反轉
+///   32. TrainerScriptsAndDataPakReversal: 作弊腳本、Tweak 定義與 data.pak 精確反轉
+///   33. CliTrainerAndProfileCommands: trainer list-cheats, list-tweaks, set 參數驗證、重複按鍵拒絕、遊戲目錄零寫入與 profile 取樣分析器指令測試
 /// </summary>
 internal static class Program
 {
@@ -61,7 +67,7 @@ internal static class Program
         Console.OutputEncoding = utf8;
         Console.InputEncoding = utf8;
 
-        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1, Phase 2, Phase 2B & Phase 3) ===\n");
+        Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1–4 & Phase 6) ===\n");
 
         // Phase 1 核心測試
         RunGroup("1. ToolkitConfig", TestToolkitConfigRoundTrip);
@@ -103,11 +109,16 @@ internal static class Program
         RunGroup("29. LangExportTemplate", TestLangExportTemplate);
         RunGroup("30. CliLangCommands", TestCliLangCommands);
 
+        // Phase 4 & Phase 6 修改器模組、取樣分析器與 CLI 指令測試
+        RunGroup("31. TrainerKeyMapReversal", TestTrainerKeyMapReversal);
+        RunGroup("32. TrainerScriptsAndDataPakReversal", TestTrainerScriptsAndDataPakReversal);
+        RunGroup("33. CliTrainerAndProfileCommands", TestCliTrainerAndProfileCommands);
+
         Console.WriteLine();
         if (_failures == 0)
         {
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("所有測試項目全部通過！ (Phase 1, Phase 2, Phase 2B & Phase 3 全綠)");
+            Console.WriteLine("所有測試項目全部通過！ (Phase 1–4 & Phase 6 全綠)");
             Console.ResetColor();
             return 0;
         }
@@ -1875,6 +1886,247 @@ internal static class Program
         }
     }
 
+    private static void TestTrainerKeyMapReversal()
+    {
+        Console.WriteLine("\n31. Trainer KeyMap 小鍵盤映射與精確反轉測試");
+
+        byte[] vanilla = CreateSyntheticExe32();
+        Check("原版按鍵表通過版本驗證", KeyMap.Verify(vanilla) is null);
+        Check("原版按鍵表未重對應", !KeyMap.IsRemappedExe(vanilla));
+
+        byte[] patched = KeyMap.Apply(vanilla, numpadKeys: true);
+        Check("小鍵盤按鍵表全部完成重對應", KeyMap.IsFullyRemappedExe(patched));
+
+        var state = PatchState.Inspect(GameFile.Exe, patched);
+        Check("PatchState 辨識 key_map", state.IsPatched && state.AppliedPatches.Contains("key_map"));
+
+        var reversed = PatchState.Normalise(GameFile.Exe, patched);
+        Check("KeyMap 正規化成功", reversed.Success);
+        Check("KeyMap 反轉後逐位元組等於原版", reversed.Value is not null && reversed.Value.SequenceEqual(vanilla));
+
+        byte[] mixed = (byte[])patched.Clone();
+        var first = KeyMap.All.First(b => b.Numpad is not null);
+        BitConverter.GetBytes(first.Vanilla).CopyTo(mixed, first.ImmOffset);
+        Check("部分重對應的混合狀態拒絕辨識", PatchState.Inspect(GameFile.Exe, mixed).IsUnrecognised);
+
+        Check("14 個作弊定義完整", Cheats.All.Count == 14);
+        Check("小鍵盤模式 14 個作弊各有唯一按鍵",
+            Cheats.All.Select(c => c.NumpadKey).Distinct(StringComparer.Ordinal).Count() == Cheats.All.Count);
+    }
+
+    private static void TestTrainerScriptsAndDataPakReversal()
+    {
+        Console.WriteLine("\n32. Trainer 作弊腳本、Tweak 定義與 data.pak 精確反轉測試");
+
+        foreach (var cheat in Cheats.All)
+        {
+            string script = Cheats.BuildScDebug(
+                [new CheatSelection { Id = cheat.Id, Key = cheat.NumpadKey, Parameters = cheat.Defaults() }],
+                "auto", 1, keepVanilla: false);
+            Check($"作弊 {cheat.Id} 產生有效且具對應鍵的 SCDEBUG",
+                script.Contains("<scdebug>", StringComparison.Ordinal) &&
+                script.Contains($"id=\"{cheat.NumpadKey}\"", StringComparison.Ordinal));
+        }
+
+        Check("四種 Tweak 型別均已移植",
+            Tweaks.All.Any(t => t is AttrTweak) &&
+            Tweaks.All.Any(t => t is IniTweak) &&
+            Tweaks.All.Any(t => t is MultiplierTweak) &&
+            Tweaks.All.Any(t => t is CommandDelayTweak));
+
+        var vanillaPak = CreateSyntheticDataPak();
+        byte[] vanillaBytes = vanillaPak.ToBytes();
+        var config = new TrainerConfig
+        {
+            Enabled = true,
+            NumpadKeys = true,
+            KeepVanilla = false,
+            Cheats = [new CheatConfig { Id = "gold_fill", Enabled = true, Key = "F1" }]
+        };
+
+        var patchedPak = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPak, config);
+        byte[] patchedBytes = patchedPak.ToBytes();
+        Check("Trainer marker 已寫入 data.pak", patchedPak.Contains(TrainerInstaller.MarkerPath));
+        Check("PatchState 辨識 trainer_marker",
+            PatchState.Inspect(GameFile.DataPak, patchedBytes).AppliedPatches.Contains("trainer_marker"));
+
+        var reversed = PatchState.Normalise(GameFile.DataPak, patchedBytes);
+        Check("Trainer data.pak 正規化成功", reversed.Success);
+        Check("Trainer data.pak 反轉後逐位元組等於原版",
+            reversed.Value is not null && reversed.Value.SequenceEqual(vanillaBytes));
+    }
+
+    // --- 33. CLI trainer list-cheats, list-tweaks, set 參數驗證、重複按鍵拒絕、遊戲目錄零寫入與 profile 取樣分析器指令測試
+    private static void TestCliTrainerAndProfileCommands()
+    {
+        Console.WriteLine("\n33. CLI trainer list-cheats, list-tweaks, set 參數驗證、零寫入與 profile 取樣分析器測試");
+
+        string tempDir = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_CliTrainer_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string configPath = Path.Combine(tempDir, "cktoolkit.json");
+
+        // 建立合成遊戲目錄
+        string tempGameDir = Path.Combine(tempDir, "Game");
+        Directory.CreateDirectory(tempGameDir);
+        byte[] vanillaExeBytes = CreateSyntheticExe32();
+        byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+        byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+        byte[] vanillaLocalPakBytes = CreateSyntheticLocalPak().ToBytes();
+        byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+        File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
+
+        var initialSnapshot = new Dictionary<string, byte[]>();
+        foreach (var file in Directory.GetFiles(tempGameDir))
+        {
+            initialSnapshot[file] = File.ReadAllBytes(file);
+        }
+
+        try
+        {
+            // 1. trainer list-cheats --json
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "list-cheats", "--json"], stdout, stderr);
+                Check("CLI trainer list-cheats 退出碼 0", exitCode == ExitCodes.Success);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == true 且 command == 'trainer list-cheats'", env is not null && env.Ok && env.Command == "trainer list-cheats");
+            }
+
+            // 2. trainer list-tweaks --json
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "list-tweaks", "--json"], stdout, stderr);
+                Check("CLI trainer list-tweaks 退出碼 0", exitCode == ExitCodes.Success);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == true 且 command == 'trainer list-tweaks'", env is not null && env.Ok && env.Command == "trainer list-tweaks");
+            }
+
+            // 3. trainer set 拒絕未知的作弊代號 -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--cheat", "unknown_cheat_xyz=on", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 拒絕未知作弊代號 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+            }
+
+            // 4. trainer set 拒絕未知的調整代號 -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--tweak", "unknown_tweak_xyz=100", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 拒絕未知調整代號 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+            }
+
+            // 5. trainer set 拒絕超出範圍的 tweak 數值 -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--tweak", "hero_max_army=9999999", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 拒絕超出範圍的 tweak 數值 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+            }
+
+            // 6. trainer set 拒絕未知的按鍵代號 -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--key", "gold_fill=INVALID_KEY", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 拒絕未知的按鍵代號 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+            }
+
+            // 7. trainer set 拒絕兩個啟用的作弊綁定相同按鍵 -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute([
+                    "trainer", "set",
+                    "--cheat", "gold_fill=on",
+                    "--key", "gold_fill=F3",
+                    "--cheat", "food_fill=on",
+                    "--key", "food_fill=F3",
+                    "--config", configPath,
+                    "--json"
+                ], stdout, stderr);
+                Check("CLI trainer set 拒絕重複按鍵綁定 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套包含重複按鍵錯誤訊息", env is not null && !env.Ok && env.Errors.Any(e => e.Contains("F3")));
+            }
+
+            // 8. trainer set 合法設定 -> 寫入設定檔，零寫入遊戲目錄，且當 trainer.enabled=false 時發出警告
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute([
+                    "trainer", "set",
+                    "--cheat", "gold_fill=on",
+                    "--key", "gold_fill=F2",
+                    "--param", "buff_army.attack=100",
+                    "--tweak", "hero_max_army=100",
+                    "--numpad", "on",
+                    "--config", configPath,
+                    "--game", tempGameDir,
+                    "--json"
+                ], stdout, stderr);
+                Check("CLI trainer set 合法設定執行成功 (exitCode 0)", exitCode == ExitCodes.Success);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("JSON 封套 ok == true", env is not null && env.Ok);
+                Check("未開啟 trainer.enabled 時發出警告", env is not null && env.Warnings.Count > 0);
+
+                var loaded = ToolkitConfig.Load(configPath);
+                Check("設定檔中 numpadKeys 已更新為 true", loaded.Trainer.NumpadKeys);
+                Check("設定檔中 tweaks 包含 hero_max_army=100", loaded.Trainer.Tweaks.TryGetValue("hero_max_army", out decimal v) && v == 100);
+                Check("設定檔中 cheats 包含 gold_fill", loaded.Trainer.Cheats.Any(c => c.Id == "gold_fill" && c.Enabled && c.Key == "F2"));
+            }
+
+            // 9. 驗證 trainer set 遊戲目錄零寫入保證
+            foreach (var (filePath, origBytes) in initialSnapshot)
+            {
+                byte[] currentBytes = File.ReadAllBytes(filePath);
+                string fileName = Path.GetFileName(filePath);
+                Check($"trainer set 未修改遊戲檔案 {fileName} (零寫入保證)", currentBytes.SequenceEqual(origBytes));
+            }
+
+            // 10. profile 當遊戲未執行且未指定 --wait 時 -> exit code 1
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["profile", "--seconds", "1", "--process", "NonExistentGameProcess.exe", "--json"], stdout, stderr);
+                Check("profile 在程序未執行時回傳 exitCode 1", exitCode == ExitCodes.GeneralFailure);
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("profile JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+            }
+
+            // 11. profile 參數錯誤 (如負數 seconds) -> exit code 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["profile", "--seconds", "-5", "--json"], stdout, stderr);
+                Check("profile 無效參數回傳 exitCode 2", exitCode == ExitCodes.InvalidArgs);
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
     #region Fixture Helpers
 
     /// <summary>
@@ -1948,6 +2200,13 @@ internal static class Program
         {
             int off = (int)(rw.Va - 0x00400000);
             rw.Orig.CopyTo(pe.AsSpan(off, rw.Orig.Length));
+        }
+
+        // D. Trainer KeyMap 原版 F1~F12 / 其他按鍵立即數與指令前綴
+        foreach (var binding in KeyMap.All)
+        {
+            binding.Prefix.CopyTo(pe.AsSpan(binding.ImmOffset - binding.Prefix.Length, binding.Prefix.Length));
+            BitConverter.TryWriteBytes(pe.AsSpan(binding.ImmOffset, 4), binding.Vanilla);
         }
 
         return pe;
@@ -2043,6 +2302,8 @@ internal static class Program
             "; Rank definitions\r\n";
 
         pak.WriteText("VXCONST.INI", constIniContent);
+        pak.WriteText(Cheats.ScDebugPath,
+            "<scdebug>\n\t<keys>\n\t\t<key id=\"F12\" script=\"Debug(1);\"/>\n\t</keys>\n</scdebug>\n");
         return pak;
     }
 

@@ -1,7 +1,8 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Serialization;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
+using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
@@ -175,6 +176,7 @@ public sealed class PatchPipeline
     public static PatchPipeline CreateDefault()
     {
         var pipeline = new PatchPipeline();
+        pipeline.RegisterModule(new TrainerModule());
         pipeline.RegisterModule(new PerfModule());
         pipeline.RegisterModule(new LangModule());
         return pipeline;
@@ -249,6 +251,7 @@ public sealed class PatchPipeline
             if (config.Perf.VideoFix) exeLayered.Add("video_fix");
             if (config.Perf.Hires >= 1600) exeLayered.Add($"hires_zoom ({config.Perf.Hires})");
             if (config.Perf.KeepRes) exeLayered.Add("res_writeback");
+            if (config.Trainer.Enabled && config.Trainer.NumpadKeys) exeLayered.Add("key_map");
 
             foreach (var mod in _modules)
             {
@@ -338,6 +341,10 @@ public sealed class PatchPipeline
             if (config.Perf.AddRes is { Count: > 0 })
             {
                 dataPakLayered.Add($"resolutions_append ({string.Join(", ", config.Perf.AddRes)})");
+            }
+            if (TrainerHasPayload(config.Trainer))
+            {
+                dataPakLayered.Add("trainer_marker");
             }
 
             foreach (var mod in _modules)
@@ -717,6 +724,7 @@ public sealed class PatchPipeline
                 if (config.Perf.VideoFix) list.Add("video_fix");
                 if (config.Perf.Hires >= 1600) list.Add("hires_zoom");
                 if (config.Perf.KeepRes) list.Add("res_writeback");
+                if (config.Trainer.Enabled && config.Trainer.NumpadKeys) list.Add("key_map");
                 break;
 
             case GameFile.Launcher:
@@ -735,6 +743,7 @@ public sealed class PatchPipeline
                 {
                     list.Add("resolutions_append");
                 }
+                if (TrainerHasPayload(config.Trainer)) list.Add("trainer_marker");
                 break;
 
             case GameFile.LocalPak:
@@ -771,6 +780,11 @@ public sealed class PatchPipeline
         }
         return list;
     }
+
+    private static bool TrainerHasPayload(TrainerConfig trainer) =>
+        trainer.Enabled &&
+        (trainer.Cheats.Any(c => c.Enabled) ||
+         trainer.Tweaks.Any(kv => Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
 
     // ---- 先寫 .cktmp 再取代之安全寫檔輔助 ----------------------------------
 

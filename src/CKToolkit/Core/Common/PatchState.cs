@@ -1,7 +1,8 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
+using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
@@ -150,11 +151,19 @@ public static class PatchState
         // 4. LAA 檢查
         bool laaApplied = LargeAddressAware.IsApplied(bytes);
 
+        // 5. Trainer KeyMap 檢查。只接受「全原版」或「全小鍵盤」；混合狀態
+        // 代表先前寫入中斷或第三方修改，必須拒絕，不可猜測使用者意圖。
+        if (KeyMap.Verify(bytes) is not null) return FileState.Unrecognised();
+        bool keyMapApplied = KeyMap.IsRemappedExe(bytes);
+        if (keyMapApplied && !KeyMap.IsFullyRemappedExe(bytes))
+            return FileState.Unrecognised();
+
         var patches = new List<string>();
         if (laaApplied) patches.Add("laa");
         if (vmApplied) patches.Add("video_fix");
         if (ztApplied) patches.Add("hires_zoom");
         if (rwApplied) patches.Add("res_writeback");
+        if (keyMapApplied) patches.Add("key_map");
 
         return patches.Count > 0 ? FileState.PatchedByUs(patches) : FileState.Vanilla();
     }
@@ -191,6 +200,9 @@ public static class PatchState
 
             // 4. 還原 ResolutionWriteback 指令序列
             ResolutionWriteback.Apply(ref exeBytes, false);
+
+            // 5. 還原 Trainer 的 F1~F12 小鍵盤立即數
+            exeBytes = KeyMap.Restore(exeBytes);
 
             return Result<byte[]>.Ok(exeBytes);
         }
@@ -275,7 +287,16 @@ public static class PatchState
             return FileState.Unrecognised();
         }
 
+        // 修改器的標記檔同時是「裝了什麼」與「怎麼還原」的唯一依據。
+        // 標記檔在但內容壞掉時必須拒絕，不能當成沒裝——那會把改過的數值留在遊戲裡。
+        bool trainerInstalled = TrainerInstaller.IsInstalled(pak);
+        if (trainerInstalled && TrainerInstaller.ReadMarker(pak) is null)
+        {
+            return FileState.Unrecognised();
+        }
+
         var patches = new List<string>();
+        if (trainerInstalled) patches.Add("trainer_marker");
         if (isApp) patches.Add("resolutions_append");
 
         return patches.Count > 0 ? FileState.PatchedByUs(patches) : FileState.Vanilla();
@@ -299,7 +320,12 @@ public static class PatchState
         try
         {
             var pak = HmmPak.FromBytes(liveBytes);
+
+            // 反轉順序與套用順序相反（AGENTS.md §2.2 的疊加順序是
+            // 修改器 tweak → Perf 的 [Resolutions]），先剝 Perf 再剝修改器。
             Resolutions.RestoreStockResolutions(pak);
+            TrainerInstaller.Uninstall(pak);
+
             return Result<byte[]>.Ok(pak.ToBytes());
         }
         catch (Exception ex)
