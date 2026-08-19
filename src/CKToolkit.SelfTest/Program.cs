@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
@@ -74,6 +74,7 @@ internal static class Program
         RunGroup("2. IniFile", TestIniFileRoundTripAndManipulation);
         RunGroup("3. PeFile", TestPeFileParsingSectionAddAndRemove);
         RunGroup("4. HmmPak", TestHmmPakSyntheticRoundTrip);
+        RunGroup("4b. HmmPakDirectoryOrdering", TestHmmPakDirectoryOrdering);
 
         // Phase 2B 核心測試
         RunGroup("5. PatchStateInspectAndNormalise", TestPatchStateInspectAndNormalise);
@@ -328,6 +329,69 @@ internal static class Program
     }
 
     // --- 4. HmmPak 合成往返測試 ---------------------------------------------
+    /// <summary>
+    /// HMMSYS 目錄排序不變式。
+    ///
+    /// 這是踩過的坑：語言包安裝後 CHINESE\ 底下 297 個項目內容全部正確、vxSettings 也指向
+    /// chinese，但遊戲仍顯示英文——因為新項目被 append 在目錄尾端而非依名稱排序，引擎查不到。
+    /// 原版 pak 全部有序（local.pak 924 項、data.pak 876 項），前身 Python 實作也在建檔前排序。
+    ///
+    /// 先前的往返測試抓不到這個問題，因為我們自己讀寫是自洽的；必須直接斷言「有序」本身。
+    /// </summary>
+    private static void TestHmmPakDirectoryOrdering()
+    {
+        Console.WriteLine("\n4b. HmmPak 目錄排序不變式測試");
+
+        static int OutOfOrder(HmmPak pak)
+        {
+            var names = pak.Names().ToList();
+            int bad = 0;
+            for (int i = 1; i < names.Count; i++)
+            {
+                if (string.CompareOrdinal(names[i - 1], names[i]) > 0)
+                {
+                    bad++;
+                }
+            }
+            return bad;
+        }
+
+        var pak = HmmPak.CreateEmpty();
+        pak.WriteText(@"ZZZ\LAST.TXT", "z");
+        pak.WriteText(@"AAA\FIRST.TXT", "a");
+        pak.WriteText(@"MMM\MIDDLE.TXT", "m");
+        pak.WriteText(@"FONTS\.MARKER.JSON", "{}");
+
+        var reloaded = HmmPak.FromBytes(pak.ToBytes());
+        Check("亂序新增後序列化，目錄依名稱排序", OutOfOrder(reloaded) == 0,
+            string.Join(" | ", reloaded.Names()));
+        Check("排序後所有項目仍可正確讀取",
+            reloaded.ReadText(@"AAA\FIRST.TXT") == "a"
+            && reloaded.ReadText(@"ZZZ\LAST.TXT") == "z"
+            && reloaded.ReadText(@"FONTS\.MARKER.JSON") == "{}");
+
+        // 真實原版 pak 必須本來就有序；若不是，代表我們對這個格式的理解有誤。
+        string[] realPaks =
+        [
+            @"（原版備份路徑，已刪除）",
+            @"（原版備份路徑，已刪除）",
+        ];
+
+        foreach (string rp in realPaks)
+        {
+            if (!File.Exists(rp))
+            {
+                continue;
+            }
+
+            byte[] raw = File.ReadAllBytes(rp);
+            var real = HmmPak.FromBytes(raw);
+            string label = Path.GetFileName(rp);
+            Check($"真實原版 {label} 目錄本來就有序", OutOfOrder(real) == 0);
+            Check($"真實原版 {label} 排序後往返仍逐位元組不變", real.ToBytes().SequenceEqual(raw));
+        }
+    }
+
     private static void TestHmmPakSyntheticRoundTrip()
     {
         Console.WriteLine("\n4. HmmPak 合成封裝檔往返測試");

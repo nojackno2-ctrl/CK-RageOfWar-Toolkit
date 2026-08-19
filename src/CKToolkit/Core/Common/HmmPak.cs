@@ -179,6 +179,22 @@ public sealed class HmmPak
 
     public byte[] ToBytes()
     {
+        // ★ 目錄必須依名稱排序後才序列化。
+        //
+        // HMMSYS 的目錄是排序的（原版 local.pak 924 個項目、data.pak 876 個項目都完全有序），
+        // 而且採前綴壓縮——每個項目只存「與前一個名稱共用幾個字元」。引擎顯然依賴這個
+        // 順序查表（極可能是二分搜尋）。
+        //
+        // 這條規則違反時的症狀非常有欺騙性：檔案內容完全正確、雜湊也對，但遊戲找不到它們。
+        // 實際發生過：語言包安裝後 CHINESE\ 底下 297 個項目全部存在且內容正確，
+        // vxSettings 也指向 chinese，但遊戲仍顯示英文——因為新項目被 append 在目錄尾端，
+        // 排在 SCENARIOS\... 之後，查表全部落空。前身 Python 實作在 ckpatch.py:308
+        // 用 sorted(files.items()) 排序後才建檔，所以它沒有這個問題。
+        //
+        // 排序規則：名稱已由 Normalize 統一為大寫加反斜線，用序數比較即與 Python 的
+        // 預設字串排序一致。
+        _entries.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+
         int dirSize = 0;
         string prev = string.Empty;
         foreach (var e in _entries)
