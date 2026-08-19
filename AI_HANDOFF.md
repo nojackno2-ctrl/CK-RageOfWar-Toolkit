@@ -1,4 +1,4 @@
-# AI_HANDOFF.md — 即時共用記憶
+﻿# AI_HANDOFF.md — 即時共用記憶
 
 ## 專案概要
 
@@ -33,118 +33,44 @@
 
 ---
 
-## 當前狀態
+## 當前狀態（2026-08-19）
 
-**階段：Phase 1、2、2B 已完成並在真實遊戲驗證通過。Phase 3 實作完成但尚未收尾——
-APF 字型精確反轉未達成，3 項測試失敗，詳見下方「尚未完成的工作」。**
+**Phase 1–6 全部完成。建置 0 警告 0 錯誤，SelfTest 全綠，並已在真實 Steam 安裝上驗證。**
 
-真實遊戲驗證進度（不是只有測試通過，是拿實際 Steam 安裝跑過）：
+| Phase | 內容 | 狀態 |
+|---|---|---|
+| 1 | 方案骨架 + `Core/Common`（狀態判定、套用管線、PE/pak/INI、設定） | 完成 |
+| 2 | `Core/Perf` — 9 項修補 + 取樣分析器 | 完成，遊戲內驗證 |
+| 2B | 移除備份層，改為精確反轉與正規化 | 完成 |
+| 3 | `Core/Lang` — 語言包機制與 APF 字型可逆管線 | 完成，遊戲內驗證 |
+| 4 | `Core/Trainer` — 14 作弊、Tweaks、按鍵重對應 | 完成，位元組級驗證 |
+| 5 | GUI — 5 分頁 + 雙語 | 完成 |
+| 6 | CLI — 全部指令與 JSON 封套 | 完成 |
+| 7 | 雙語 README、GitHub 發布 | README 完成，發布未做 |
 
-- 1920x1080 HD 已在遊戲內確認生效（引擎實際以 1920x1080 渲染，非僅桌面切換）
-- 四項 exe 修補的位元組、`.ckhr` 節區與立即數重寫、啟動器模式表、`[Resolutions]` 附加皆已核對
-- `apply` → `restore --all` 後五個檔案逐位元組回到原版
+### 真實遊戲驗證紀錄（非僅測試通過）
+
+- 1920x1080 HD 在遊戲內確認生效，引擎實際以該解析度渲染
+- 四項 exe 修補位元組、`.ckhr` 節區與立即數重寫、啟動器模式表、`[Resolutions]` 附加皆逐一核對
+- 語言包安裝產出 8.7MB `local.pak`（前身專案為 8.6MB，差 1.4%），中文內容與 `Default=chinese` 就位
+- 修改器 `key_map` 與 `trainer_marker` 疊加正確，含 tweak 改寫的 56 個 class XML
+- `apply` → `restore --all` 後五個檔案全部逐位元組回到原版
 - 反轉只回捲本工具的修補，玩家自己的遊戲設定（如 `GameSpeed`）不受影響
-- `keepres` 實測有效：遊戲執行並離開後 `Resolution=4` 仍然存在
+- `keepres` 實測有效：遊戲執行並離開後 `Resolution=4` 仍在
 
-已完成：
+### 尚未驗證
 
-- 儲存庫骨架、`.gitignore`、MIT `LICENSE`
-- `AGENTS.md`：合併三專案的協作規範與無備份精確反轉修補紀律
-- `docs/SPEC.md`：完整整合規格（無備份架構、單一管線、三模組移植清單、語言包格式、GUI / CLI 規格、SelfTest 必測項、驗收清單）
-- 資產遷移：
-  - `assets/langpacks/zh-TW/` — `pack.json` + 4 份翻譯 JSON（358KB，共 3,575 條）+ 詞彙表 + 嵌入式組件資源
-  - `docs/reverse-engineering-notes.md` — 效能專案 67KB 逆向筆記（不可再生）
-  - `docs/` — HMMSYS pak 格式、VS 腳本速查、內建主控台、config.ini 解壓內容
-  - `tools/{perf,lang,trainer}/` — Python 交叉驗證 oracle
-- **Phase 1 — 方案骨架 + `Core/Common` 實作完成**
-- **Phase 2 — `Core/Perf` 效能與相容性修補模組實作完成**
-- **Phase 2B — 無備份架構與精確反轉正規化實作完成**
-- **Phase 3 — `Core/Lang` 語言包管理模組與 APF 字型可逆管線實作完成**：
-  - `ApfFont.cs`：APF 點陣字型格式讀寫器，實作 8/14 級 RLE 編解碼，透過原始 `RawBlock` 保留與 `StripAddedRanges()` 達成 100% 逐位元組原版精確反轉。
-  - `GdiFont.cs`：Win32 GDI 字形光柵化器，支援 0..64 量化轉換至 0..14 點陣，字體存在性檢查與名稱別名比對。
-  - `FontBuilder.cs`：泛化字形產生器，由 `pack.json` 宣告範圍驅動動態劃分區間，絕無寫死之 CJK 常數。
-  - `LocXml.cs`：XML 翻譯表重建與 `HELP.XML` 說明文件處理，具備非自閉合正則表達式保護。
-  - `Translations.cs`：翻譯字典集合與 JSON 剖析載入。
-  - `LanguagePack.cs` & `PackLoader.cs`：`pack.json` 嚴格必填欄位驗證、內建 `zh-TW` 組件資源載入與外部目錄探索。
-  - `LangInstaller.cs` & `LangModule.cs`：語言包安裝、Uninstall 逐位元組還原、範本匯出 (`export-template`)、`vxSettings.ini` 語系設定就地更新。
-  - `PatchPipeline.cs` & `PatchState.cs`：整合 `LangModule`，支援 `local.pak` 狀態判定與正規化還原。
-  - `CliHost.cs`：實作 `lang list`, `lang install`, `lang uninstall`, `lang export-template`。
-  - `SelfTest`：實作 Group 23–30（共 30 大組測試）。
+- **取樣分析器從未對執行中的遊戲取樣過。** 失敗路徑已驗（程序不存在時回 exit 1 且不卡住），
+  但 `Wow64SuspendThread` / `Wow64GetThreadContext` 的實際取樣路徑沒跑過。
+  需要在遊戲執行中跑一次 `profile --seconds 30 --out ckprofile.txt`。
+- **`export-template` 產生的範本沒有被真人用來做出第二個語言。**
+  可擴充性的真正驗收是有人能靠它完成一個新語言。
+- **GUI 只做過建置與啟動驗證**，各分頁的互動路徑（尤其修改器分頁的參數編輯）沒有逐一點過。
 
----
+### 剩餘工作
 
-## 當前狀態
-
-**階段：Phase 3 (Core/Lang 語言包管理與 APF 字型可逆管線) 修正第 3 輪 (Fix Round 3) 完成。**
-
-已完成：
-
-- 儲存庫骨架、`.gitignore`、MIT `LICENSE`
-- `AGENTS.md`：合併三專案的協作規範與無備份精確反轉修補紀律
-- `docs/SPEC.md`：完整整合規格（無備份架構、單一管線、三模組移植清單、語言包格式、GUI / CLI 規格、SelfTest 必測項、驗收清單）
-- 資產遷移：
-  - `assets/langpacks/zh-TW/` — `pack.json` + 4 份翻譯 JSON（358KB，共 3,575 條）+ 詞彙表 + 嵌入式組件資源
-  - `docs/reverse-engineering-notes.md` — 效能專案 67KB 逆向筆記（不可再生）
-  - `docs/` — HMMSYS pak 格式、VS 腳本速查、內建主控台、config.ini 解壓內容
-  - `tools/{perf,lang,trainer}/` — Python 交叉驗證 oracle
-- **Phase 1 — 方案骨架 + `Core/Common` 實作完成**
-- **Phase 2 — `Core/Perf` 效能與相容性修補模組實作完成**
-- **Phase 2B — 無備份架構與精確反轉正規化實作完成**
-- **Phase 3 — `Core/Lang` 語言包管理模組與 APF 字型可逆管線實作完成 (Fix Round 3 修正完成)**：
-  - `FontPatchManifest.cs`：定義 `FontPatchManifest` 與 `FontPatchRecord`（含 `OriginalMaxWidth`），記錄安裝時確切新增的範圍與修改之字形，以自我描述 (self-describing) 清冊檔案 `FONTS\.patch_marker.json` 隨封裝檔持久化，徹底根除任何碼位門檻常數。
-  - `ApfFont.cs`：APF 點陣字型格式讀寫器，實作 8/14 級 RLE 編解碼，透過原始 `RawBlock` 保留與依據事實清冊精確反轉之 `StripAddedRanges(FontPatchRecord)`，重算原創範圍 `Metrics[6]` (MaxWidth)、`Metrics[19]`、`Metrics[4]` 達成 100% 逐位元組原版精確反轉；加入 `CreatePatchRecord()` 與 `ModelEquals` 欄位級深層比對與 `DiagnoseByteDifference` / `DescribeApfOffset` 結構位移診斷。
-  - `GdiFont.cs`：Win32 GDI 字形光柵化器，支援 0..64 量化轉換至 0..14 點陣，字體存在性檢查與名稱別名比對。
-  - `FontBuilder.cs`：泛化字形產生器，由 `pack.json` 宣告範圍驅動動態劃分區間，支援重疊追加 `ExtendRangeWithGlyphs`，回傳包含 `FontPatchRecord` 之 `FontBuildResult`，絕無寫死之 CJK 常數。
-  - `LocXml.cs`：XML 翻譯表重建與 `HELP.XML` 說明文件處理，具備非自閉合正則表達式保護。
-  - `Translations.cs`：翻譯字典集合與 JSON 剖析載入。
-  - `LanguagePack.cs` & `PackLoader.cs`：`pack.json` 嚴格必填欄位驗證、內建 `zh-TW` 組件資源載入與外部目錄探索。
-  - `LangInstaller.cs` & `LangModule.cs`：修復檔案截斷與重複宣告問題；語言包安裝時自動產生並寫入 `FONTS\.patch_marker.json`、Uninstall 時依據清冊精確反轉並刪除 marker 逐位元組還原、範本匯出 (`export-template`)、`vxSettings.ini` 語系設定就地更新。
-  - `PatchPipeline.cs` & `PatchState.cs`：整合 `LangModule`，支援 `local.pak` marker 狀態判定與正規化還原。
-  - `CliHost.cs`：實作 `lang list`, `lang install`, `lang uninstall`, `lang export-template`。
-  - `SelfTest`：實作 Group 23–30（共 30 大組測試，強化 Group 23 單區間、多區間、重疊區間與真實原版 APF 字型原廠範圍數與 Metrics[4] 保持未變與逐位元組精確還原斷言；Group 27 強化低碼位 &lt; 0x2000 與重疊範圍語言包之精確可逆性驗證）。
-
----
-
-## Phase 3 修正第 3 輪 (Fix Round 3) 根因分析與修正紀錄 (2026-08-18)
-
-1. **編譯錯誤修復 (CS1513: } expected)**：
-   - 根因：先前的編輯操作在 `LangInstaller.cs` 中留下了一段未閉合且被截斷的舊版 `Install` 方法（第 32–124 行），導致第 125 行起的全域常數與第二版 `Install` 方法落入未閉合的方法區塊內引發語法錯誤。
-   - 修正：完全清除殘留的截斷片段，重整 `LangInstaller.cs` 檔案結構，確保所有方法（`Install`、`Uninstall`、`ExportTemplate`、`GetInstalledLanguages`）均正確開閉並具備明確的回傳路徑。
-2. **APF 精確反轉清冊機制強化**：
-   - 在 `FontPatchRecord` 中新增 `OriginalMaxWidth` 欄位並於 `CreatePatchRecord()` 時記錄原版字型的最大字形寬度（`Metrics[6]`）。
-   - 在 `ApfFont.StripAddedRanges` 中依據清冊還原 `Metrics[6]`，與 `Metrics[19]`、`Metrics[4]` 及原始 `RawBlock` 一併達成 100% 逐位元組可逆。
-   - 徹底杜絕任何基於碼位（如 `First >= 0x2000`）的推測判定，真實原版 APF 字型（`COURIERNEW16.APF`, `TAHOMA13.APF`, `TAHOMA13B.APF`, `TAHOMA14B.APF`, `TAHOMA16B.APF`, `TAHOMA20B.APF`）所包含的原廠 `>= 0x2000` 範圍在反轉後維持原創 10 個範圍（`Metrics[4] == 220`），不誤刪任何原廠區段。
-
-### 待辦階段（依序）
-
-1. **Phase 4 — `Core/Trainer`**（自 `CK_RageOfWar修改器` 移植）
-   - 14 項作弊、4 種 Tweak 型別、兩種按鍵配置
-   - **修改器是檔案修補，不是記憶體注入**：改的是 `data.pak` 內的 VS 腳本、
-     `CLASSES\UNIT.SC.XML`、`scdebug.xml`、`config.ini`，以及 exe 的按鍵表立即數
-     （檔案位移 `0x1E6860` 起，VA = 位移 + `0x400000`）。不要誤寫成記憶體修改器。
-   - 註冊 `key_map`（Exe）與 `trainer_marker`（DataPak）兩個簽章，完成後這兩個檔案的
-     涵蓋率才完整，`status` 才會對它們給出真正的判定
-   - Tweaks 的反轉靠原廠預設值就地還原，同樣要求逐位元組
-2. **Phase 5 — GUI**（5 分頁 + 雙語 i18n；目前只有 Phase 1 的佔位視窗）
-3. **Phase 6 — CLI 補完**（`apply`/`restore`/`verify`/`perf`/`lang` 已於 Phase 2/3 提前完成，
-   尚缺 `trainer` 子指令與 `profile` 指令）
-4. **Phase 7 — 雙語 README、發布流程、GitHub 公開**
-
-### 尚未驗證的項目
-
-- **取樣分析器從未實際執行過**。`Profiler.cs`（685 行）已移植但只有編譯驗證，
-  沒有對執行中的遊戲取樣過。`Wow64SuspendThread` / `Wow64GetThreadContext` 路徑
-  必須實測，Phase 6 的 `profile` 指令做完後補上。
-- **語言包在真實 `local.pak` 上的安裝從未驗證**。目前只有合成 fixture。
-  比照 Perf 模組的做法，必須用真實檔案驗證安裝後遊戲能正常顯示中文、以及反轉後逐位元組還原。
-- **`export-template` 產生的範本沒有被真人用過**。可擴充性的真正驗收是「有人能靠它做出第二個語言」。
-
-### 已知的小項
-
-- Perf `apply` 在移除超出 ZoomMap 容量的解析度、或因此重新指向 `Resolution` 時**靜默進行**，
-  應發出說明性警告（Phase 3 任務書已列入但尚未確認完成）。
-- AGY 在這個專案裡反覆遺漏 `using` 指示詞（`VxSettingsPatch.cs`、`PatchState.cs` 各一次），
-  由呼叫端建置時發現並補上。這是無編譯器環境的固有代價，不是設計問題。
+1. GitHub 發布：建立儲存庫、Release 打包（需決定是否附 .NET 10 Desktop Runtime 的說明）
+2. 三個前身專案的刪除（本儲存庫已自給自足，但刪除前建議再確認一次資產完整）
 
 ---
 
@@ -267,6 +193,18 @@ APF 字型精確反轉未達成，3 項測試失敗，詳見下方「尚未完�
 ---
 
 ## 逆向工程與相容性關鍵筆記
+
+- **HMMSYS pak 目錄必須依名稱排序（踩過的坑，代價最高的一個）**：
+  原版 `local.pak`（924 項）與 `data.pak`（876 項）的目錄都是完全有序的，
+  格式本身也用前綴壓縮（每項只存與前一項共用幾個字元），引擎顯然靠這個順序查表。
+  **新增項目若 append 在尾端，引擎就找不到它們——但檔案內容完全正確、雜湊也對。**
+  實際症狀：語言包安裝後 `CHINESE\` 底下 297 個項目全部存在、譯文正確、字型含 2704 個
+  CJK 字形、`vxSettings` 也指向 chinese，但遊戲仍顯示英文。
+  修正在 `HmmPak.ToBytes()`，序列化前依序數比較排序。前身 Python 實作在 `ckpatch.py:308`
+  用 `sorted(files.items())`，所以它沒這個問題。
+  注意這個 bug **只影響新增項目**：`[Resolutions]` 是修改既有項目，所以 HD 一直正常，
+  這也是它拖到語言包才被發現的原因。往返測試抓不到，因為讀寫兩端是自洽的；
+  SelfTest 第 4b 組直接斷言「有序」這個不變式。
 
 - **HD 天花板**：遊戲引擎實測於 2048x1152 及以上解析度會在進入遊戲後崩潰並重設為 1024x768。出廠預設凍結於 1920x1080。
 - **ZoomMap 容量約束**：`data.pak` 內的 `[Resolutions]` 清單寬度必須小於等於當前 Exe 的 ZoomMap 表格容量（原版為 1600，HD 修補時為 Hires 設定值）。
