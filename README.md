@@ -1,4 +1,4 @@
-# CK-RageOfWar-Toolkit
+﻿# CK-RageOfWar-Toolkit
 
 *[繁體中文](#繁體中文) · [English](#english)*
 
@@ -137,6 +137,28 @@ CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域）
   而且每次崩潰都會把解析度設定寫成 0。工具本身接受任意尺寸，出廠設定保守。
 - **取樣分析器對遊戲唯讀**：暫停執行緒讀取 EIP 後立即恢復，不注入、不寫入遊戲記憶體。
 
+### 從原始碼建置與測試
+
+```
+dotnet build CKToolkit.sln -c Release
+dotnet run --project src/CKToolkit.SelfTest
+```
+
+自我測試有一部分會拿**真實的原版遊戲檔案**驗證我們對格式的理解——目錄排序、
+原廠語系白名單、APF 字型的精確反轉。這些是遊戲內容，不放在儲存庫裡，
+所以用環境變數指定：
+
+```
+set CKTOOLKIT_VANILLA_DIR=D:\path\to\vanilla
+```
+
+該目錄需含 `local.pak.orig` 與 `data.pak.orig`（用 Steam 驗證檔案完整性取得的原版副本）。
+沒設定時這些檢查會自動略過，其餘測試照常通過。
+
+這件事值得強調：本專案最難找的幾個 bug——語言包裝好卻顯示英文、還原後的 pak 少 4 個
+位元組、原版遊戲被工具拒絕——**合成測試全部是綠的**，只有真實檔案才照得出來。
+改動 pak、字型或 INI 相關程式碼時，請務必設定這個變數再跑測試。
+
 ### 授權與致謝
 
 MIT License。翻譯內容由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 完成。
@@ -269,6 +291,29 @@ Output is always UTF-8, regardless of the console code page.
 - **The profiler is read-only with respect to the game**: it suspends a thread,
   reads EIP, and resumes. Nothing is injected and nothing is written into the
   game's memory.
+
+### Building and testing
+
+```
+dotnet build CKToolkit.sln -c Release
+dotnet run --project src/CKToolkit.SelfTest
+```
+
+Some of the self-test checks our understanding of the file formats against **real vanilla
+game files** — directory ordering, the stock language list, byte-exact APF font reversal.
+Those are game content and are not in the repository, so point at them with:
+
+```
+set CKTOOLKIT_VANILLA_DIR=D:\path\to\vanilla
+```
+
+That directory needs `local.pak.orig` and `data.pak.orig`, copied from a Steam-verified
+install. Without it those checks skip and the rest of the suite still passes.
+
+This is worth stressing: the hardest bugs in this project — a language pack that installed
+correctly yet showed English, a restored pak four bytes short, a vanilla game being refused
+outright — **all passed the synthetic tests**. Only real files exposed them. Set the variable
+before touching anything to do with paks, fonts or INI files.
 
 ### Licence and credits
 

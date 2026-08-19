@@ -338,6 +338,33 @@ internal static class Program
     ///
     /// 先前的往返測試抓不到這個問題，因為我們自己讀寫是自洽的；必須直接斷言「有序」本身。
     /// </summary>
+    /// <summary>
+    /// 找出可用來做「真實原版檔案」驗證的目錄。
+    ///
+    /// 好幾組測試會拿真實的原版 pak 來驗證我們對格式的理解（目錄排序、原廠語系白名單、
+    /// APF 字型反轉）。這些檔案是遊戲內容，不能放進儲存庫，所以由環境變數指定；
+    /// 找不到時相關測試會自動略過，不會讓沒有遊戲的人無法跑測試。
+    ///
+    /// 設定方式：
+    ///     set CKTOOLKIT_VANILLA_DIR=D:\somewhere\vanilla
+    /// 該目錄需含 local.pak.orig 與 data.pak.orig（用 Steam 驗證檔案完整性取得的原版）。
+    /// </summary>
+    private static string? FindVanillaFile(string fileName)
+    {
+        var candidates = new List<string>();
+
+        string? env = Environment.GetEnvironmentVariable("CKTOOLKIT_VANILLA_DIR");
+        if (!string.IsNullOrWhiteSpace(env))
+        {
+            candidates.Add(Path.Combine(env, fileName));
+        }
+
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, "vanilla", fileName));
+        candidates.Add(Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\CK_RageOfWar_原版備份", fileName));
+
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
     private static void TestHmmPakDirectoryOrdering()
     {
         Console.WriteLine("\n4b. HmmPak 目錄排序不變式測試");
@@ -373,12 +400,13 @@ internal static class Program
         // 真實原版 pak 必須本來就有序；若不是，代表我們對這個格式的理解有誤。
         string[] realPaks =
         [
-            @"（原版備份路徑，已刪除）",
-            @"（原版備份路徑，已刪除）",
+            FindVanillaFile("local.pak.orig") ?? string.Empty,
+            FindVanillaFile("data.pak.orig") ?? string.Empty,
         ];
 
         foreach (string rp in realPaks)
         {
+            if (string.IsNullOrEmpty(rp)) continue;
             if (!File.Exists(rp))
             {
                 continue;
@@ -1436,10 +1464,7 @@ internal static class Program
         // D. 真實遊戲原廠 APF 字型完整反轉、範圍數保持與欄位一致性檢驗 (Real Game Fonts)
         string[] candidatePakPaths =
         [
-            Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\CK_RageOfWar_原版備份\local.pak.orig"),
-            @"（原版備份路徑，已刪除）",
-            Path.Combine(AppContext.BaseDirectory, @"..\..\..\..\..\CK_RageOfWar中文化\備份\local.pak"),
-            @"（前身備份，已刪除）"
+            FindVanillaFile("local.pak.orig") ?? string.Empty
         ];
 
         string? realPakPath = candidatePakPaths.FirstOrDefault(File.Exists);
