@@ -19,6 +19,84 @@ static HANDLE        g_thread = nullptr;
 static HANDLE        g_stop   = nullptr;
 static volatile LONG g_peakPrivateMb = 0;
 
+// ------------------------------------------------------------- live object census
+//
+// The engine keeps every handle-addressable object in one flat table: 0x00481A20 is
+// nothing but `return table[handle & 0xFFFF]`, and 0x00481A40 clears a slot when the
+// object dies. So counting the non-empty slots of that table gives the live object
+// count for free, with no extra reverse engineering and no per-frame cost.
+//
+// This is exactly the number worth having next to the crashes. Every fault this tool
+// has repaired was a script writing through a handle whose slot had just been cleared,
+// so it is not only "how big is the battle" -- the DEATHS figure below is the direct
+// driver of how many stale references are in flight at any moment.
+//
+// It counts all handle-managed objects, not units alone: buildings, projectiles and
+// effects share the table. Treat it as battle scale rather than an army roster.
+
+constexpr uintptr_t kHandleTable  = 0x00798CB8;
+constexpr int       kHandleSlots  = 0x10000;
+
+static unsigned char* g_prevOccupied = nullptr;   // one bit per slot, for birth/death deltas
+static bool           g_censusUsable = false;
+static LONG           g_peakLive = 0;
+static volatile LONG  g_lastLive = 0;
+
+static void CensusInit() {
+    // The table lives in the game's .data, so it is only there once the image is loaded.
+    // Verified rather than assumed: a wrong address here would report convincing nonsense.
+    // Walk the whole span rather than demanding one contiguous region. The first
+    // attempt required a single VirtualQuery region to cover all 256 KB and refused
+    // the table outright, because .data is split into several regions by page
+    // protection -- the memory was there all along, the check was simply too strict.
+    uintptr_t p   = kHandleTable;
+    uintptr_t end = kHandleTable + (uintptr_t)kHandleSlots * 4;
+    while (p < end) {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT ||
+            (mbi.Protect & PAGE_GUARD) || (mbi.Protect & 0xFF) == PAGE_NOACCESS) {
+            Logf("object census: handle table at 0x%08X is not fully readable (stopped at "
+                 "0x%08X); live counts unavailable.", (unsigned)kHandleTable, (unsigned)p);
+            return;
+        }
+        uintptr_t next = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        if (next <= p) return;
+        p = next;
+    }
+    g_prevOccupied = (unsigned char*)VirtualAlloc(nullptr, kHandleSlots / 8,
+                                                  MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    g_censusUsable = g_prevOccupied != nullptr;
+    if (g_censusUsable) {
+        Logf("object census: watching the %d-slot handle table at 0x%08X.",
+             kHandleSlots, (unsigned)kHandleTable);
+    }
+}
+
+// Counts occupied slots and, by diffing against the previous sample, how many objects
+// were created and destroyed in between.
+static void CensusSample(int& live, int& born, int& died) {
+    live = born = died = 0;
+    if (!g_censusUsable) return;
+
+    const uint32_t* table = (const uint32_t*)kHandleTable;
+    for (int i = 0; i < kHandleSlots; ++i) {
+        bool occupied = table[i] != 0;
+        unsigned char mask = (unsigned char)(1u << (i & 7));
+        unsigned char& bits = g_prevOccupied[i >> 3];
+        bool wasOccupied = (bits & mask) != 0;
+
+        if (occupied) {
+            ++live;
+            if (!wasOccupied) { ++born; bits |= mask; }
+        } else if (wasOccupied) {
+            ++died;
+            bits = (unsigned char)(bits & ~mask);
+        }
+    }
+    if (live > g_peakLive) g_peakLive = live;
+    InterlockedExchange(&g_lastLive, live);
+}
+
 struct AddressSpace {
     SIZE_T freeTotal;
     SIZE_T freeLargest;
@@ -49,6 +127,7 @@ static AddressSpace ScanAddressSpace() {
 static DWORD WINAPI TelemetryThread(LPVOID) {
     int tick = 0;
     long lastSuppressed = 0;
+    CensusInit();
     const double period = g_cfg.telemetryMs / 1000.0;
 
     // The engine loads content packs lazily, so the module list is not final at
@@ -87,6 +166,15 @@ static DWORD WINAPI TelemetryThread(LPVOID) {
             Logf("mem: private %u MB | working set %u MB", privMb, wsMb);
         }
 
+        // Battle scale first: it is the variable everything else in this log is a
+        // function of, so it belongs on its own line every single sample.
+        int live = 0, born = 0, died = 0;
+        CensusSample(live, born, died);
+        if (g_censusUsable) {
+            Logf("objects: %d live (peak %ld) | +%d born, -%d died since the last sample",
+                 live, g_peakLive, born, died);
+        }
+
         FrameTimingDrainAndLog(period);
 
         // Reported only when it moves. A rising count is direct evidence that the
@@ -100,9 +188,16 @@ static DWORD WINAPI TelemetryThread(LPVOID) {
         }
     }
 
-    Logf("telemetry stopped. peak private bytes this session: %d MB", (int)g_peakPrivateMb);
+    Logf("telemetry stopped. peak private bytes %d MB, peak live objects %ld.",
+         (int)g_peakPrivateMb, g_peakLive);
     return 0;
 }
+
+// Exposed so a crash report can state the battle scale at the moment of the fault --
+// the single most useful piece of context for a bug that only shows up when the map is
+// busy. Returns -1 when the census is not running.
+long CensusLiveObjects() { return g_censusUsable ? InterlockedCompareExchange(&g_lastLive, 0, 0) : -1; }
+long CensusPeakObjects() { return g_censusUsable ? g_peakLive : -1; }
 
 void TelemetryStart() {
     if (!g_cfg.telemetry) return;

@@ -2030,6 +2030,7 @@ public static partial class CliHost
         bool plain = false;
         bool attach = false;
         bool watch = false;
+        bool watchSecondsGiven = false;
         int watchSeconds = 300;
 
         for (int i = 0; i < options.Count; i++)
@@ -2059,6 +2060,7 @@ public static partial class CliHost
                         return OutputError("run", Strings.Get("Error_InvalidArgs", $"--watch-seconds 需為 5..3600 的整數，收到 '{v}'"),
                                            ExitCodes.InvalidArgs, isJson, stdout, stderr);
                     watchSeconds = n;
+                    watchSecondsGiven = true;
                     watch = true;
                     break;
                 }
@@ -2161,6 +2163,25 @@ public static partial class CliHost
             progress.Add(m);
             // 等待模式可能一等好幾分鐘，逐句印出來才知道它還活著。
             if (!isJson && watch) stdout.WriteLine($"  {m}");
+        }
+
+        // 沒有指定等待秒數的 --watch 是常駐監看，跑到使用者按 Ctrl+C 為止。
+        // 這是預設行為而不是額外選項，因為「玩到閃退卻沒有資料」已經發生兩次，
+        // 兩次都是遊戲從 Steam 啟動、繞過了唯一的注入點。
+        if (watch && !watchSecondsGiven)
+        {
+            using var cts = new CancellationTokenSource();
+            ConsoleCancelEventHandler onCancel = (_, e) => { e.Cancel = true; cts.Cancel(); };
+            Console.CancelKeyPress += onCancel;
+            try
+            {
+                GameRunner.WatchForever(diag, cts.Token, m => stdout.WriteLine($"  {m}"));
+            }
+            finally
+            {
+                Console.CancelKeyPress -= onCancel;
+            }
+            return ExitCodes.Success;
         }
 
         Result<RunOutcome> result =

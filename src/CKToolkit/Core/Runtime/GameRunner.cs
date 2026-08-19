@@ -138,6 +138,89 @@ public static class GameRunner
         return Result<RunOutcome>.Fail("等待逾時，期間沒有偵測到《Celtic Kings》啟動。");
     }
 
+    /// <summary>
+    /// 常駐監看：只要遊戲出現就掛上去，掛完繼續等下一次，直到被取消。
+    ///
+    /// 為什麼需要這個而不是只有單次等待：兩次「玩到閃退」的回報最後都發現整場沒有被
+    /// 插樁，因為使用者是從 Steam 開遊戲的，而那條路上沒有任何注入點。要求人每次改用
+    /// 別的方式啟動，是把工具的缺陷轉嫁給使用者；讓工具自己等，才是正確的分工。
+    ///
+    /// 已經掛載過的行程會被記住，所以重複輪詢不會重複注入。
+    /// </summary>
+    public static void WatchForever(
+        DiagnosticsOptions options, CancellationToken cancel, Action<string> log)
+    {
+        // The watcher keeps its OWN file, separate from the injected DLL's log.
+        //
+        // Three sessions in a row were reported as crashes with no diagnostics at all,
+        // and each time the only thing on disk was the toolkit's own smoke test -- which
+        // proves nothing was captured but says nothing about WHY. A watcher that leaves
+        // no trace when it fails to attach is a collector that cannot be debugged. This
+        // file records every decision it makes, so an empty diag folder is never again
+        // the whole story.
+        string watchLog = Path.Combine(DiagnosticsDirectory,
+            $"ckwatch-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        void Trace(string m)
+        {
+            log(m);
+            try
+            {
+                File.AppendAllText(watchLog, $"[{DateTime.Now:HH:mm:ss.fff}] {m}{Environment.NewLine}");
+            }
+            catch
+            {
+                // Never let logging failure stop the watching.
+            }
+        }
+
+        try { Directory.CreateDirectory(DiagnosticsDirectory); } catch { /* reported below */ }
+
+        Trace($"常駐監看已啟動（本工具 pid {Environment.ProcessId}，"
+            + $"{(Environment.IsPrivilegedProcess ? "以系統管理員身分執行" : "一般權限")}）。");
+        Trace($"監看紀錄：{watchLog}");
+        Trace("現在可以照常從 Steam 開遊戲——每一次啟動都會自動掛上診斷層。");
+
+        var handled = new HashSet<int>();
+        int idleTicks = 0;
+        while (!cancel.IsCancellationRequested)
+        {
+            int pid = FindGameProcessId();
+            if (pid != 0 && !handled.Contains(pid))
+            {
+                handled.Add(pid);
+                if (ProcessInjector.IsAlreadyInjected((uint)pid))
+                {
+                    Trace($"pid {pid} 已經載入 ckperf.dll，略過。");
+                }
+                else
+                {
+                    Trace($"偵測到遊戲行程 pid {pid}，正在掛載……");
+                    Result<RunOutcome> r = AttachToProcess((uint)pid, options, Trace);
+                    Trace(r.IsOk
+                        ? $"pid {pid} 已就位。診斷輸出：{DiagnosticsDirectory}"
+                        : $"pid {pid} 掛載失敗：{r.ErrorMessage}");
+                }
+            }
+
+            // 行程結束後把它從已處理清單移除，這樣同一個 pid 被系統重用時仍會處理。
+            if (pid == 0 && handled.Count > 0) handled.Clear();
+
+            // A heartbeat every two minutes. Without it, a watcher that ran all evening
+            // and simply never saw the game is indistinguishable from one that was never
+            // started at all.
+            if (++idleTicks >= 480)
+            {
+                idleTicks = 0;
+                Trace(pid == 0 ? "監看中，目前沒有偵測到遊戲行程。" : $"監看中，遊戲 pid {pid} 執行中。");
+            }
+
+            try { Task.Delay(250, cancel).Wait(cancel); }
+            catch (OperationCanceledException) { break; }
+            catch (AggregateException) { break; }
+        }
+        Trace("常駐監看已停止。");
+    }
+
     private static Result<RunOutcome> AttachToProcess(uint pid, DiagnosticsOptions options, Action<string>? log)
     {
         if (ProcessInjector.IsAlreadyInjected(pid))

@@ -174,7 +174,11 @@ static int DescribeMemoryPressure(char* buf, int cap, int pos) {
     return pos;
 }
 
-static void WriteReport(EXCEPTION_POINTERS* ep, LONG index) {
+// withDump is false for repaired faults. Nine repaired sites in one and a half seconds
+// meant nine half-megabyte minidumps, and the I/O alone dropped the game to 9 fps. The
+// text report already carries everything a null-page access needs; the dump does not
+// earn its cost when the diagnosis is "this pointer was zero".
+static void WriteReport(EXCEPTION_POINTERS* ep, LONG index, bool withDump) {
     static char buf[64 * 1024];
     int cap = (int)sizeof(buf);
     int pos = 0;
@@ -213,6 +217,13 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index) {
                      g->name, (unsigned)g->base, (unsigned)g->size);
     }
 
+    // Battle scale at the moment of the fault. This whole class of bug only shows up
+    // when the map is busy, so a report without this number is missing its main clue.
+    long live = CensusLiveObjects();
+    if (live >= 0) {
+        pos = Append(buf, cap, pos, "  live objects  : %ld  (peak this session %ld)\r\n",
+                     live, CensusPeakObjects());
+    }
     pos = Append(buf, cap, pos, "  guard         : %ld null write-backs suppressed before this fault\r\n", GuardSuppressedCount());
     pos = Append(buf, cap, pos, "  exception     : 0x%08X  %s%s\r\n",
                  (unsigned)er->ExceptionCode, CodeName(er->ExceptionCode),
@@ -296,7 +307,7 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index) {
         CloseHandle(h);
     }
 
-    if (g_cfg.miniDumps && g_miniDump) {
+    if (withDump && g_cfg.miniDumps && g_miniDump) {
         swprintf_s(path, L"%s\\ckcrash-%04d%02d%02d-%02d%02d%02d-%02d.dmp",
                    g_cfg.outDir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, (int)index);
         HANDLE hd = CreateFileW(path, GENERIC_WRITE, 0, nullptr,
@@ -350,7 +361,7 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
             char where[160];
             DescribeAddress(faultEip, where, sizeof(where));
             LONG idx = InterlockedIncrement(&g_reportCount);
-            if (idx <= g_cfg.maxReports) WriteReport(ep, idx);   // still the pre-repair context
+            if (idx <= g_cfg.maxReports) WriteReport(ep, idx, /*withDump=*/false);  // pre-repair context
             Logf("REPAIRED a new null-store site: eip 0x%08X %s -- store skipped, execution resumed.",
                  (unsigned)faultEip, where);
         }
@@ -365,7 +376,7 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
         // A stack overflow leaves almost no stack to work in, and the report path uses
         // a 64 KB static buffer precisely so it needs none -- but the formatting calls
         // still need a few pages. Nothing to do about it beyond keeping frames small.
-        WriteReport(ep, index);
+        WriteReport(ep, index, /*withDump=*/true);
     } else if (index == g_cfg.maxReports + 1) {
         Logf("FAULT: report limit (%d) reached; further faults are counted only.", g_cfg.maxReports);
     }

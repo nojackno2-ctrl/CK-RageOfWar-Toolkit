@@ -100,6 +100,10 @@ void CrashInstall();
 void CrashLoadSymbolHelper();
 void CrashUninstall();
 
+// Live handle-table occupancy: battle scale. -1 when the census is unavailable.
+long CensusLiveObjects();
+long CensusPeakObjects();
+
 void TelemetryStart();
 void TelemetryStop();
 
@@ -110,6 +114,9 @@ long GuardSuppressedCount();
 
 // Generic null-store repair; see nullstore.cpp for why this is narrow on purpose.
 void NullStoreInit();
+// Asks the OS for a zero-filled page at address 0. If granted, the whole fault-repair
+// path becomes dormant because nothing faults any more. Returns true on success.
+bool NullPageTryMap();
 // Executes a real null store from a scratch page and verifies the handler skipped it.
 // Disables the repair if it cannot be proven to work. Returns true on success.
 bool NullStoreSelfTest();

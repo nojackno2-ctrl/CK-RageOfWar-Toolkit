@@ -993,3 +993,190 @@ Framerate in a real battle was 37-61 fps (frame 17-28 ms), so the average is fin
 500 ms**. The blit stayed at 0.1-0.4 ms, i.e. under 1% of the frame. Whatever causes the
 stutter is neither the framerate nor the presentation path; it is a periodic spike in the
 simulation. That is where the performance track should start.
+
+### Third session: the repair works, and the bug is much wider than two sites (2026-08-19 21:26)
+
+pid 40200, alive 97 seconds. The null-store repair fired on **eight distinct sites,
+40 stores in 1.5 seconds**, and the process kept running through all of them:
+
+| Site | Hits | Shape |
+|---|---|---|
+| `0x005D99A4` | 7 | `mov [eax], esi` |
+| `0x005D9BF2` | 15 | store |
+| `0x0068F91A` | 5 | `mov [edx], ecx` |
+| `0x0068F925` | 5 | `mov [ecx], eax` |
+| `0x0068F931` | 5 | store |
+| `0x006907E6` | 1 | `mov dword [edx], 0xFFFFFFFF` |
+| `0x006907F0` | 1 | `mov dword [ecx], 0xFFFFFFFF` |
+| `0x006907F6` | 1 | `mov dword [edx], 0xFFFFFFFF` |
+
+Four separate clusters, all reached from the script VM, all within one and a half
+seconds. This is not two unlucky functions; the engine does this everywhere it writes a
+script result back.
+
+Then it died anyway, at a **ninth** site the repair refused:
+
+```
+006908DB  mov  eax, [esp+0x14]
+006908DF  mov  ecx, [eax]        ; eax = 0  -- a READ, not a write
+006908E1  cmp  ecx, -1
+006908E4  je   0x6908EA
+006908E6  cmp  ebx, ecx
+006908E8  jge  0x6908EC
+006908EA  mov  [eax], ebx        ; and then a write through the same null pointer
+```
+
+`if (*p != -1 && value < *p) *p = value;` -- a clamp, through a pointer that is null.
+
+The repair handled writes only, on the reasoning that stepping over a load would leave
+the destination register holding garbage. That reasoning was right about *stepping over*
+and wrong about the conclusion: the correct repair for a null read is to **deliver zero**
+into the destination, which is precisely what a zero-filled page mapped at address 0
+would produce. Reads are now repaired that way, and the startup self-test proves it by
+loading through a null pointer into a register preloaded with `0xDEADBEEF` and checking
+the result is zero rather than the sentinel.
+
+Also learned: writing a half-megabyte minidump per repaired site cost more than the
+faults did. Nine of them in 1.5 seconds took the game to 9 fps. Repaired faults now get
+a text report only.
+
+### The handle table, and why every one of these crashes has the same shape
+
+`0x00481A20` is four instructions:
+
+```
+00481A20  mov eax, [esp+4]              ; handle
+00481A24  and eax, 0xFFFF               ; low 16 bits are the slot index
+00481A29  mov eax, [eax*4 + 0x798CB8]   ; return table[index]
+00481A30  ret
+```
+
+A flat **65,536-entry object pointer table at `0x00798CB8`** (256 KB, in `.data`).
+`0x00481A40` is its counterpart: it writes 0 into a slot when the object dies, and has
+56 callers. `0x00481A20` has **1,690**.
+
+So "resolution failed" simply means the slot is empty -- the object was destroyed. Every
+crash so far is a script command dereferencing a handle whose object died first.
+
+That also makes the live object count free: **count the non-empty slots**. The telemetry
+thread now does exactly that once a second, along with births and deaths computed by
+diffing against the previous sample. Deaths are the number that actually drives this bug
+class, since each death is a chance for some script to still be holding that handle.
+
+### Fourth session: the repair works, and then it hangs (2026-08-19 21:38)
+
+Sixteen sites repaired, the game survived all of them -- and then died anyway, this time
+because of the tool rather than the engine.
+
+Sites `0x005D98BF` and `0x005D98C3` are one statement, `*p += n`:
+
+```
+005D98BD  xor  eax, eax
+005D98BF  mov  ecx, [eax]     ; load  *p     -> repaired: ecx = 0
+005D98C1  add  ecx, edi       ; ecx = 0 + n
+005D98C3  mov  [eax], ecx     ; store *p     -> repaired: skipped
+```
+
+With reads answering zero and writes going nowhere, the value never advances. The script
+loop waiting for it never finishes: **no frames were rendered for five seconds** while
+those two sites took 200,000 faults each, hit the per-site cap, and became fatal.
+
+A crash had been converted into a hang and then back into a crash. Two lessons:
+
+1. **"Reads return zero" is not a safe universal answer.** It is safe for a value nobody
+   depends on, and unsafe the moment a loop's exit condition depends on it.
+2. The 200,000 cap was the proximate cause of death. A cap is still needed so a runaway
+   cannot spin forever, but it must be far above anything healthy, and crossing a warning
+   threshold has to be loud.
+
+**The fix: redirect, do not skip.** When the null pointer is in a base register, that
+register is pointed at a per-site scratch region and the instruction is *re-executed*.
+The load then reads real memory, the store lands in real memory, `*p += n` advances, and
+the loop terminates. It also removes the need to know what the instruction does -- only
+the addressing mode matters -- so read-modify-write, string and floating-point forms are
+covered without decoding any of them.
+
+Scratch is **per site**, not shared. A single shared page aliases unrelated dead objects
+so that one site's write becomes another site's read; the startup self-test caught this
+immediately when its store stub polluted what its load stub read.
+
+Also tried and rejected: asking the OS for a real zero page at address 0, which would
+make all of this unnecessary. `NtAllocateVirtualMemory` refuses with
+`STATUS_CONFLICTING_ADDRESSES` (0xC0000018). The attempt is kept in the code because it
+costs nothing and would be strictly better if a future Windows ever allowed it.
+
+### Fifth session: watcher worked, and it caught a SECOND, unrelated bug (2026-08-20)
+
+The persistent watcher attached automatically to a Steam-launched process at
+`06:35:01`, no user action beyond leaving the watch running. Trainer was **disabled**
+this session (`ckrun-config.txt`: `啟用 否`) -- no tweaks, vanilla cheat/tweak values --
+so whatever happened here happens in unmodified gameplay parameters, given enough units.
+
+**Object count climbed monotonically for the whole session and never turned around:**
+
+| Time | Live objects | Frame time |
+|---|---|---|
+| 06:35:12 | 5,352 | ~30 ms |
+| 06:35:42 | 12,767 | ~35 ms |
+| 06:36:12 | 24,054 | ~45 ms |
+| 06:36:32 | 29,279 | ~50 ms |
+| 06:36:37 | 30,645 | 105 ms |
+| 06:36:38 | 31,030 | 155 ms |
+| 06:36:40 | 31,341 (peak) | 216 ms, **2 fps** |
+
+Frame time is flat until roughly 25,000 objects, then rises sharply -- this is the first
+hard evidence for the "LAG" complaint independent of any crash, and it points at
+something whose cost scales worse than linearly with live object count (O(n log n) at
+best, plausibly O(n^2)) rather than at rendering, which stayed at 1.2-1.5 ms throughout.
+
+The null-handle repair fired 11 times across 9 sites and the game kept running through
+all of them -- the mechanism from the fourth session held up under real load, with no
+hangs and no repeat crashes at the same site (kMaxPerSite change confirmed working).
+
+**Fault #11 killed the process, and it is a different bug:**
+
+```
+faulting eip  : 0x0069305D   mov edx, [ecx+4]
+fault address : 0x61FA0004   (read from)
+region        : base 0x61FA0000  size 0x5C0000  state FREE
+```
+
+Not the null page -- a real address, correctly outside the repair's scope (it only
+touches `target < 0x10000`), so it produced a full report and killed the process exactly
+as it would have with no diagnostic layer installed. The surrounding code:
+
+```
+00693044  xor  eax, eax
+00693046  mov  ax, [esi]        ; a handle from a list node
+0069304A  call 0x481a20         ; resolve it
+00693052  test eax, eax
+00693054  jne  0x69305A         ; resolution SUCCEEDED here -- eax is a real object
+0069305A  mov  ecx, [eax+4]     ; ecx = some pointer field of the resolved object
+0069305D  mov  edx, [ecx+4]     ; FAULT: dereferencing that field
+```
+
+The handle resolved fine. The crash is in a **field of the resolved object** --
+`[eax+4]` -- holding `0x61FA0000`, a base address that was a real allocation (0x5C0000 =
+~5.75 MB, 64 KB-aligned like a `VirtualAlloc` block) and is now `FREE`. The registers at
+the fault (`ebx=080C0C0C`, `edx=0E0D0F0F`, `esi=0A0A0CB0`, `edi=05040808`) are full of
+small, uniform nibbles -- not the pattern of an uninitialised pointer, more consistent
+with the memory having been freed and its bytes since overwritten by something unrelated
+(tile data, a small-integer array) that got allocated into the same address range.
+
+This reads as a **use-after-free**, not a null-handle bug: something walks a list off a
+resolved object, and one node's secondary pointer refers to a block that has since been
+freed and reused. It is a plausible second, independent cause of "crashes when the map
+is busy" -- distinct from the null-handle class, and NOT something the current repair
+can or should touch, since the address is real and the block genuinely no longer exists.
+
+### What this session settles and what it reopens
+
+- The crash is **not** caused by extreme trainer tweaks. This session had none active.
+- The live-object census is doing its job: the crash-report line
+  `live objects : 31134 (peak this session 31134)` is the first hard number tying a
+  fault to battle scale, and the growth curve above is the first hard number tying
+  frame-time collapse to battle scale independently of any crash.
+- There are now confirmed to be (at least) two independent crash causes: the null-handle
+  class this file already repairs, and a use-after-free class this session found for the
+  first time. The next fault report needs to be read for WHICH class it is before
+  assuming the existing repair is expected to cover it.

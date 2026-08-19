@@ -35,6 +35,7 @@ static DWORD WINAPI InitThread(LPVOID) {
     }
 
     CrashLoadSymbolHelper();
+    NullPageTryMap();
     NullStoreSelfTest();
     GuardInstall();
     FrameTimingInstall();

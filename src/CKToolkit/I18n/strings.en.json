@@ -158,5 +158,9 @@
   "Gui_Log_DiagAttaching": "Attaching to the running game...",
   "Gui_Log_DiagReady": "Diagnostics are in place (pid {0}). After a crash, collect ckcrash-*.txt from {1}.",
   "Gui_Log_DiagFolder": "Diagnostics folder: {0}",
-  "Gui_Diag_OpenFolder": "Open diagnostics folder"
+  "Gui_Diag_OpenFolder": "Open diagnostics folder",
+  "Gui_Diag_Watch": "Watch for the game",
+  "Gui_Diag_WatchStop": "Stop watching",
+  "Gui_Log_WatchStarted": "Watching. Launch the game however you like -- from Steam included -- and diagnostics attach automatically.",
+  "Gui_Log_WatchStopped": "Stopped watching."
 }

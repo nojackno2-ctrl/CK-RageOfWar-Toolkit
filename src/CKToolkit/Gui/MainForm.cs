@@ -40,7 +40,9 @@ public sealed class MainForm : Form
     private readonly Button _check = new();
     private readonly Button _diagLaunch = new();
     private readonly Button _diagAttach = new();
+    private readonly Button _diagWatch = new();
     private readonly Label _diagHint = new();
+    private CancellationTokenSource? _watchCancel;
     private readonly Label _operationStatus = new();
     private readonly TextBox _log = new();
 
@@ -191,13 +193,15 @@ public sealed class MainForm : Form
         };
         ConfigureActionButton(_diagLaunch, Color.White, Color.FromArgb(21, 94, 117));
         ConfigureActionButton(_diagAttach, Color.White, Color.FromArgb(21, 94, 117));
+        ConfigureActionButton(_diagWatch, Color.White, Color.FromArgb(21, 94, 117));
         _diagLaunch.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: false);
         _diagAttach.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: true);
+        _diagWatch.Click += (_, _) => ToggleWatch();
         _diagHint.AutoSize = true;
         _diagHint.Anchor = AnchorStyles.Left;
         _diagHint.Margin = new Padding(18, 10, 0, 0);
         _diagHint.ForeColor = Color.FromArgb(100, 116, 139);
-        diagnostics.Controls.AddRange([_diagLaunch, _diagAttach, _diagHint]);
+        diagnostics.Controls.AddRange([_diagLaunch, _diagAttach, _diagWatch, _diagHint]);
         panel.RowStyles.Insert(1, new RowStyle(SizeType.AutoSize));
         panel.RowCount = 3;
         panel.Controls.Add(diagnostics, 0, 1);
@@ -267,6 +271,7 @@ public sealed class MainForm : Form
         _check.Text = Strings.Get("Gui_Check");
         _diagLaunch.Text = Strings.Get("Gui_Diag_Launch");
         _diagAttach.Text = Strings.Get("Gui_Diag_Attach");
+        _diagWatch.Text = Strings.Get(_watchCancel is null ? "Gui_Diag_Watch" : "Gui_Diag_WatchStop");
         _diagHint.Text = Strings.Get("Gui_Diag_Hint");
         _operationStatus.Text = _busy ? Strings.Get("Gui_Working") : Strings.Get("Gui_Ready");
         _performancePage.ApplyLanguage();
@@ -423,6 +428,70 @@ public sealed class MainForm : Form
         }
         catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
         finally { SetBusy(false); }
+    }
+
+    /// <summary>
+    /// 開關常駐監看。
+    ///
+    /// 存在的理由是實測出來的：兩次「玩到閃退」都完全沒有資料，因為遊戲是從 Steam
+    /// 啟動的，而那條路上沒有注入點。要求人每次改用別的方式開遊戲，是把工具的缺陷
+    /// 轉嫁給使用者；讓工具自己在背景等，才是正確的分工。
+    ///
+    /// 刻意不走 SetBusy：監看是長時間執行的，把整個介面鎖住反而讓人無法按下停止。
+    /// </summary>
+    private void ToggleWatch()
+    {
+        if (_watchCancel is not null)
+        {
+            _watchCancel.Cancel();
+            return;
+        }
+
+        string gameDir = _gamePath.Text.Trim();
+        if (!GamePaths.IsGameDir(gameDir))
+        {
+            ShowOperationError(Strings.Get("Error_GameNotFound"));
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _watchCancel = cts;
+        _diagWatch.Text = Strings.Get("Gui_Diag_WatchStop");
+        AppendLog(Strings.Get("Gui_Log_WatchStarted"));
+
+        var diag = new DiagnosticsOptions();
+        ToolkitConfig snapshot = SnapshotConfiguration();
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                try
+                {
+                    Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
+                    RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, snapshot, diag);
+                }
+                catch
+                {
+                    // 清單寫不出來不該擋住監看本身。
+                }
+                GameRunner.WatchForever(diag, cts.Token, m => AppendLog(m));
+            }
+            catch (Exception ex)
+            {
+                AppendLog(Strings.Get("Gui_Log_Error", ex.Message));
+            }
+            finally
+            {
+                BeginInvoke(() =>
+                {
+                    _watchCancel = null;
+                    cts.Dispose();
+                    _diagWatch.Text = Strings.Get("Gui_Diag_Watch");
+                    AppendLog(Strings.Get("Gui_Log_WatchStopped"));
+                });
+            }
+        });
     }
 
     private async Task RestoreAsync()
