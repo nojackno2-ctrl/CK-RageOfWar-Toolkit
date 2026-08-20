@@ -1,4 +1,4 @@
-﻿using CKToolkit.Core.Common;
+using CKToolkit.Core.Common;
 using System.Globalization;
 using System.Text;
 using System.Xml;
@@ -159,6 +159,9 @@ public static class Cheats
     /// <summary>「切換生成單位」的作弊代號。</summary>
     public const string CycleUnitId = "cycle_unit";
 
+    /// <summary>「修改選取單位等級」的作弊代號。</summary>
+    public const string SetSelectedLevelId = "set_selected_level";
+
     /// <summary>
     /// 單位清單中「滿載食物的騾車」的代表代號（腳本生成時會 Place("Trader") 並呼叫 Wagon.LoadFood(1000) 裝載 1000 食物）。
     /// </summary>
@@ -181,6 +184,27 @@ public static class Cheats
     /// <summary>一份清單最多幾種單位。腳本沒有陣列，每多一種就多一行 if。</summary>
     public const int MaxUnitListLength = 20;
 
+    /// <summary>生成的單位或英雄最多可同時攜帶幾件物品（遊戲實測上限為 4 格）。</summary>
+    public const int MaxItemListLength = 4;
+
+    /// <summary>「在滑鼠位置生成物品」的作弊代號。</summary>
+    public const string SpawnItemId = "spawn_item";
+
+    /// <summary>「切換生成物品」的作弊代號。</summary>
+    public const string CycleItemId = "cycle_item";
+
+    /// <summary>
+    /// 兩項物品生成類作弊共用的環境變數，存的是物品清單的索引。
+    /// </summary>
+    private const string ItemVar = "cktraineritem";
+
+    /// <summary>預設可切換的物品清單（逗號分隔的物品名稱）。</summary>
+    public const string DefaultItemList =
+        "King's Belt,Fur gloves of health,Concentration stone,Finger of death,Horn of victory,Healing herbs,Boar teeth,Gem of Power";
+
+    /// <summary>可切換的物品清單最多幾種物品（全遊戲共 23 種）。</summary>
+    public const int MaxSwitchableItemListLength = 23;
+
     /// <summary>把設定裡逗號分隔的清單拆開；拆出來是空的就退回預設清單。</summary>
     public static IReadOnlyList<string> ParseUnitList(string? raw)
     {
@@ -196,88 +220,143 @@ public static class Cheats
     public static readonly IReadOnlyList<CheatParamOption> UnitOptions =
     [
         // --- 高盧常規單位與平民 ---
-        new("GAxeman", "高盧斧兵"),
-        new("GSwordsman", "高盧劍士"),
-        new("GArcher", "高盧弓箭手"),
-        new("GSpearman", "高盧矛兵"),
-        new("GHorseman", "高盧騎兵"),
-        new("GWFighter", "高盧女戰士"),
-        new("GVikingLord", "維京領主"),
-        new("GDruid", "德魯伊"),
-        new("GVillager", "高盧男農民"),
-        new("GWVillager", "高盧女農民"),
-        new("GVillagerAmbient", "高盧男農民 (環境)"),
-        new("GWVillagerAmbient", "高盧女農民 (環境)"),
+        new("GAxeman", "高盧斧兵", "GaulUnits", "Gaul Axeman"),
+        new("GSwordsman", "高盧劍士", "GaulUnits", "Gaul Swordsman"),
+        new("GArcher", "高盧弓箭手", "GaulUnits", "Gaul Archer"),
+        new("GSpearman", "高盧矛兵", "GaulUnits", "Gaul Spearman"),
+        new("GHorseman", "高盧騎兵", "GaulUnits", "Gaul Horseman"),
+        new("GWFighter", "高盧女戰士", "GaulUnits", "Gaul Woman Fighter"),
+        new("GVikingLord", "維京領主", "GaulUnits", "Viking Lord"),
+        new("GDruid", "德魯伊", "GaulUnits", "Druid"),
+        new("GVillager", "高盧男農民", "GaulUnits", "Gaul Villager (Male)"),
+        new("GWVillager", "高盧女農民", "GaulUnits", "Gaul Villager (Female)"),
+        new("GVillagerAmbient", "高盧男農民 (環境)", "GaulUnits", "Gaul Villager Ambient (Male)"),
+        new("GWVillagerAmbient", "高盧女農民 (環境)", "GaulUnits", "Gaul Villager Ambient (Female)"),
 
         // --- 高盧英雄 ---
-        new("Larax", "英雄：拉拉克司"),
-        new("Keltill", "英雄：凱爾提爾"),
-        new("GHeroWoman", "高盧女英雄"),
-        new("GHero01", "高盧英雄 1"),
-        new("GHero02", "高盧英雄 2"),
-        new("GHero03", "高盧英雄 3"),
-        new("GHero20", "高盧英雄 20"),
-        new("GHero21", "高盧英雄 21"),
-        new("GHero22", "高盧英雄 22"),
-        new("GHero23", "高盧英雄 23"),
-        new("GHero24", "高盧英雄 24"),
+        new("Larax", "英雄：拉拉克司", "GaulHeroes", "Hero: Larax"),
+        new("Keltill", "英雄：凱爾提爾", "GaulHeroes", "Hero: Keltill"),
+        new("GHeroWoman", "高盧女英雄", "GaulHeroes", "Gaul Heroine"),
+        new("GHero01", "高盧英雄 1", "GaulHeroes", "Gaul Hero 1"),
+        new("GHero02", "高盧英雄 2", "GaulHeroes", "Gaul Hero 2"),
+        new("GHero03", "高盧英雄 3", "GaulHeroes", "Gaul Hero 3"),
+        new("GHero20", "高盧英雄 20", "GaulHeroes", "Gaul Hero 20"),
+        new("GHero21", "高盧英雄 21", "GaulHeroes", "Gaul Hero 21"),
+        new("GHero22", "高盧英雄 22", "GaulHeroes", "Gaul Hero 22"),
+        new("GHero23", "高盧英雄 23", "GaulHeroes", "Gaul Hero 23"),
+        new("GHero24", "高盧英雄 24", "GaulHeroes", "Gaul Hero 24"),
 
         // --- 羅馬常規單位與平民 ---
-        new("RHastatus", "羅馬輕裝步兵"),
-        new("RPrinciple", "羅馬主力兵"),
-        new("RArcher", "羅馬弓箭手"),
-        new("RGladiator", "羅馬角鬥士"),
-        new("RScout", "羅馬斥候 / 騎兵"),
-        new("RPraetorian", "羅馬禁衛軍"),
-        new("RLiberatus", "自由鬥士"),
-        new("RPriest", "羅馬祭司"),
-        new("RVillager", "羅馬男農民"),
-        new("RWVillager", "羅馬女農民"),
-        new("RVillagerAmbient", "羅馬男農民 (環境)"),
-        new("RWVillagerAmbient", "羅馬女農民 (環境)"),
+        new("RHastatus", "羅馬輕裝步兵", "RomeUnits", "Roman Hastatus"),
+        new("RPrinciple", "羅馬主力兵", "RomeUnits", "Roman Principes"),
+        new("RArcher", "羅馬弓箭手", "RomeUnits", "Roman Archer"),
+        new("RGladiator", "羅馬角鬥士", "RomeUnits", "Roman Gladiator"),
+        new("RScout", "羅馬斥候 / 騎兵", "RomeUnits", "Roman Scout / Cavalry"),
+        new("RPraetorian", "羅馬禁衛軍", "RomeUnits", "Roman Praetorian"),
+        new("RLiberatus", "自由鬥士", "RomeUnits", "Roman Liberatus"),
+        new("RPriest", "羅馬祭司", "RomeUnits", "Roman Priest"),
+        new("RVillager", "羅馬男農民", "RomeUnits", "Roman Villager (Male)"),
+        new("RWVillager", "羅馬女農民", "RomeUnits", "Roman Villager (Female)"),
+        new("RVillagerAmbient", "羅馬男農民 (環境)", "RomeUnits", "Roman Villager Ambient (Male)"),
+        new("RWVillagerAmbient", "羅馬女農民 (環境)", "RomeUnits", "Roman Villager Ambient (Female)"),
 
         // --- 羅馬英雄 ---
-        new("Caesar", "英雄：凱撒"),
-        new("RHero6", "羅馬英雄 6"),
-        new("RHero08", "羅馬英雄 8"),
-        new("RHero09", "羅馬英雄 9"),
-        new("RHero10", "羅馬英雄 10"),
-        new("RHero11", "羅馬英雄 11"),
-        new("RHero20", "羅馬英雄 20"),
-        new("RHero21", "羅馬英雄 21"),
-        new("RHero22", "羅馬英雄 22"),
-        new("RHero23", "羅馬英雄 23"),
-        new("RHero24", "羅馬英雄 24"),
+        new("Caesar", "英雄：凱撒", "RomeHeroes", "Hero: Caesar"),
+        new("RHero6", "羅馬英雄 6", "RomeHeroes", "Roman Hero 6"),
+        new("RHero08", "羅馬英雄 8", "RomeHeroes", "Roman Hero 8"),
+        new("RHero09", "羅馬英雄 9", "RomeHeroes", "Roman Hero 9"),
+        new("RHero10", "羅馬英雄 10", "RomeHeroes", "Roman Hero 10"),
+        new("RHero11", "羅馬英雄 11", "RomeHeroes", "Roman Hero 11"),
+        new("RHero20", "羅馬英雄 20", "RomeHeroes", "Roman Hero 20"),
+        new("RHero21", "羅馬英雄 21", "RomeHeroes", "Roman Hero 21"),
+        new("RHero22", "羅馬英雄 22", "RomeHeroes", "Roman Hero 22"),
+        new("RHero23", "羅馬英雄 23", "RomeHeroes", "Roman Hero 23"),
+        new("RHero24", "羅馬英雄 24", "RomeHeroes", "Roman Hero 24"),
 
         // --- 條頓、中立、特殊與載具 ---
-        new("TeutonWolf", "條頓騎手"),
-        new("TeutonMetal", "條頓鐵甲騎手"),
-        new("TeutonArcher", "條頓弓箭手"),
-        new("NHero01", "中立英雄 1"),
-        new("NHero02", "中立英雄 2"),
-        new("DLleldoryn", "英雄：勒爾多林"),
-        new("Catapult", "投石機"),
-        new("ShipS", "運輸小船"),
-        new("ShipL", "戰船"),
-        new("Trader", "貿易騾車"),
-        new(FoodMuleSentinel, "滿載食物的騾車"),
-        new("GGhost", "食屍鬼 / 幽靈"),
+        new("TeutonWolf", "條頓騎手", "SpecialVehicles", "Teuton Rider"),
+        new("TeutonMetal", "條頓鐵甲騎手", "SpecialVehicles", "Teuton Armored Rider"),
+        new("TeutonArcher", "條頓弓箭手", "SpecialVehicles", "Teuton Archer"),
+        new("NHero01", "中立英雄 1", "SpecialVehicles", "Neutral Hero 1"),
+        new("NHero02", "中立英雄 2", "SpecialVehicles", "Neutral Hero 2"),
+        new("DLleldoryn", "英雄：勒爾多林", "SpecialVehicles", "Hero: Lleldoryn"),
+        new("Catapult", "投石機", "SpecialVehicles", "Catapult"),
+        new("ShipS", "運輸小船", "SpecialVehicles", "Small Transport Ship"),
+        new("ShipL", "戰船", "SpecialVehicles", "Warship"),
+        new("Trader", "貿易騾車", "SpecialVehicles", "Trade Mule Cart"),
+        new(FoodMuleSentinel, "滿載食物的騾車", "SpecialVehicles", "Food Mule (1000 Food)"),
+        new("GGhost", "食屍鬼 / 幽靈", "SpecialVehicles", "Ghoul / Ghost"),
 
         // --- 野生動物 ---
-        new("Wolf", "狼"),
-        new("WolfUnit", "狼單位"),
-        new("Deer", "鹿"),
-        new("Hen", "母雞"),
-        new("Fish", "魚"),
+        new("Wolf", "狼", "Animals", "Wolf"),
+        new("WolfUnit", "狼單位", "Animals", "Wolf Unit"),
+        new("Deer", "鹿", "Animals", "Deer"),
+        new("Hen", "母雞", "Animals", "Hen"),
+        new("Fish", "魚", "Animals", "Fish"),
     ];
 
-    /// <summary>取得單位代號對應的中文名稱；未登錄者回傳代號本身。</summary>
-    public static string GetUnitLabel(string unitId)
+    /// <summary>全遊戲可攜帶的物品與能力說明對照表（共 23 種物品）。</summary>
+    public static readonly IReadOnlyList<CheatParamOption> ItemOptions =
+    [
+        // --- 高級神器 ---
+        new("King's Belt", "王者腰帶 [被動] (+600生命, +10雙防)", "GodTier", "King's Belt [Passive] (+600 Max HP, +10 Slash/Pierce Def)"),
+        new("Fur gloves of health", "狂亂皮手套 [主動+被動] (+1200生命, 治療友軍)", "GodTier", "Fur Gloves [Active+Passive] (+1200 Max HP, Heal Ally)"),
+        new("Concentration stone", "專注之石 [主動+被動] (+60最大攻擊, 吸血自癒)", "GodTier", "Concentration Stone [Active+Passive] (+60 Max Attack, Life Steal)"),
+        new("Finger of death", "死亡之指 [主動6次] (直接擊殺3名非英雄敵軍)", "GodTier", "Finger of Death [Active 6x] (Insta-kill 3 Non-hero Enemies)"),
+
+        // --- 攻擊／武器加成 ---
+        new("Belt of snakes", "靈蛇腰帶 [被動] (+30攻擊)", "Attack", "Belt of Snakes [Passive] (+30 Attack)"),
+        new("Snake skin", "蛇皮 [被動] (+10攻擊)", "Attack", "Snake Skin [Passive] (+10 Attack)"),
+        new("Bear teeth amulet", "熊牙護身符 [被動] (+4最大攻擊)", "Attack", "Bear Teeth Amulet [Passive] (+4 Max Attack)"),
+        new("Boar tooth", "野豬之牙 [主動+被動] (+16經驗, 自殘傷敵)", "Attack", "Boar Tooth [Active+Passive] (+16 Exp, Damage Target)"),
+        new("Horn of victory", "勝利號角 [主動10次] (對周圍12敵軍造成60傷害)", "Attack", "Horn of Victory [Active 10x] (Damage 12 Enemies for 60)"),
+
+        // --- 防禦／生命護身符 ---
+        new("Feather amulet", "羽毛護身符 [被動] (+400生命上限)", "Defense", "Feather Amulet [Passive] (+400 Max HP)"),
+        new("Eagle feather", "鷹羽 [被動] (+200生命上限)", "Defense", "Eagle Feather [Passive] (+200 Max HP)"),
+        new("Belt of might", "力量腰帶 [被動] (+4斬擊防禦)", "Defense", "Belt of Might [Passive] (+4 Slash Defense)"),
+        new("Herb amulet of luck", "幸運草護身符 [被動] (+4穿刺防禦)", "Defense", "Herb Amulet of Luck [Passive] (+4 Pierce Defense)"),
+
+        // --- 治療／補給 ---
+        new("Healing herbs", "治療草藥 [主動1次] (完全恢復自身生命)", "Heal", "Healing Herbs [Active 1x] (Full Restore HP)"),
+        new("Healing water", "治療聖水 [主動1000] (向周圍友軍分發1000生命)", "Heal", "Healing Water [Active 1000] (Distribute 1000 HP to Allies)"),
+        new("Ash of druid heart", "德魯伊之心餘燼 [主動10次] (治療自身與8名友軍)", "Heal", "Ash of Druid Heart [Active 10x] (Heal Self & 8 Allies)"),
+        new("Rye spikes", "黑麥穗 [主動200] (向周圍友軍分發200食物)", "Heal", "Rye Spikes [Active 200] (Distribute 200 Food to Allies)"),
+
+        // --- 等級／特殊魔法 ---
+        new("Boar teeth", "野豬牙項鍊 [被動] (+5等級)", "Special", "Boar Teeth [Passive] (+5 Levels)"),
+        new("Poison Mushroom", "毒蘑菇 [主動1次] (使用時永久提升1級)", "Special", "Poison Mushroom [Active 1x] (+1 Level Permanently)"),
+        new("Gem of Power", "力量寶石 [任務] (女神之力)", "Special", "Gem of Power [Quest] (Power of the Goddess)"),
+        new("Glowing gem", "發光寶石 [任務] (發光女神寶石)", "Special", "Glowing Gem [Quest] (Glowing Diamond)"),
+        new("Faded gem", "黯淡寶石 [任務] (微弱女神寶石)", "Special", "Faded Gem [Quest] (Faded Diamond)"),
+        new("Bloodstone", "血石 [任務] (神秘遠古血石)", "Special", "Bloodstone [Quest] (Ancient Bloodstone)"),
+    ];
+
+    /// <summary>取得單位代號對應的名稱；未登錄者回傳代號本身。</summary>
+    public static string GetUnitLabel(string unitId, bool english = false)
     {
         foreach (var opt in UnitOptions)
             if (string.Equals(opt.Value, unitId, StringComparison.OrdinalIgnoreCase))
-                return opt.Label;
+                return english ? opt.EnglishLabel : opt.Label;
         return unitId;
+    }
+
+    /// <summary>取得物品代號對應的名稱；未登錄者回傳代號本身。</summary>
+    public static string GetItemLabel(string itemId, bool english = false)
+    {
+        foreach (var opt in ItemOptions)
+            if (string.Equals(opt.Value, itemId, StringComparison.OrdinalIgnoreCase))
+                return english ? opt.EnglishLabel : opt.Label;
+        return itemId;
+    }
+
+    public static IReadOnlyList<string> ParseItemList(string? raw, int max = MaxSwitchableItemListLength)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return [];
+        return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(max)
+            .ToList();
     }
 
     /// <summary>
@@ -296,6 +375,24 @@ public static class Cheats
             var cls = units[i];
             var name = GetUnitLabel(cls);
             sb.Append($" if (n == {i}) {{ cls = \"{cls}\"; name = \"{name}\"; }}");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 依索引 n 把物品代號放進 item、中文名稱放進 name。
+    /// </summary>
+    private static string ItemPick(IReadOnlyList<string> items)
+    {
+        var firstId = items[0];
+        var firstName = GetItemLabel(firstId);
+        var sb = new StringBuilder();
+        sb.Append($"item = \"{firstId}\"; name = \"{firstName}\";");
+        for (int i = 1; i < items.Count; i++)
+        {
+            var id = items[i];
+            var name = GetItemLabel(id);
+            sb.Append($" if (n == {i}) {{ item = \"{id}\"; name = \"{name}\"; }}");
         }
         return sb.ToString();
     }
@@ -331,7 +428,7 @@ public static class Cheats
             (player, p) => ForEachCentralBuilding(player,
                 $"s.AddToPopulation({Int(p, "amount")});",
                 "[修改器] 人口已增加"),
-            [new CheatParam("amount", "每次增加的人口", 500, 1, 1000000)],
+            [new CheatParam("amount", "每次增加的人口", 500, 1, 1000000, englishLabel: "Population Increase Amount")],
             defaultEnabled: false, numpadKey: "F11"),
 
         new Cheat("loyalty_max", "忠誠度全滿",
@@ -347,7 +444,7 @@ public static class Cheats
             (player, p) => ForEachSettlement(player,
                 $"s.SetGoldProduction({Int(p, "rate")}); s.SetFoodProduction({Int(p, "rate")});",
                 "[修改器] 生產力已提升"),
-            [new CheatParam("rate", "生產率", 200, 1, 10000)],
+            [new CheatParam("rate", "生產率", 200, 1, 10000, englishLabel: "Production Rate")],
             defaultEnabled: false, numpadKey: "F12"),
 
         new Cheat("heal_army", "我方全體回血",
@@ -359,7 +456,7 @@ public static class Cheats
                 q.Heal({Int(p, "amount")});
                 pr("[修改器] 全軍已回血");
                 """,
-            [new CheatParam("amount", "回血量", 100000, 1, 1000000)],
+            [new CheatParam("amount", "回血量", 100000, 1, 1000000, englishLabel: "Heal Amount")],
             numpadKey: "F4"),
 
         new Cheat("buff_army", "強化我方單位（只有我變強）",
@@ -392,9 +489,9 @@ public static class Cheats
                 }
                 pr("[修改器] 單位已強化");
                 """,
-            [new CheatParam("attack", "攻擊加成（原版步兵約 8~40）", 50, 0, 1000000),
-              new CheatParam("defense", "防禦加成（斬擊與穿刺，原版約 4~26）", 50, 0, 1000000),
-              new CheatParam("health", "血量上限加成（原版步兵約 220）", 500, 0, 1000000)],
+            [new CheatParam("attack", "攻擊加成（原版步兵約 8~40）", 50, 0, 1000000, englishLabel: "Attack Bonus (Vanilla Infantry ~8-40)"),
+             new CheatParam("defense", "防禦加成（斬擊與穿刺，原版約 4~26）", 50, 0, 1000000, englishLabel: "Defense Bonus (Slash & Pierce, Vanilla ~4-26)"),
+             new CheatParam("health", "血量上限加成（原版步兵約 220）", 500, 0, 1000000, englishLabel: "Health Bonus (Vanilla Infantry ~220)")],
             numpadKey: "F5"),
 
         new Cheat("heal_buildings", "我方建築修復",
@@ -406,7 +503,7 @@ public static class Cheats
                 q.Heal({Int(p, "amount")});
                 pr("[修改器] 建築已修復");
                 """,
-            [new CheatParam("amount", "修復量", 100000, 1, 1000000)],
+            [new CheatParam("amount", "修復量", 100000, 1, 1000000, englishLabel: "Repair Amount")],
             defaultEnabled: false, numpadKey: "F6"),
 
         new Cheat("smite_enemies", "重創全圖敵軍",
@@ -419,7 +516,7 @@ public static class Cheats
                 q.Damage({Int(p, "damage")});
                 pr("[修改器] 敵軍已重創");
                 """,
-            [new CheatParam("damage", "傷害值", 9999, 1, 1000000)],
+            [new CheatParam("damage", "傷害值", 9999, 1, 1000000, englishLabel: "Damage Value")],
             numpadKey: "F7"),
 
         new Cheat("explore_all", "探索全地圖",
@@ -437,15 +534,14 @@ public static class Cheats
             defaultEnabled: false, numpadKey: "F9"),
 
         new Cheat(SpawnUnitId, "在滑鼠位置生成單位",
-            "在滑鼠游標所指的地面上生成指定數量的單位。"
+            "在滑鼠游標所指的地面上生成指定數量、等級與攜帶物品的單位。"
             + "座標取自 MousePtm()——執行檔裡註冊了但官方文件沒寫的函式，"
             + "回傳的是游標所指位置的地圖座標（不是螢幕像素，那個是另一支 MousePos）。"
             + "要生成哪一種單位由「可切換的單位」決定，遊戲中可用「切換生成單位」"
             + "熱鍵即時換，不必重新套用修改器。"
             + "底層呼叫 Place 需傳 point 結構（對照原版腳本確認，誤傳 x, y 雙整數會噴 error in key-bound script 錯誤）。"
             + "生成的單位初始食物會自動補滿（20/20）避免剛生出來就挨餓；"
-            + "腳本無個別單位永久免進食的 API（類別層級的 max_food 會影響該兵種全體），"
-            + "後續仍由聚落存糧自動補給（可常駐「食物補滿」）。"
+            + "若設定了初始等級，會自動套用 SetLevel；若設定了攜帶物品，會自動透過 AddItem 裝備。"
             + "若清單選取「滿載食物的騾車」，會生成貿易騾車（Trader）並自動裝載 1000 食物（呼叫 Wagon.LoadFood(1000)），同樣出現在游標位置。",
             "Pause",
             // 這段同時含 VS 的大括號與 C# 插值，所以用 $$ 讓插值變成 {{...}}
@@ -453,6 +549,17 @@ public static class Cheats
             {
                 var units = ParseUnitList(Str(p, "units"));
                 int count = Int(p, "count");
+                int level = p.ContainsKey("level") ? Int(p, "level") : 1;
+                var items = p.ContainsKey("items") ? ParseItemList(Str(p, "items"), MaxItemListLength) : [];
+
+                var itemStatements = new StringBuilder();
+                foreach (var item in items)
+                {
+                    itemStatements.Append($" o.AddItem(\"{item}\");");
+                }
+
+                string levelCode = level > 1 ? $" u.SetLevel({level});" : "";
+
                 return $$"""
                     point pt; int n; int i; str cls; str name; Obj o; Unit u; Wagon wagon;
                     n = EnvReadInt({{player}}, "{{UnitVar}}");
@@ -463,21 +570,27 @@ public static class Cheats
                       if (cls == "{{FoodMuleSentinel}}") {
                         o = Place("Trader", pt, {{player}});
                         if (o.IsValid()) {
-                          u = o.AsUnit(); if (u.IsValid()) u.SetFood(20);
+                          u = o.AsUnit(); if (u.IsValid()) { u.SetFood(20);{{levelCode}} }
                           wagon = o.AsWagon();
                           if (wagon.IsValid()) wagon.LoadFood(1000);
+                          {{itemStatements}}
                         }
                       } else {
                         o = Place(cls, pt, {{player}});
-                        if (o.IsValid()) { u = o.AsUnit(); if (u.IsValid()) u.SetFood(20); }
+                        if (o.IsValid()) {
+                          u = o.AsUnit(); if (u.IsValid()) { u.SetFood(20);{{levelCode}} }
+                          {{itemStatements}}
+                        }
                       }
                     }
                     pr("[修改器] 已在游標位置生成 " + name + " ×{{count}}");
                     """;
             },
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
-                            options: UnitOptions, multi: true),
-             new CheatParam("count", "數量", 5, 1, 50)],
+                            options: UnitOptions, multi: true, englishLabel: "Switchable Units"),
+             new CheatParam("count", "數量", 5, 1, 50, englishLabel: "Spawn Count"),
+             new CheatParam("level", "初始等級", 1, 1, 100, englishLabel: "Spawn Level"),
+             new CheatParam("items", "攜帶物品", string.Empty, options: ItemOptions, multi: true, englishLabel: "Carried Items")],
             experimental: true, numpadKey: "Sub"),
 
         new Cheat(CycleUnitId, "切換生成單位",
@@ -502,8 +615,103 @@ public static class Cheats
             // units 不顯示在介面上：清單只有一份，由 spawn_unit 那一列負責編輯，
             // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
-                            options: UnitOptions, multi: true, hidden: true)],
+                            options: UnitOptions, multi: true, hidden: true, englishLabel: "Switchable Units")],
             experimental: true, numpadKey: "Add"),
+
+        new Cheat(SpawnItemId, "在滑鼠位置生成物品",
+            "在滑鼠游標所指的地面上生成裝有指定物品的皮袋（DefItemHolder）。"
+            + "座標取自 MousePtm()，產生的皮袋會放置在游標位置，英雄或單位走近即可拾取。"
+            + "要生成哪一種物品由「可切換的物品」決定，遊戲中可用「切換生成物品」"
+            + "熱鍵即時換，不必重新套用修改器。"
+            + "若設定了數量，會在同一皮袋中放入指定數量的該物品。",
+            "Ins",
+            (player, p) =>
+            {
+                var items = ParseItemList(Str(p, "items"));
+                if (items.Count == 0) items = ParseItemList(DefaultItemList);
+                int count = Int(p, "count");
+
+                return $$"""
+                    point pt; int n; int i; str item; str name; Obj o;
+                    n = EnvReadInt({{player}}, "{{ItemVar}}");
+                    if (n < 0 || n >= {{items.Count}}) n = 0;
+                    {{ItemPick(items)}}
+                    pt = MousePtm();
+                    o = Place("DefItemHolder", pt, {{player}});
+                    if (o.IsValid()) {
+                      for (i = 0; i < {{count}}; i += 1) {
+                        o.AddItem(item);
+                      }
+                    }
+                    pr("[修改器] 已在游標位置生成 " + name + " ×{{count}}");
+                    """;
+            },
+            [new CheatParam("items", "可切換的物品", DefaultItemList,
+                            options: ItemOptions, multi: true, englishLabel: "Switchable Items"),
+             new CheatParam("count", "數量", 1, 1, 20, englishLabel: "Spawn Count")],
+            experimental: true, numpadKey: "Mul"),
+
+        new Cheat(CycleItemId, "切換生成物品",
+            "在遊戲中按一下就換成清單裡的下一種物品，並把物品名稱印在畫面上。"
+            + "清單就是「在滑鼠位置生成物品」那一列勾的那份，兩項共用同一個環境變數，"
+            + "所以不需要重新套用修改器、也不必重開遊戲就能換。",
+            "F6",
+            (player, p) =>
+            {
+                var items = ParseItemList(Str(p, "items"));
+                if (items.Count == 0) items = ParseItemList(DefaultItemList);
+                return $$"""
+                    int n; str item; str name;
+                    n = EnvReadInt({{player}}, "{{ItemVar}}") + 1;
+                    if (n < 0 || n >= {{items.Count}}) n = 0;
+                    EnvWriteInt({{player}}, "{{ItemVar}}", n);
+                    {{ItemPick(items)}}
+                    pr("[修改器] 目前生成物品：" + name);
+                    """;
+            },
+            // items 不顯示在介面上：清單只有一份，由 spawn_item 那一列負責編輯，
+            // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
+            [new CheatParam("items", "可切換的物品", DefaultItemList,
+                            options: ItemOptions, multi: true, hidden: true, englishLabel: "Switchable Items")],
+            experimental: true, numpadKey: "Del"),
+
+        new Cheat(SetSelectedLevelId, "修改選取單位等級",
+            "將當前選取的單位（或英雄）等級直接設定為指定目標等級（1～1000 級），並自動補滿該等級之血量上限。"
+            + "若選取的是英雄，英雄麾下所有部隊士兵亦會一併升級並補滿血量。"
+            + "底層呼叫引擎內部未公開函式 selu() 取得選取物件，並透過 Unit::SetLevel 設定等級。",
+            "F7",
+            (player, p) =>
+            {
+                int level = Int(p, "level");
+                return $$"""
+                    Unit u; Unit m; Hero h; ObjList ol; int i;
+                    u = selu();
+                    if (u.IsValid()) {
+                      u.SetLevel({{level}});
+                      u.Heal(1000000);
+                      h = u.AsHero();
+                      if (h.IsValid()) {
+                        ol = h.army;
+                        for (i = 0; i < ol.count; i += 1) {
+                          if (ol[i].IsValid()) {
+                            m = ol[i].AsUnit();
+                            if (m.IsValid()) {
+                              m.SetLevel({{level}});
+                              m.Heal(1000000);
+                            }
+                          }
+                        }
+                        pr("[修改器] 英雄與麾下部隊等級已設為 {{level}}");
+                      } else {
+                        pr("[修改器] 選取單位等級已設為 " + u.level);
+                      }
+                    } else {
+                      pr("[修改器] 請先選取一個單位");
+                    }
+                    """;
+            },
+            [new CheatParam("level", "目標等級", 100, 1, 1000, englishLabel: "Target Level")],
+            defaultEnabled: false, numpadKey: "Pause"),
 
         new Cheat("diagnose", "診斷（確認修改器運作）",
             "在畫面上印出玩家編號與單位數量。裝好後先按這個鍵確認熱鍵有生效；"
@@ -550,11 +758,12 @@ public static class Cheats
         var bindings = new List<(string Key, string Script, string Comment)>();
         var used = new HashSet<string>(StringComparer.Ordinal);
 
-        // 「切換生成單位」循環的是「在滑鼠位置生成單位」勾的那份清單：清單只有一份，
-        // 介面上也只編輯一份，所以組腳本時把 spawn_unit 的參數借給 cycle_unit 用。
-        // spawn_unit 沒啟用時 cycle_unit 就吃自己的預設清單。
+        // 「切換生成單位／物品」循環的是「在滑鼠位置生成單位／物品」勾的那份清單：清單只有一份，
+        // 介面上也只編輯一份，所以組腳本時把 spawn 的參數借給 cycle 用。
+        // spawn 沒啟用時 cycle 就吃自己的預設清單。
         var chosen = selections.ToList();
         var spawnParameters = chosen.FirstOrDefault(s => s.Id == SpawnUnitId)?.Parameters;
+        var spawnItemParameters = chosen.FirstOrDefault(s => s.Id == SpawnItemId)?.Parameters;
 
         foreach (var selection in chosen)
         {
@@ -567,9 +776,12 @@ public static class Cheats
             if (!used.Add(key))
                 throw new InvalidOperationException($"按鍵 {key} 被指定給多個功能");
 
-            var parameters = cheat.Id == CycleUnitId && spawnParameters is not null
-                ? spawnParameters
-                : selection.Parameters;
+            var parameters = cheat.Id switch
+            {
+                CycleUnitId when spawnParameters is not null => spawnParameters,
+                CycleItemId when spawnItemParameters is not null => spawnItemParameters,
+                _ => selection.Parameters
+            };
 
             // 註解只放 ASCII 的 cheat id：pak 內的檔案一律以 latin-1 存放。
             bindings.Add((key, cheat.Script(player, parameters), cheat.Id));
@@ -608,10 +820,12 @@ public static class Cheats
     }
 }
 
-public sealed class CheatParamOption(string value, string label)
+public sealed class CheatParamOption(string value, string label, string? category = null, string? englishLabel = null)
 {
     public string Value { get; } = value;
     public string Label { get; } = label;
+    public string Category { get; } = category ?? string.Empty;
+    public string EnglishLabel { get; } = englishLabel ?? value;
     public string DisplayText => string.IsNullOrWhiteSpace(Label) || Label == Value
         ? Value
         : $"{Label} ({Value})";
@@ -621,10 +835,12 @@ public sealed class CheatParamOption(string value, string label)
 public sealed class CheatParam(string name, string label, object defaultValue,
                                decimal minimum = 0, decimal maximum = 0,
                                IReadOnlyList<CheatParamOption>? options = null,
-                               bool multi = false, bool hidden = false)
+                               bool multi = false, bool hidden = false,
+                               string? englishLabel = null)
 {
     public string Name { get; } = name;
     public string Label { get; } = label;
+    public string EnglishLabel { get; } = englishLabel ?? name;
     public object Default { get; } = defaultValue;
     public decimal Minimum { get; } = minimum;
     public decimal Maximum { get; } = maximum;
@@ -637,6 +853,8 @@ public sealed class CheatParam(string name, string label, object defaultValue,
 
     /// <summary>不顯示在介面上，值由別處餵進來（見 <see cref="Cheats.BuildScDebug"/>）。</summary>
     public bool Hidden { get; } = hidden;
+
+    public string DisplayLabel(bool english = false) => english ? EnglishLabel : Label;
 }
 
 public sealed class Cheat(

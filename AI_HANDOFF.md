@@ -1,4 +1,4 @@
-﻿# AI_HANDOFF.md — 即時共用記憶
+# AI_HANDOFF.md — 即時共用記憶
 
 ## 專案概要
 
@@ -693,3 +693,143 @@ region        : base 0x61FA0000  size 0x5C0000  state FREE
    跟 use-after-free 同一個清單走訪迴圈。
 3. 多核心維持原判斷：不是這顆引擎能安全做到的事，效能提升要靠演算法修正，
    不是靠核心數。
+
+---
+
+## 修改器視覺化圖形參數與單位挑選介面完成紀錄 (2026-08-20)
+
+使用者反映原本修改器參數需要輸入 `名稱=值; 名稱=值` 或內部英文兵種代號（如 `GAxeman,GHorseman...`），操作如同打指令，不易使用。
+
+### 完成項目
+1. **作弊清單參數欄改為親和文字摘要**：
+   - 不再顯示原始 key=value 字串，改為直觀摘要（如 `每次增加 +500 人`、`攻擊 +50 / 防禦 +50 / 生命 +500`、`8 種單位（高盧斧兵、高盧騎兵...）· 每次 5 隻 · Lv.10 · 攜帶 4 件物品`；無參數項目顯示 `—`）。
+2. **獨立參數設定對話框 (`CheatParamsDialog.cs`)**：
+   - 數值參數：提供具備上下限、增減箭頭、千分位格式的 `NumericUpDown` 控制項，並顯示預設值與範圍提示。
+   - **全格整齊 3 欄等寬排列 (TableLayoutPanel)**：徹底解決 FlowLayoutPanel 項目長短不一導致的參差不齊問題，所有單位與物品在各分類分頁中均呈標準 3 欄對齊表格，且搜尋過濾時即時緊湊重排。
+   - **單位生成等級 (Level)**：支援設定 1～100 初始等級，腳本生成單位時自動呼叫 `u.SetLevel(level)`。
+   - **攜帶物品挑選器 (Items)**：新增「🎒 攜帶物品」分頁，以寬敞的 2 欄對齊表格收錄全遊戲 23 種可裝備物品，**完整標註各裝備具體能力數值與效果**（如 `王者腰帶 (+600生命, +10雙防)`、`狂亂皮手套 (+1200生命, 治療友軍)`、`專注之石 (+60最大攻擊, 吸血自癒)`、`死亡之指 (直接擊殺3名非英雄敵軍)` 等），**依遊戲實測上限嚴格限制單次最多攜帶 4 件物品**（`MaxItemListLength = 4`），並提供「神裝組合 (4件)」、「強力攻擊 (4件)」、「防禦生存 (4件)」、「清空物品」等快捷按鈕，生成時透過 `o.AddItem(...)` 自動穿戴。
+   - **單位生成挑選器 (Units)**：整合 62 種全遊戲單位的分類挑選器，支援即時關鍵字搜尋與快速預設按鈕，最多 20 種上限防呆。
+3. **操作動線與多國語系**：
+   - 作弊清單新增「⚙ 設定」按鈕，點擊設定或參數欄位均可開啟設定對話框。
+   - `strings.zh-TW.json` 與 `strings.en.json` 同步新增等級、物品計數、上限提示與物品組合預設字串。
+4. **測試驗證**：
+   - `dotnet build` 0 警告 0 錯誤。
+   - `dotnet run --project src/CKToolkit.SelfTest` 全 33 組測試 100% 通過。
+
+---
+
+## 修改器在滑鼠游標位置生成物品與切換生成物品功能完成紀錄 (2026-08-20)
+
+使用者需求：在修改器中加入「在滑鼠位置叫出物品」的功能，並且要跟生成單位一樣可以用熱鍵循環切換物品。
+
+### 逆向工程與底層機制
+1. **物品容器實體 (`DefItemHolder`)**：
+   - 經由逆向分析遊戲核心 XML 與腳本，地面上的物品放置在 `CLASSES\DEFITEMHOLDER.SC.XML` 皮袋容器中（模型為 `assets/entities/visuals/ItemHolder2/Bag.ent.xml`，屬性 `delete_empty="1"`）。
+   - 透過 `Place("DefItemHolder", pt, player)` 可在滑鼠游標座標（`pt = MousePtm()`）生成皮袋，英雄或單位走近拾取後皮袋會自動刪除。
+2. **物品賦予 API (`AddItem`)**：
+   - 容器物件具備 `o.AddItem(item)` 原生腳本方法（註冊於虛擬位址 `0x007321E0`），可連續放入指定數量的物品。
+3. **物品切換機制 (`ItemVar = "cktraineritem"`)**：
+   - 與單位切換機制（`UnitVar = "cktrainerunit"`）相同，採用遊戲引擎環境變數 `EnvReadInt` / `EnvWriteInt` 記錄目前選取的物品索引。
+   - `spawn_item` 與 `cycle_item` 共用該環境變數，按鍵即時切換、即時顯示物品名稱，無須重開遊戲或重新套用修改器。
+
+### 完成項目
+1. **核心作弊與腳本生成 (`Cheats.cs`)**：
+   - 新增 `SpawnItemId = "spawn_item"`（預設按鍵 `Ins` / 小鍵盤 `Mul` `*`）與 `CycleItemId = "cycle_item"`（預設按鍵 `F6` / 小鍵盤 `Del`）。
+   - 新增全 23 種物品的切換支援 `ItemPick(items)` 與清單解析 `ParseItemList(raw, max)`。
+   - `BuildScDebug` 中讓 `cycle_item` 自動借用 `spawn_item` 的物品清單設定。
+2. **視覺化圖形設定對話框 (`CheatParamsDialog.cs`)**：
+   - 新增 `BuildSpawnItemContent()`：
+     - 數量設定微調器（1～20 個，預設 1 個）。
+     - 搜尋過濾框與預設組合按鈕（預設清單 8種、神裝組合 4件、強力攻擊 5件、防禦生存 4件、治療補給 4件、特殊升級 5件、全部物品 23件、清空物品）。
+     - 6 大分類分頁（全部物品、高級神器、攻擊武器、防禦生命、治療補給、特殊等級），以等寬對齊表格排列，帶有能力數值與 ID 的 Tooltip。
+     - 跨分頁 CheckBox 同步、即時物品數量統計與上限限制（最多 23 種）。
+3. **作弊清單摘要格式化 (`TrainerPage.cs`)**：
+   - `FormatSummary` 支援 `SpawnItemId`，顯示如 `8 種物品（王者腰帶、狂亂皮手套...）· 每次 1 個`。
+4. **多國語系 (`strings.zh-TW.json` / `strings.en.json`)**：
+   - 新增物品生成摘要、分類名稱、預設按鈕文字與防呆提示等雙語字串。
+5. **測試與驗證**：
+   - `dotnet build` 0 警告 0 錯誤。
+   - `dotnet run --project src/CKToolkit.SelfTest` 全 33 組測試 100% 通過（包含 16 個作弊定義、小鍵盤唯一鍵、`spawn_item` / `cycle_item` SCDEBUG 生成與參數繼承）。
+
+---
+
+## 召喚單位攜帶裝備屬性極致化優化 (2026-08-20)
+
+使用者需求：士兵單位雖然不會主動點擊使用物品，但具備「主動+被動」複合屬性的裝備（如狂亂皮手套提供全遊戲最高的 +1200 生命、專注之石提供全遊戲最高的 +60 最大攻擊），其被動數值依然會 100% 作用在士兵身上。因此推薦組合應以「**被動屬性加成強度**」為準，納入此類高加成神器，僅排除「純主動消耗/技能且無被動加成」的物品（如死亡之指、德魯伊之灰等 0 加成物品）。
+
+### 完成項目
+1. **物品標籤清楚標記各裝備屬性與機制 (`Cheats.cs`)**：
+   - 包含常駐加成與主動效果的完整中文/英文標註。
+2. **單位生成裝備推薦組合以「純戰鬥攻防屬性（排除野豬牙項鍊）」重新配置 (`CheatParamsDialog.cs`)**：
+   - **全能神裝 (最強屬性4件)**：狂亂皮手套 (+1200HP) + 專注之石 (+60最大攻擊) + 王者腰帶 (+600HP, +10雙防) + 靈蛇腰帶 (+30攻擊)
+     - *士兵實裝效果：生命 +1800、最大攻擊 +60、基礎攻擊 +30、雙防 +10*
+   - **極致攻擊 (最高攻擊4件)**：專注之石 (+60最大攻擊) + 靈蛇腰帶 (+30攻擊) + 蛇皮 (+10攻擊) + 熊牙護身符 (+4最大攻擊)
+     - *士兵實裝效果：最大攻擊 +64、基礎攻擊 +40*
+   - **鐵壁生存 (最高生命4件)**：狂亂皮手套 (+1200HP) + 王者腰帶 (+600HP, +10雙防) + 羽毛護身符 (+400HP) + 力量腰帶 (+4斬防)
+     - *士兵實裝效果：生命 +2200、斬擊防禦 +14、穿刺防禦 +10*
+3. **多國語系更新 (`strings.zh-TW.json`, `strings.en.json`)**：
+   - 預設按鈕更新為 `全能神裝 (最強屬性4件)`、`極致攻擊 (最高攻擊4件)`、`鐵壁生存 (最高生命4件)`。
+4. **測試驗證**：
+   - `dotnet build` 0 警告 0 錯誤。
+   - `SelfTest` 33 項測試 100% 通過。
+
+---
+
+## 修改選取單位等級功能完成紀錄 (2026-08-20)
+
+使用者需求：有沒有辦法修改當前選取單位的等級。選擇採用 VS 腳本熱鍵方式（方法一）實作。
+
+### 逆向工程與底層機制
+1. **當前選取物件獲取 (`selu`)**：
+   - 引擎內部註冊了未公開腳本函式 `selu()`（虛擬位址 `0x005E91D0`，回傳型別 `Unit`）。
+   - 透過呼叫 `selu()` 可直接取得玩家目前選取的單位物件；若選取建築或無選取則回傳無效物件（`!u.IsValid()`）。
+2. **等級設定 API (`Unit::SetLevel`)**：
+   - 單位物件具備 `u.SetLevel(int level)` 原生方法（註冊於虛擬位址 `0x00512C00`）。
+   - 引擎內部自動將等級限制夾在 `1 ～ 1000` 級（`0x00512C78` - `0x00512C8C`），並自動更新最大血量、攻擊力與經驗值。
+   - 升級後呼叫 `u.Heal(1000000)` 可將新等級增加之生命上限補滿。
+3. **英雄麾下整隊升級 (`h.army`)**：
+   - 若選取的單位為英雄（`h = u.AsHero()`），可走訪 `h.army`，對麾下所有有效士兵一併呼叫 `SetLevel(level)` 與 `Heal(1000000)`，實現一鍵全隊升級。
+
+### 完成項目
+1. **核心作弊與腳本生成 (`Cheats.cs`)**：
+   - 新增 `SetSelectedLevelId = "set_selected_level"`。
+   - 預設按鍵：原版 `F7` / 小鍵盤 `Pause`，預設狀態關閉（`defaultEnabled: false`）。
+   - 參數：`level`（目標等級，預設 `100`，範圍 `1 ～ 1000`）。
+   - 腳本產生器：呼叫 `selu()`、`SetLevel`、`Heal` 以及走訪 `h.army`。
+2. **UI 與摘要格式化 (`TrainerPage.cs`)**：
+   - `FormatSummary` 支援 `SetSelectedLevelId`，顯示如 `設定為 Lv.100 級`。
+3. **多國語系 (`strings.zh-TW.json` / `strings.en.json`)**：
+   - 新增 `Gui_Trainer_Summary_Level`（繁中：`設定為 Lv.{0} 級` / 英文：`Set to Lv.{0}`）。
+4. **說明文件 (`docs/VS腳本速查.md`)**：
+   - 補記 `selu()`、`selb()`、`sels()`、`selsq()` 與 `Unit::SetLevel` 等底層函式。
+### 測試與驗證
+1. `dotnet build` 0 警告 0 錯誤。
+2. `SelfTest` 33 項測試 100% 通過（包含 17 個作弊定義、小鍵盤唯一鍵、`set_selected_level` SCDEBUG 生成）。
+
+---
+
+## 程式碼全域最佳化（2026-08-20）
+
+針對專案全域進行效能、記憶體分配、非託管資源管理與 UI 渲染最佳化：
+
+1. **程序偵測與測試目錄隔離 (`GamePaths.cs`, `PatchPipeline.cs`, `CliHost.cs`)**：
+   - `GamePaths.IsGameRunning(gameDir)` 支援目錄比對與 `%TEMP%` 測試暫存目錄隔離。
+   - 解決使用者背景執行正版 Steam 遊戲時 `SelfTest` 誤判為 `FileLocked (exitCode 5)` 的問題。
+   - 改用 `Process.GetProcessesByName` 與確定性 `Dispose()`，杜絕 handle 洩漏。
+2. **GDI 字型光柵化與記憶體最佳化 (`GdiFont.cs`, `ApfFont.cs`, `HmmPak.cs`)**：
+   - `GdiFont`：維護可重用之非託管緩衝區 `_glyphBuffer`，徹底消除 32,000+ 次字形光柵化時每一字元的 `Marshal.AllocHGlobal`/`FreeHGlobal` 與中間陣列拷貝。
+   - `ApfFont.RleEncode`：改用 `ArrayPool<byte>.Shared` 租借緩衝區，消除 `List<byte>` 擴容與二次拷貝。
+   - `ApfFont.RleDecode`：使用 `Span.Slice(...).Fill(...)` SIMD 向量化區塊填值。
+   - `HmmPak.Magic`：改用 `ReadOnlySpan<byte>` 唯讀字面值，消除靜態堆積配置。
+3. **檔案解析與字串處理最佳化 (`LocXml.cs`, `IniFile.cs`)**：
+   - `LocXml.IsTranslationTable`：改用零配置之 `ReadOnlySpan<byte>` 快速比對 `<translationtable` 標籤。
+   - `IniFile.Parse`：改用 `ReadOnlySpan<char>` 進行行切片、等號定位與空白修剪，大幅減少中間垃圾字串配置。
+4. **WinForms UI 雙緩衝與資源釋放 (`CheatParamsDialog.cs`, `TrainerPage.cs`)**：
+   - `CheatParamsDialog`：新增 `Dispose(bool disposing)` 確保 `_toolTip` 正確釋放。
+   - 為 `TableLayoutPanel` 啟用 DoubleBuffered，消除搜尋與分類切換時的 UI 閃爍與重繪卡頓。
+5. **建置與驗證結果**：
+   - `dotnet build`：0 警告 0 錯誤。
+   - `SelfTest`：全部 33 組測試群組 100% 通過（Phase 1–4 & Phase 6 全綠）。
+
+
+

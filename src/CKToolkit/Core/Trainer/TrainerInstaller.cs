@@ -1,4 +1,5 @@
-﻿using System.Text.Encodings.Web;
+﻿using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using CKToolkit.Core.Common;
 
@@ -20,6 +21,16 @@ public static class TrainerInstaller
 {
     /// <summary>修改器標記檔在 data.pak 內的路徑（沿用前身專案的檔名）。</summary>
     public const string MarkerPath = "CKTRAINER.TXT";
+
+    /// <summary>
+    /// <see cref="HmmPak.WriteText"/> 沒指定編碼時預設用 Latin-1（<c>HmmPak.PakEncoding</c>），
+    /// 那是為了讓快照／還原任意原始位元組時不失真而選的，不是給「本工具自己產生、
+    /// 含中文的新內容」用的——Latin-1 只能表示 0x00-0xFF，中文字元一律被吃成 '?'
+    /// （字面上的問號位元組），SCDEBUG.XML 裡熱鍵回饋訊息（<c>pr("[修改器] ...")</c>）
+    /// 因此在遊戲內顯示成亂碼。這裡改用 UTF-8，寫法比照 LocXml.cs 那條已驗證能在
+    /// 遊戲內正確顯示中文的路徑。
+    /// </summary>
+    private static readonly UTF8Encoding ScDebugEncoding = new(false, true);
 
     private static readonly JsonSerializerOptions MarkerJsonOpts = new()
     {
@@ -70,7 +81,7 @@ public static class TrainerInstaller
         {
             string xml = Cheats.BuildScDebug(
                 selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla);
-            pak.WriteText(Cheats.ScDebugPath, xml);
+            pak.WriteText(Cheats.ScDebugPath, xml, ScDebugEncoding);
             marker.Cheats.AddRange(selections.Select(s => s.Id));
             log?.Invoke($"作弊：{selections.Count} 項已寫入 {Cheats.ScDebugPath}");
         }

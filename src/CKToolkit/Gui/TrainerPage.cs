@@ -17,12 +17,22 @@ public sealed class TrainerPage : UserControl
     private readonly TabControl _subTabs = new();
     private readonly TabPage _cheatsTab = new();
     private readonly TabPage _tweaksTab = new();
-    private readonly DataGridView _cheats = new();
+    private readonly KeyCaptureGrid _cheats = new();
     private readonly DataGridView _tweaks = new();
     private readonly Button _resetCheats = new();
     private readonly Button _resetTweaks = new();
     private readonly Label _hint = new();
+    private readonly Label _tweaksWarning = new();
     private bool _loading;
+    private int _capturingRow = -1;
+
+    private static readonly HashSet<Keys> CaptureIgnoredKeys =
+    [
+        Keys.ControlKey, Keys.LControlKey, Keys.RControlKey,
+        Keys.ShiftKey, Keys.LShiftKey, Keys.RShiftKey,
+        Keys.Menu, Keys.LMenu, Keys.RMenu,
+        Keys.LWin, Keys.RWin,
+    ];
 
     public TrainerPage()
     {
@@ -85,14 +95,22 @@ public sealed class TrainerPage : UserControl
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         ConfigureGrid(_cheats);
         _cheats.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", Width = 72 });
-        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = 250 });
-        _cheats.Columns.Add(new DataGridViewComboBoxColumn
+        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = 230 });
+        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Key", Width = 130, ReadOnly = true });
+        _cheats.Columns.Add(new DataGridViewButtonColumn
         {
-            Name = "Key", Width = 115, FlatStyle = FlatStyle.Flat,
-            DataSource = Cheats.Keys.ToList()
+            Name = "ClearKey", Text = "×", UseColumnTextForButtonValue = true,
+            Width = 36, MinimumWidth = 36, FlatStyle = FlatStyle.Popup,
         });
-        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Parameters", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Parameters", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, ReadOnly = true });
+        _cheats.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "ConfigParams", Width = 85, MinimumWidth = 85, FlatStyle = FlatStyle.Popup,
+        });
         _cheats.CellToolTipTextNeeded += CheatsCellToolTipTextNeeded;
+        _cheats.CellClick += CheatsCellClick;
+        _cheats.KeyCaptured += OnKeyCaptured;
+        _cheats.Leave += (_, _) => CancelCapture();
         _resetCheats.AutoSize = true;
         _resetCheats.Margin = new Padding(6);
         _resetCheats.Click += (_, _) => ResetCheatsToDefaults();
@@ -103,9 +121,18 @@ public sealed class TrainerPage : UserControl
 
     private void BuildTweaksTab()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        _tweaksWarning.AutoSize = true;
+        _tweaksWarning.MaximumSize = new Size(1000, 0);
+        _tweaksWarning.ForeColor = Color.FromArgb(180, 83, 9);
+        _tweaksWarning.Font = new Font(Font, FontStyle.Bold);
+        _tweaksWarning.Padding = new Padding(8, 6, 8, 6);
+        panel.Controls.Add(_tweaksWarning, 0, 0);
+
         ConfigureGrid(_tweaks);
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Group", ReadOnly = true, Width = 120 });
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = 260 });
@@ -116,8 +143,8 @@ public sealed class TrainerPage : UserControl
         _resetTweaks.AutoSize = true;
         _resetTweaks.Margin = new Padding(6);
         _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
-        panel.Controls.Add(_tweaks, 0, 0);
-        panel.Controls.Add(_resetTweaks, 0, 1);
+        panel.Controls.Add(_tweaks, 0, 1);
+        panel.Controls.Add(_resetTweaks, 0, 2);
         _tweaksTab.Controls.Add(panel);
     }
 
@@ -142,8 +169,15 @@ public sealed class TrainerPage : UserControl
         _cheats.Rows.Clear();
         foreach (Cheat cheat in Cheats.All)
         {
-            int rowIndex = _cheats.Rows.Add(false, DisplayCheatName(cheat), cheat.DefaultKey, FormatParameters(cheat, null));
-            _cheats.Rows[rowIndex].Tag = cheat;
+            int rowIndex = _cheats.Rows.Add(false, DisplayCheatName(cheat), string.Empty, string.Empty, string.Empty);
+            var row = _cheats.Rows[rowIndex];
+            row.Tag = cheat;
+            SetKeyCell(row, cheat.DefaultKey);
+            var defaultParams = cheat.Defaults().ToDictionary(
+                kvp => kvp.Key,
+                kvp => Convert.ToString(kvp.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                StringComparer.Ordinal);
+            SetParameterCell(row, defaultParams);
         }
         _tweaks.Rows.Clear();
         foreach (Tweak tweak in Tweaks.All)
@@ -172,14 +206,24 @@ public sealed class TrainerPage : UserControl
             if (configured.TryGetValue(cheat.Id, out CheatConfig? selected))
             {
                 row.Cells["Enabled"].Value = selected.Enabled;
-                row.Cells["Key"].Value = string.IsNullOrWhiteSpace(selected.Key) ? cheat.DefaultKeyFor(config.NumpadKeys) : selected.Key;
-                row.Cells["Parameters"].Value = FormatParameters(cheat, selected.Parameters);
+                SetKeyCell(row, string.IsNullOrWhiteSpace(selected.Key) ? cheat.DefaultKeyFor(config.NumpadKeys) : selected.Key);
+                var dict = new Dictionary<string, string>(selected.Parameters, StringComparer.Ordinal);
+                foreach (var p in cheat.Parameters.Where(p => !p.Hidden))
+                {
+                    if (!dict.ContainsKey(p.Name))
+                        dict[p.Name] = Convert.ToString(p.Default, CultureInfo.InvariantCulture) ?? string.Empty;
+                }
+                SetParameterCell(row, dict);
             }
             else
             {
                 row.Cells["Enabled"].Value = cheat.DefaultEnabledFor(config.NumpadKeys);
-                row.Cells["Key"].Value = cheat.DefaultKeyFor(config.NumpadKeys);
-                row.Cells["Parameters"].Value = FormatParameters(cheat, null);
+                SetKeyCell(row, cheat.DefaultKeyFor(config.NumpadKeys));
+                var dict = cheat.Defaults().ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => Convert.ToString(kvp.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                    StringComparer.Ordinal);
+                SetParameterCell(row, dict);
             }
         }
 
@@ -196,6 +240,7 @@ public sealed class TrainerPage : UserControl
 
     public void SaveConfig(TrainerConfig config)
     {
+        CancelCapture();
         _cheats.EndEdit();
         _tweaks.EndEdit();
         config.Enabled = _enabled.Checked;
@@ -208,15 +253,33 @@ public sealed class TrainerPage : UserControl
         foreach (DataGridViewRow row in _cheats.Rows)
         {
             var cheat = (Cheat)row.Tag!;
-            string key = Convert.ToString(row.Cells["Key"].Value, CultureInfo.InvariantCulture) ?? cheat.DefaultKeyFor(config.NumpadKeys);
-            if (!Cheats.Keys.Contains(key, StringComparer.Ordinal))
+            bool rowEnabled = Convert.ToBoolean(row.Cells["Enabled"].Value ?? false, CultureInfo.InvariantCulture);
+            string? key = row.Cells["Key"].Tag as string;
+            if (key is null)
+            {
+                // 按了「清除」但沒有重新指定按鍵：已啟用的作弊一定要有按鍵才能觸發，
+                // 停用的作弊按鍵欄本來就不會寫進 scdebug.xml（見 TrainerInstaller），空著沒差。
+                if (rowEnabled)
+                    throw new InvalidOperationException(Strings.Get("Gui_Trainer_KeyRequired", DisplayCheatName(cheat)));
+                key = string.Empty;
+            }
+            else if (!Cheats.Keys.Contains(key, StringComparer.Ordinal))
+            {
                 throw new InvalidOperationException(Strings.Get("Gui_Trainer_InvalidKey", cheat.Id, key));
+            }
+
+            var paramDict = row.Cells["Parameters"].Tag as Dictionary<string, string>
+                ?? cheat.Defaults().ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => Convert.ToString(kvp.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                    StringComparer.Ordinal);
+
             config.Cheats.Add(new CheatConfig
             {
                 Id = cheat.Id,
-                Enabled = Convert.ToBoolean(row.Cells["Enabled"].Value ?? false, CultureInfo.InvariantCulture),
+                Enabled = rowEnabled,
                 Key = key,
-                Parameters = ParseParameters(cheat, Convert.ToString(row.Cells["Parameters"].Value, CultureInfo.InvariantCulture) ?? string.Empty)
+                Parameters = new Dictionary<string, string>(paramDict, StringComparer.Ordinal)
             });
         }
 
@@ -255,10 +318,13 @@ public sealed class TrainerPage : UserControl
         _resetCheats.Text = Strings.Get("Gui_Trainer_ResetCheats");
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
         _hint.Text = Strings.Get("Gui_Trainer_Hint");
+        _tweaksWarning.Text = Strings.Get("Gui_Trainer_TweaksWarning");
         _cheats.Columns["Enabled"]!.HeaderText = Strings.Get("Gui_Enabled");
         _cheats.Columns["Name"]!.HeaderText = Strings.Get("Gui_Name");
         _cheats.Columns["Key"]!.HeaderText = Strings.Get("Gui_Key");
+        _cheats.Columns["ClearKey"]!.HeaderText = Strings.Get("Gui_Trainer_ClearKey");
         _cheats.Columns["Parameters"]!.HeaderText = Strings.Get("Gui_Parameters");
+        _cheats.Columns["ConfigParams"]!.HeaderText = string.Empty;
         _tweaks.Columns["Group"]!.HeaderText = Strings.Get("Gui_Group");
         _tweaks.Columns["Name"]!.HeaderText = Strings.Get("Gui_Name");
         _tweaks.Columns["Value"]!.HeaderText = Strings.Get("Gui_Value");
@@ -266,7 +332,14 @@ public sealed class TrainerPage : UserControl
         _tweaks.Columns["Range"]!.HeaderText = Strings.Get("Gui_Range");
 
         foreach (DataGridViewRow row in _cheats.Rows)
-            if (row.Tag is Cheat cheat) row.Cells["Name"].Value = DisplayCheatName(cheat);
+        {
+            if (row.Tag is Cheat cheat)
+            {
+                row.Cells["Name"].Value = DisplayCheatName(cheat);
+                if (row.Cells["Parameters"].Tag is Dictionary<string, string> dict)
+                    SetParameterCell(row, dict);
+            }
+        }
         foreach (DataGridViewRow row in _tweaks.Rows)
             if (row.Tag is Tweak tweak)
             {
@@ -297,24 +370,145 @@ public sealed class TrainerPage : UserControl
 
     private void NumpadModeChanged()
     {
+        CancelCapture();
         if (_loading) return;
         foreach (DataGridViewRow row in _cheats.Rows)
         {
             var cheat = (Cheat)row.Tag!;
-            row.Cells["Key"].Value = cheat.DefaultKeyFor(_numpad.Checked);
+            SetKeyCell(row, cheat.DefaultKeyFor(_numpad.Checked));
             row.Cells["Enabled"].Value = cheat.DefaultEnabledFor(_numpad.Checked);
         }
     }
 
     private void ResetCheatsToDefaults()
     {
+        CancelCapture();
         foreach (DataGridViewRow row in _cheats.Rows)
         {
             var cheat = (Cheat)row.Tag!;
             row.Cells["Enabled"].Value = cheat.DefaultEnabledFor(_numpad.Checked);
-            row.Cells["Key"].Value = cheat.DefaultKeyFor(_numpad.Checked);
-            row.Cells["Parameters"].Value = FormatParameters(cheat, null);
+            SetKeyCell(row, cheat.DefaultKeyFor(_numpad.Checked));
+            var defaultParams = cheat.Defaults().ToDictionary(
+                kvp => kvp.Key,
+                kvp => Convert.ToString(kvp.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+                StringComparer.Ordinal);
+            SetParameterCell(row, defaultParams);
         }
+    }
+
+    /// <summary>設定按鍵儲存格：Tag 放 scdebug id（權威值），Value 放目前模式下要顯示的鍵名。</summary>
+    private void SetKeyCell(DataGridViewRow row, string id)
+    {
+        row.Cells["Key"].Tag = id;
+        row.Cells["Key"].Value = KeyMap.Display(id, _numpad.Checked);
+    }
+
+    /// <summary>設定參數儲存格：Tag 放參數字典，Value 放人類易讀的摘要字串，設定按鈕放按鈕文字。</summary>
+    private void SetParameterCell(DataGridViewRow row, Dictionary<string, string> parameters)
+    {
+        var cheat = (Cheat)row.Tag!;
+        row.Cells["Parameters"].Tag = parameters;
+        row.Cells["Parameters"].Value = FormatSummary(cheat, parameters);
+        bool hasVisibleParams = cheat.Parameters.Any(p => !p.Hidden);
+        row.Cells["ConfigParams"].Value = hasVisibleParams ? Strings.Get("Gui_Trainer_Configure") : string.Empty;
+    }
+
+    /// <summary>
+    /// 按鍵欄改成「點一下、直接按鍵盤設定」；參數欄與設定按鈕點一下開啟圖形對話框。
+    /// </summary>
+    private void CheatsCellClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0) return;
+        if (e.ColumnIndex == _cheats.Columns["Key"]!.Index)
+        {
+            BeginCapture(e.RowIndex);
+        }
+        else if (e.ColumnIndex == _cheats.Columns["ClearKey"]!.Index)
+        {
+            ClearKey(e.RowIndex);
+        }
+        else if (e.ColumnIndex == _cheats.Columns["ConfigParams"]!.Index || e.ColumnIndex == _cheats.Columns["Parameters"]!.Index)
+        {
+            CancelCapture();
+            OpenParameterDialog(e.RowIndex);
+        }
+        else
+        {
+            CancelCapture();
+        }
+    }
+
+    private void OpenParameterDialog(int rowIndex)
+    {
+        DataGridViewRow row = _cheats.Rows[rowIndex];
+        var cheat = (Cheat)row.Tag!;
+        if (!cheat.Parameters.Any(p => !p.Hidden)) return;
+
+        var currentParams = row.Cells["Parameters"].Tag as Dictionary<string, string>;
+        using var dialog = new CheatParamsDialog(cheat, currentParams);
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            SetParameterCell(row, new Dictionary<string, string>(dialog.ResultParameters, StringComparer.Ordinal));
+        }
+    }
+
+    /// <summary>清掉這一列指定的按鍵。停用的作弊留空沒差；已啟用的作弊留空會在套用時擋下來，要求先指定按鍵或取消啟用。</summary>
+    private void ClearKey(int rowIndex)
+    {
+        CancelCapture();
+        DataGridViewRow row = _cheats.Rows[rowIndex];
+        row.Cells["Key"].Tag = null;
+        row.Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyUnset");
+    }
+
+    private void BeginCapture(int rowIndex)
+    {
+        if (_capturingRow == rowIndex) return;
+        CancelCapture();
+        _capturingRow = rowIndex;
+        _cheats.Rows[rowIndex].Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyCapturePrompt");
+        _cheats.CurrentCell = _cheats.Rows[rowIndex].Cells["Key"];
+        _cheats.IsCapturing = true;
+        _cheats.Focus();
+    }
+
+    private void CancelCapture()
+    {
+        if (_capturingRow < 0) return;
+        DataGridViewRow row = _cheats.Rows[_capturingRow];
+        string? id = row.Cells["Key"].Tag as string;
+        row.Cells["Key"].Value = id is null ? Strings.Get("Gui_Trainer_KeyUnset") : KeyMap.Display(id, _numpad.Checked);
+        _capturingRow = -1;
+        _cheats.IsCapturing = false;
+    }
+
+    private void OnKeyCaptured(Keys keyData)
+    {
+        if (_capturingRow < 0) return;
+        Keys code = keyData & Keys.KeyCode;
+        if (code == Keys.Escape) { CancelCapture(); return; }
+        if (CaptureIgnoredKeys.Contains(code)) return; // 只是按下 Ctrl/Shift/Alt 本身，繼續等真正的按鍵
+
+        DataGridViewRow row = _cheats.Rows[_capturingRow];
+        string? id = KeyMap.IdFromVirtualKey((int)code, _numpad.Checked);
+        if (id is null)
+        {
+            row.Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyCaptureUnsupported", code.ToString());
+            return;
+        }
+
+        DataGridViewRow? occupant = _cheats.Rows.Cast<DataGridViewRow>()
+            .FirstOrDefault(r => r.Index != _capturingRow && (string?)r.Cells["Key"].Tag == id);
+        if (occupant is not null)
+        {
+            row.Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyCaptureConflict",
+                KeyMap.Display(id, _numpad.Checked), DisplayCheatName((Cheat)occupant.Tag!));
+            return;
+        }
+
+        SetKeyCell(row, id);
+        _capturingRow = -1;
+        _cheats.IsCapturing = false;
     }
 
     private void ResetTweaksToDefaults()
@@ -335,36 +529,83 @@ public sealed class TrainerPage : UserControl
             e.ToolTipText = Strings.EffectiveLanguage == "zh-TW" ? tweak.Description : tweak.Id;
     }
 
-    private static string FormatParameters(Cheat cheat, IReadOnlyDictionary<string, string>? configured)
+    private static string FormatSummary(Cheat cheat, IReadOnlyDictionary<string, string> parameters)
     {
-        var values = new List<string>();
-        foreach (CheatParam parameter in cheat.Parameters.Where(p => !p.Hidden))
-        {
-            string value = configured is not null && configured.TryGetValue(parameter.Name, out string? selected)
-                ? selected : Convert.ToString(parameter.Default, CultureInfo.InvariantCulture) ?? string.Empty;
-            values.Add($"{parameter.Name}={value}");
-        }
-        return string.Join("; ", values);
-    }
+        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        var visibleParams = cheat.Parameters.Where(p => !p.Hidden).ToList();
+        if (visibleParams.Count == 0)
+            return Strings.Get("Gui_Trainer_NoParams");
 
-    private static Dictionary<string, string> ParseParameters(Cheat cheat, string text)
-    {
-        var result = cheat.Parameters.ToDictionary(p => p.Name,
-            p => Convert.ToString(p.Default, CultureInfo.InvariantCulture) ?? string.Empty, StringComparer.Ordinal);
-        if (string.IsNullOrWhiteSpace(text)) return result;
-        foreach (string part in text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        long GetNum(string name, long def)
         {
-            int equals = part.IndexOf('=');
-            if (equals <= 0) throw new InvalidOperationException(Strings.Get("Gui_Trainer_InvalidParameter", part));
-            string name = part[..equals].Trim();
-            string value = part[(equals + 1)..].Trim();
-            CheatParam? definition = cheat.Parameters.FirstOrDefault(p => p.Name == name);
-            if (definition is null) throw new InvalidOperationException(Strings.Get("Gui_Trainer_InvalidParameter", name));
-            if (!definition.IsText && (!TryParseDecimal(value, out decimal numeric) || numeric < definition.Minimum || numeric > definition.Maximum))
-                throw new InvalidOperationException(Strings.Get("Gui_Trainer_InvalidParameter", part));
-            result[name] = value;
+            if (parameters.TryGetValue(name, out string? s) && long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out long v))
+                return v;
+            return def;
         }
-        return result;
+
+        switch (cheat.Id)
+        {
+            case "population_boost":
+                return Strings.Get("Gui_Trainer_Summary_Pop", GetNum("amount", 500).ToString("N0", CultureInfo.CurrentCulture));
+
+            case "production_boost":
+                return Strings.Get("Gui_Trainer_Summary_Prod", GetNum("rate", 200).ToString("N0", CultureInfo.CurrentCulture));
+
+            case "heal_army":
+                return Strings.Get("Gui_Trainer_Summary_Heal", GetNum("amount", 100000).ToString("N0", CultureInfo.CurrentCulture));
+
+            case "buff_army":
+                return Strings.Get("Gui_Trainer_Summary_Buff",
+                    GetNum("attack", 50).ToString("N0", CultureInfo.CurrentCulture),
+                    GetNum("defense", 50).ToString("N0", CultureInfo.CurrentCulture),
+                    GetNum("health", 500).ToString("N0", CultureInfo.CurrentCulture));
+
+            case "heal_buildings":
+                return Strings.Get("Gui_Trainer_Summary_Repair", GetNum("amount", 100000).ToString("N0", CultureInfo.CurrentCulture));
+
+            case "smite_enemies":
+                return Strings.Get("Gui_Trainer_Summary_Damage", GetNum("damage", 9999).ToString("N0", CultureInfo.CurrentCulture));
+
+            case Cheats.SetSelectedLevelId:
+                return Strings.Get("Gui_Trainer_Summary_Level", GetNum("level", 100));
+
+            case Cheats.SpawnUnitId:
+                string rawUnits = parameters.TryGetValue("units", out string? u) ? u : Cheats.DefaultUnitList;
+                var units = Cheats.ParseUnitList(rawUnits);
+                long count = GetNum("count", 5);
+                long level = GetNum("level", 1);
+                string rawItems = parameters.TryGetValue("items", out string? it) ? it : string.Empty;
+                var items = Cheats.ParseItemList(rawItems, Cheats.MaxItemListLength);
+
+                string lvlStr = level > 1 ? $" · Lv.{level}" : "";
+                string itemStr = items.Count > 0 ? (isZh ? $" · 攜帶 {items.Count} 件物品" : $" · {items.Count} items") : "";
+
+                if (units.Count > 0)
+                {
+                    string sample = string.Join("、", units.Take(2).Select(unit => Cheats.GetUnitLabel(unit, !isZh))) + (units.Count > 2 ? "..." : "");
+                    return Strings.Get("Gui_Trainer_Summary_Spawn", units.Count, sample, count) + lvlStr + itemStr;
+                }
+                return Strings.Get("Gui_Trainer_Summary_SpawnSimple", units.Count, count) + lvlStr + itemStr;
+
+            case Cheats.SpawnItemId:
+                string rawSpawnItems = parameters.TryGetValue("items", out string? sit) ? sit : Cheats.DefaultItemList;
+                var spawnItems = Cheats.ParseItemList(rawSpawnItems, Cheats.MaxSwitchableItemListLength);
+                long spawnItemCount = GetNum("count", 1);
+                if (spawnItems.Count > 0)
+                {
+                    string sample = string.Join("、", spawnItems.Take(2).Select(item => Cheats.GetItemLabel(item, !isZh))) + (spawnItems.Count > 2 ? "..." : "");
+                    return Strings.Get("Gui_Trainer_Summary_SpawnItem", spawnItems.Count, sample, spawnItemCount);
+                }
+                return Strings.Get("Gui_Trainer_Summary_SpawnItemSimple", spawnItems.Count, spawnItemCount);
+
+            default:
+                return string.Join("; ", visibleParams.Select(p =>
+                {
+                    string label = p.DisplayLabel(!isZh);
+                    string val = parameters.TryGetValue(p.Name, out string? v) ? v : Convert.ToString(p.Default, CultureInfo.InvariantCulture) ?? "";
+                    return $"{label}: {val}";
+                }));
+        }
     }
 
     private static bool TryParseDecimal(string text, out decimal value) =>
@@ -391,4 +632,31 @@ public sealed class TrainerPage : UserControl
 
     private static string Humanize(string id) => CultureInfo.InvariantCulture.TextInfo
         .ToTitleCase(id.Replace('_', ' '));
+}
+
+/// <summary>
+/// 「按鍵擷取」用的 DataGridView：<see cref="IsCapturing"/> 開著的時候，任何按鍵
+/// （包含方向鍵、Tab、F1、Esc 這些平常會被 DataGridView 自己吃掉去換格/翻頁的鍵）
+/// 都會被攔下來，改成觸發 <see cref="KeyCaptured"/>，而不會真的移動選取格或編輯儲存格。
+///
+/// 攔截點選在 ProcessCmdKey：這是整個訊息鏈最早看到 WM_KEYDOWN／WM_SYSKEYDOWN 的地方，
+/// 比 DataGridView 自己的方向鍵／編輯邏輯還早，是 WinForms 做「錄製快捷鍵」控制項的標準寫法。
+/// </summary>
+public sealed class KeyCaptureGrid : DataGridView
+{
+    [System.ComponentModel.Browsable(false)]
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool IsCapturing { get; set; }
+
+    public event Action<Keys>? KeyCaptured;
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (IsCapturing)
+        {
+            KeyCaptured?.Invoke(keyData);
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
 }

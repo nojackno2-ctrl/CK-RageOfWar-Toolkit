@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
@@ -1998,8 +1998,8 @@ internal static class Program
         BitConverter.GetBytes(first.Vanilla).CopyTo(mixed, first.ImmOffset);
         Check("部分重對應的混合狀態拒絕辨識", PatchState.Inspect(GameFile.Exe, mixed).IsUnrecognised);
 
-        Check("14 個作弊定義完整", Cheats.All.Count == 14);
-        Check("小鍵盤模式 14 個作弊各有唯一按鍵",
+        Check($"{Cheats.All.Count} 個作弊定義完整", Cheats.All.Count >= 14);
+        Check($"小鍵盤模式 {Cheats.All.Count} 個作弊各有唯一按鍵",
             Cheats.All.Select(c => c.NumpadKey).Distinct(StringComparer.Ordinal).Count() == Cheats.All.Count);
     }
 
@@ -2016,6 +2016,15 @@ internal static class Program
                 script.Contains("<scdebug>", StringComparison.Ordinal) &&
                 script.Contains($"id=\"{cheat.NumpadKey}\"", StringComparison.Ordinal));
         }
+
+        string itemScript = Cheats.BuildScDebug(
+            [
+                new CheatSelection { Id = Cheats.SpawnItemId, Key = "Ins", Parameters = new Dictionary<string, object> { ["items"] = "King's Belt,Boar teeth", ["count"] = 3 } },
+                new CheatSelection { Id = Cheats.CycleItemId, Key = "F6" }
+            ],
+            "auto", 1, keepVanilla: false);
+        Check("spawn_item 產生 DefItemHolder 與 AddItem 腳本", itemScript.Contains("Place(&quot;DefItemHolder&quot;", StringComparison.Ordinal) && itemScript.Contains("o.AddItem(item)", StringComparison.Ordinal));
+        Check("cycle_item 借用 spawn_item 之 items 參數", itemScript.Contains("King's Belt", StringComparison.Ordinal) && itemScript.Contains("Boar teeth", StringComparison.Ordinal));
 
         Check("四種 Tweak 型別均已移植",
             Tweaks.All.Any(t => t is AttrTweak) &&

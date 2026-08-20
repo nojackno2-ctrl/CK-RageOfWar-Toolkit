@@ -82,6 +82,21 @@ public static class KeyMap
     }
 
     /// <summary>
+    /// 反查：目前這個模式下，實際按下某個實體鍵（Win32 虛擬鍵碼）對應到哪個
+    /// scdebug id。用於「按鍵擷取」介面——使用者直接按鍵盤，不是從清單挑名字。
+    /// 找不到就回傳 null（那顆實體鍵在目前模式下沒有對應的 scdebug id）。
+    /// </summary>
+    public static string? IdFromVirtualKey(int virtualKey, bool numpadKeys)
+    {
+        foreach (var b in All)
+        {
+            uint effective = numpadKeys && b.Numpad is { } np ? np : b.Vanilla;
+            if (effective == (uint)virtualKey) return b.Key;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// 確認執行檔就是我們認識的那一版：每個位址上都要是預期的指令，
     /// 而且鍵碼是原版值或我們自己改上去的值。不符就回傳說明，符合回傳 null。
     /// </summary>

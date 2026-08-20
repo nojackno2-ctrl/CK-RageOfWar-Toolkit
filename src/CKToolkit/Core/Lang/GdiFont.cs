@@ -22,6 +22,8 @@ public sealed class GdiFont : IDisposable
     private IntPtr _hdc;
     private IntPtr _hfont;
     private IntPtr _oldFont;
+    private IntPtr _glyphBuffer = IntPtr.Zero;
+    private int _glyphBufferCapacity = 0;
 
     public int Ascent { get; }
     public int Descent { get; }
@@ -96,55 +98,66 @@ public sealed class GdiFont : IDisposable
             return true;
         }
 
-        IntPtr buffer = Marshal.AllocHGlobal((int)need);
-        try
+        if ((int)need > _glyphBufferCapacity)
         {
-            uint got = GetGlyphOutline(_hdc, (uint)codepoint, GgoGray8Bitmap,
-                                       out gm, need, buffer, ref mat);
-            if (got == GdiError)
+            if (_glyphBuffer != IntPtr.Zero)
             {
-                return false;
+                Marshal.FreeHGlobal(_glyphBuffer);
             }
+            int newCap = Math.Max((int)need, 4096);
+            _glyphBuffer = Marshal.AllocHGlobal(newCap);
+            _glyphBufferCapacity = newCap;
+        }
 
-            var raw = new byte[need];
-            Marshal.Copy(buffer, raw, 0, (int)need);
+        uint got = GetGlyphOutline(_hdc, (uint)codepoint, GgoGray8Bitmap,
+                                   out gm, need, _glyphBuffer, ref mat);
+        if (got == GdiError)
+        {
+            return false;
+        }
 
-            int w = (int)gm.gmBlackBoxX;
-            int h = (int)gm.gmBlackBoxY;
-            int pitch = (w + 3) & ~3;
-            var pixels = new byte[w * h];
+        int w = (int)gm.gmBlackBoxX;
+        int h = (int)gm.gmBlackBoxY;
+        int pitch = (w + 3) & ~3;
+        var pixels = new byte[w * h];
+
+        unsafe
+        {
+            var rawSpan = new ReadOnlySpan<byte>((void*)_glyphBuffer, (int)need);
             for (int y = 0; y < h; y++)
             {
                 int src = y * pitch;
                 int dst = y * w;
                 for (int x = 0; x < w; x++)
                 {
-                    byte v = raw[src + x];
+                    byte v = rawSpan[src + x];
                     pixels[dst + x] = v <= 64 ? GrayToLevel[v] : (byte)ApfFont.MaxLevel;
                 }
             }
+        }
 
-            int a = gm.gmptGlyphOriginX;
-            glyph = new Glyph
-            {
-                A = a,
-                B = w,
-                C = gm.gmCellIncX - a - w,
-                Top = Baseline - gm.gmptGlyphOriginY,
-                Width = w,
-                Height = h,
-                Pixels = pixels
-            };
-            return true;
-        }
-        finally
+        int a = gm.gmptGlyphOriginX;
+        glyph = new Glyph
         {
-            Marshal.FreeHGlobal(buffer);
-        }
+            A = a,
+            B = w,
+            C = gm.gmCellIncX - a - w,
+            Top = Baseline - gm.gmptGlyphOriginY,
+            Width = w,
+            Height = h,
+            Pixels = pixels
+        };
+        return true;
     }
 
     public void Dispose()
     {
+        if (_glyphBuffer != IntPtr.Zero)
+        {
+            Marshal.FreeHGlobal(_glyphBuffer);
+            _glyphBuffer = IntPtr.Zero;
+            _glyphBufferCapacity = 0;
+        }
         if (_hdc != IntPtr.Zero)
         {
             SelectObject(_hdc, _oldFont);

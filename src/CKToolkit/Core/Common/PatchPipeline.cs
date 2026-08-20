@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json.Serialization;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
@@ -188,7 +188,7 @@ public sealed class PatchPipeline
     /// </summary>
     public Result<ApplyReport> ApplyAll(string gameDir, ToolkitConfig config)
     {
-        if (GamePaths.IsGameRunning())
+        if (GamePaths.IsGameRunning(gameDir))
         {
             return Result<ApplyReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
         }
@@ -490,7 +490,7 @@ public sealed class PatchPipeline
     /// </summary>
     public Result<RestoreReport> RestoreAll(string gameDir)
     {
-        if (GamePaths.IsGameRunning())
+        if (GamePaths.IsGameRunning(gameDir))
         {
             return Result<RestoreReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
         }

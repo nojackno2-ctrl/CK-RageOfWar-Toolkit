@@ -334,7 +334,7 @@ public static partial class CliHost
         var data = new
         {
             gameDir,
-            gameRunning = GamePaths.IsGameRunning(),
+            gameRunning = GamePaths.IsGameRunning(gameDir),
             configVersion = config.Version,
             uiLanguage = config.UiLanguage,
             files = filesStatus
@@ -385,7 +385,7 @@ public static partial class CliHost
             return OutputError(commandName, err, ExitCodes.GameNotFound, isJson, stdout, stderr);
         }
 
-        if (GamePaths.IsGameRunning())
+        if (GamePaths.IsGameRunning(gameDir))
         {
             string err = Strings.Get("Error_GameRunning");
             return OutputError(commandName, err, ExitCodes.FileLocked, isJson, stdout, stderr);
@@ -486,7 +486,7 @@ public static partial class CliHost
             return OutputError("restore", err, ExitCodes.GameNotFound, isJson, stdout, stderr);
         }
 
-        if (GamePaths.IsGameRunning())
+        if (GamePaths.IsGameRunning(gameDir))
         {
             string err = Strings.Get("Error_GameRunning");
             return OutputError("restore", err, ExitCodes.FileLocked, isJson, stdout, stderr);
