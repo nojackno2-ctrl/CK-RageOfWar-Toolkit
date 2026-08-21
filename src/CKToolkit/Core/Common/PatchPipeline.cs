@@ -476,7 +476,7 @@ public sealed class PatchPipeline
 
         report.FilesWritten = writtenFiles;
 
-        if (config.Perf.Hires >= 2048)
+        if (config.Perf.Hires > 2048)
         {
             warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
         }

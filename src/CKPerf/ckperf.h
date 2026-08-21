@@ -100,6 +100,16 @@ void CrashInstall();
 void CrashLoadSymbolHelper();
 void CrashUninstall();
 
+// High-resolution runtime safety. Installed from DllMain while CKToolkit still
+// holds the game entry point, before any engine window or CVXVisible::View call.
+void HighResolutionInstallEarly();
+void HighResolutionInstallDeferred();
+void HighResolutionLogStatus();
+// Drains hires.cpp per-redirect hit counters into the log; no-op when the sidecar is not installed; safe to call every telemetry tick because it only writes when something changed.
+void HighResolutionLogHitCounts();
+// Measures the live CVXVisible dynamic rectangle count to validate whether the unverified 127-slot consumer loop cap ever drops rectangles.
+void HighResolutionLogVisibleCount();
+
 // Live handle-table occupancy: battle scale. -1 when the census is unavailable.
 long CensusLiveObjects();
 long CensusPeakObjects();
@@ -130,6 +140,8 @@ void FrameTimingUninstall();
 // Called by the telemetry thread once per period; drains the frame counters and
 // appends one line to the log. Returns false when frame timing is not installed.
 bool FrameTimingDrainAndLog(double periodSeconds);
+// Logs the maximum blit dimensions and distinct blit geometries observed; only writes when numbers change.
+void BlitGeometryLog();
 
 // ----------------------------------------------------------------------- helpers
 

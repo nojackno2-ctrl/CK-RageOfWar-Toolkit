@@ -9,9 +9,13 @@
 
 #include "ckperf.h"
 
+extern "C" __declspec(dllexport) volatile LONG CKPerfStartupStep = 0;
+
 namespace ckperf {
 
 static HANDLE g_initThread = nullptr;
+static BOOL   g_dpiAwareAtAttach = FALSE;
+static DWORD  g_dpiAwareError = ERROR_SUCCESS;
 
 static DWORD WINAPI InitThread(LPVOID) {
     // Now that the loader lock is released, the rest is safe.
@@ -42,14 +46,35 @@ static DWORD WINAPI InitThread(LPVOID) {
     TelemetryStart();
 
     Logf("ckperf ready.");
+    HighResolutionInstallDeferred();
     return 0;
 }
 
 static void Startup(HMODULE self) {
+    CKPerfStartupStep = 1;
+    // CKToolkit injects this DLL while the executable entry point is held in a
+    // two-byte self-loop.  This is therefore earlier than any engine window or
+    // GDI surface creation, which is the only reliable moment to opt this 2004
+    // non-manifested process out of Windows DPI virtualisation.  Without it a
+    // 3840x2160 desktop at 150% scaling is exposed to the engine as 2560x1440.
+    g_dpiAwareAtAttach = SetProcessDPIAware();
+    g_dpiAwareError = GetLastError();
+    CKPerfStartupStep = 2;
+
     DisableThreadLibraryCalls(self);
 
     LoadConfig(self);
+    CKPerfStartupStep = 3;
     LogInit();
+    CKPerfStartupStep = 4;
+    Logf("DPI awareness requested before entry point: %s (GetLastError=%u)",
+         g_dpiAwareAtAttach ? "applied" : "already set or refused", g_dpiAwareError);
+    // Keep diagnostics available for every refusal or early-install failure. This
+    // still runs inside the injected LoadLibrary call while CKToolkit holds the
+    // executable entry point, so no engine instruction can observe partial state.
+    HighResolutionInstallEarly();
+    CKPerfStartupStep = 5;
+    HighResolutionLogStatus();
 
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -67,6 +92,7 @@ static void Startup(HMODULE self) {
     CrashInstall();
 
     g_initThread = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
+    CKPerfStartupStep = 6;
 }
 
 static void Shutdown(bool processExiting) {

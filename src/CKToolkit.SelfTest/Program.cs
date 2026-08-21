@@ -109,6 +109,7 @@ internal static class Program
         RunGroup("28. VxSettingsLanguageDefaultReversal", TestVxSettingsLanguageDefaultReversal);
         RunGroup("29. LangExportTemplate", TestLangExportTemplate);
         RunGroup("30. CliLangCommands", TestCliLangCommands);
+        RunGroup("30b. LangImportSecurityAndValidation", TestLangImportSecurityAndValidation);
 
         // Phase 4 & Phase 6 修改器模組、取樣分析器與 CLI 指令測試
         RunGroup("31. TrainerKeyMapReversal", TestTrainerKeyMapReversal);
@@ -1860,31 +1861,81 @@ internal static class Program
         Check("Normalise 後 vxSettings.ini 逐位元組 100% 還原為原版", normRes.Value!.SequenceEqual(vanillaBytes));
     }
 
-    // --- 29. 語言包範本匯出測試 ---------------------------------------------
+    // --- 29. 語言包範本匯出與官方語言偵測測試 -----------------------------
     private static void TestLangExportTemplate()
     {
-        Console.WriteLine("29. 語言包範本匯出測試");
+        Console.WriteLine("29. 語言包範本匯出與官方語言偵測測試");
 
-        string tempOutDir = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_ExportTemplate_" + Guid.NewGuid().ToString("N"));
         var localPak = CreateSyntheticLocalPak();
 
+        // 1. 官方語言偵測測試：僅偵測 pak 中實際存在之語系
+        var stockLangs = LangInstaller.DetectStockLanguages(localPak);
+        Check("DetectStockLanguages 偵測出 ENGLISH 與 GERMAN",
+            stockLangs.Contains("ENGLISH") && stockLangs.Contains("GERMAN"));
+        Check("DetectStockLanguages ENGLISH 排在第一位",
+            stockLangs.Count > 0 && stockLangs[0] == "ENGLISH");
+        Check("未包含不存在的 SPANISH / ITALIAN / RUSSIAN",
+            !stockLangs.Contains("SPANISH") && !stockLangs.Contains("ITALIAN") && !stockLangs.Contains("RUSSIAN"));
+        var exportableLangs = LangInstaller.DetectExportableStockLanguages(localPak);
+        Check("匯出清單只包含具有可用翻譯表的官方語言，並保留英文主體",
+            exportableLangs.Contains("ENGLISH") && exportableLangs.Contains("GERMAN"));
+
+        // 2. 預設英文匯出 (ENGLISH)：英文 key + 英文預填 value
+        string tempOutEng = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_Export_Eng_" + Guid.NewGuid().ToString("N"));
         try
         {
-            LangInstaller.ExportTemplate(localPak, "GERMAN", tempOutDir);
+            LangInstaller.ExportTemplate(localPak, "ENGLISH", tempOutEng);
 
-            Check("ui.json 匯出成功", File.Exists(Path.Combine(tempOutDir, "ui.json")));
-            Check("help.json 匯出成功", File.Exists(Path.Combine(tempOutDir, "help.json")));
-            Check("pack.json 骨架匯出成功", File.Exists(Path.Combine(tempOutDir, "pack.json")));
+            Check("ui.json 匯出成功", File.Exists(Path.Combine(tempOutEng, "ui.json")));
+            Check("help.json 匯出成功", File.Exists(Path.Combine(tempOutEng, "help.json")));
+            Check("pack.json 骨架匯出成功", File.Exists(Path.Combine(tempOutEng, "pack.json")));
 
-            string packJsonText = File.ReadAllText(Path.Combine(tempOutDir, "pack.json"));
-            var metaRes = LanguagePack.ParseMeta(packJsonText);
-            Check("匯出的 pack.json 符合格式規範", metaRes.Success);
-            Check("匯出的 pack.json TemplateLang 為 GERMAN", metaRes.Value!.TemplateLang == "GERMAN");
+            string uiJson = File.ReadAllText(Path.Combine(tempOutEng, "ui.json"));
+            var uiDict = JsonSerializer.Deserialize<Dictionary<string, string>>(uiJson);
+            Check("英文匯出 ui.json key 為英文原文", uiDict != null && uiDict.ContainsKey("Start Game"));
+            Check("英文匯出 ui.json value 預填英文 (Start Game -> Start Game)", uiDict != null && uiDict["Start Game"] == "Start Game");
+
+            string packJson = File.ReadAllText(Path.Combine(tempOutEng, "pack.json"));
+            var metaRes = LanguagePack.ParseMeta(packJson);
+            Check("英文匯出 pack.json 結構合法", metaRes.Success);
+            Check("英文匯出 pack.json TemplateLang 設定為包含結構表的 GERMAN", metaRes.Value?.TemplateLang == "GERMAN");
         }
         finally
         {
-            try { if (Directory.Exists(tempOutDir)) Directory.Delete(tempOutDir, true); } catch { }
+            try { if (Directory.Exists(tempOutEng)) Directory.Delete(tempOutEng, true); } catch { }
         }
+
+        // 3. 選取官方語言匯出 (GERMAN)：英文 key + 德文預填 value
+        string tempOutDe = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_Export_De_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            LangInstaller.ExportTemplate(localPak, "GERMAN", tempOutDe);
+
+            string uiJson = File.ReadAllText(Path.Combine(tempOutDe, "ui.json"));
+            var uiDict = JsonSerializer.Deserialize<Dictionary<string, string>>(uiJson);
+            Check("德文匯出 ui.json key 仍為英文原文 (Start Game)", uiDict != null && uiDict.ContainsKey("Start Game"));
+            Check("德文匯出 ui.json value 預填德文翻譯 (Start Game -> Spiel starten)", uiDict != null && uiDict["Start Game"] == "Spiel starten");
+
+            string packJson = File.ReadAllText(Path.Combine(tempOutDe, "pack.json"));
+            var metaRes = LanguagePack.ParseMeta(packJson);
+            Check("德文匯出 pack.json TemplateLang 為 GERMAN", metaRes.Value?.TemplateLang == "GERMAN");
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempOutDe)) Directory.Delete(tempOutDe, true); } catch { }
+        }
+
+        // 4. 匯出不存在之語言 (SPANISH) 拒絕測試
+        bool rejected = false;
+        try
+        {
+            LangInstaller.ExportTemplate(localPak, "SPANISH", tempOutEng);
+        }
+        catch (InvalidOperationException)
+        {
+            rejected = true;
+        }
+        Check("匯出 local.pak 不存在之語言 (SPANISH) 被拒絕並拋出例外", rejected);
     }
 
     // --- 30. CLI lang 指令端對端整合測試 ------------------------------------
@@ -1959,19 +2010,228 @@ internal static class Program
                 Check("設定檔中 Lang.Pack 已清空", string.IsNullOrEmpty(loadedConfig.Lang.Pack));
             }
 
-            // 6. lang export-template --out <dir> --game <dir> --json
-            string exportOutDir = Path.Combine(tempDir, "Exported");
+            // 6. lang export-template 預設未指定 --template -> 預設 ENGLISH
+            string exportOutDir = Path.Combine(tempDir, "Exported_Default");
             using (var stdout = new StringWriter())
             using (var stderr = new StringWriter())
             {
                 int exitCode = CliHost.Execute(["lang", "export-template", "--out", exportOutDir, "--game", tempGameDir, "--json"], stdout, stderr);
-                Check("CLI lang export-template 退出碼 0", exitCode == ExitCodes.Success);
-                Check("範本輸出目錄已建立 pack.json", File.Exists(Path.Combine(exportOutDir, "pack.json")));
+                Check("CLI lang export-template (預設 ENGLISH) 退出碼 0", exitCode == ExitCodes.Success);
+                Check("預設匯出目錄已建立 pack.json", File.Exists(Path.Combine(exportOutDir, "pack.json")));
+
+                string uiJson = File.ReadAllText(Path.Combine(exportOutDir, "ui.json"));
+                var uiDict = JsonSerializer.Deserialize<Dictionary<string, string>>(uiJson);
+                Check("預設匯出 ui.json 為英文值", uiDict != null && uiDict["Start Game"] == "Start Game");
+            }
+
+            // 7. lang export-template --template GERMAN 指定官方語言
+            string exportOutDe = Path.Combine(tempDir, "Exported_German");
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "export-template", "--out", exportOutDe, "--template", "GERMAN", "--game", tempGameDir, "--json"], stdout, stderr);
+                Check("CLI lang export-template --template GERMAN 退出碼 0", exitCode == ExitCodes.Success);
+
+                string uiJson = File.ReadAllText(Path.Combine(exportOutDe, "ui.json"));
+                var uiDict = JsonSerializer.Deserialize<Dictionary<string, string>>(uiJson);
+                Check("德文匯出 ui.json 為德文值", uiDict != null && uiDict["Start Game"] == "Spiel starten");
+            }
+
+            // 8. lang export-template 不存在語言 -> 退出碼失敗
+            string exportOutBad = Path.Combine(tempDir, "Exported_Bad");
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "export-template", "--out", exportOutBad, "--template", "SPANISH", "--game", tempGameDir, "--json"], stdout, stderr);
+                Check("CLI lang export-template 不存在語言退出碼非 0", exitCode != ExitCodes.Success);
             }
         }
         finally
         {
             try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    // --- 30b. 語言包安全匯入、邊界防護與 Staging 原子覆寫測試 -------------
+    private static void TestLangImportSecurityAndValidation()
+    {
+        Console.WriteLine("30b. 語言包安全匯入、邊界防護與 Staging 原子覆寫測試");
+
+        string testBaseDir = Path.Combine(Path.GetTempPath(), "CKToolkit_Test_LangImport_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testBaseDir);
+
+        try
+        {
+            // A. 合法語言包匯入測試
+            string validSource = Path.Combine(testBaseDir, "SourceValid");
+            Directory.CreateDirectory(validSource);
+
+            var validMeta = new LanguagePackMeta
+            {
+                Id = "custom-test",
+                Name = "Custom Test Pack",
+                NativeName = "自訂測試語言包",
+                Version = "1.0.0",
+                Authors = ["Tester"],
+                GameLangFolder = "CUSTOM",
+                GameLangKey = "custom",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta
+                {
+                    Face = "Arial",
+                    Ranges = ["0020-007F", "4E00-9FFF"]
+                },
+                Files = new FilesMeta
+                {
+                    Ui = "ui.json",
+                    Help = "help.json",
+                    Campaigns = ["campaign-test.json"]
+                }
+            };
+
+            File.WriteAllText(Path.Combine(validSource, "pack.json"), JsonSerializer.Serialize(validMeta));
+            File.WriteAllText(Path.Combine(validSource, "ui.json"), "{\"Start Game\": \"開始遊戲\"}");
+            File.WriteAllText(Path.Combine(validSource, "help.json"), "{\"Welcome\": \"歡迎\"}");
+            File.WriteAllText(Path.Combine(validSource, "campaign-test.json"), "{\"Objective\": \"目標\"}");
+            File.WriteAllText(Path.Combine(validSource, "credits.txt"), "Translators: Tester");
+
+            var importRes = LangPackService.ImportPack(validSource, testBaseDir);
+            Check("合法語言包匯入成功", importRes.Success && importRes.Value != null);
+
+            string installedDir = Path.Combine(testBaseDir, "langpacks", "custom-test");
+            Check("目標安裝目錄已建立", Directory.Exists(installedDir));
+            Check("安裝目錄內 pack.json 存在", File.Exists(Path.Combine(installedDir, "pack.json")));
+            Check("安裝目錄內 ui.json 存在", File.Exists(Path.Combine(installedDir, "ui.json")));
+            Check("安裝目錄內 help.json 存在", File.Exists(Path.Combine(installedDir, "help.json")));
+            Check("安裝目錄內 campaign-test.json 存在", File.Exists(Path.Combine(installedDir, "campaign-test.json")));
+            Check("安裝目錄內 credits.txt 存在", File.Exists(Path.Combine(installedDir, "credits.txt")));
+
+            var discovered = PackLoader.DiscoverAll(testBaseDir);
+            Check("DiscoverAll 成功探索到新匯入之語言包", discovered.ContainsKey("custom-test"));
+
+            // 匯入復原失敗時保留的 .rollback_* 不得被 DiscoverAll 當成正式語言包。
+            string orphanRollback = Path.Combine(testBaseDir, "langpacks", ".rollback_custom-test_orphan");
+            Directory.CreateDirectory(orphanRollback);
+            validMeta.Version = "999.0.0";
+            File.WriteAllText(Path.Combine(orphanRollback, "pack.json"), JsonSerializer.Serialize(validMeta));
+            File.Copy(Path.Combine(validSource, "ui.json"), Path.Combine(orphanRollback, "ui.json"));
+            File.Copy(Path.Combine(validSource, "help.json"), Path.Combine(orphanRollback, "help.json"));
+            File.Copy(Path.Combine(validSource, "campaign-test.json"), Path.Combine(orphanRollback, "campaign-test.json"));
+            var discoveredWithRollback = PackLoader.DiscoverAll(testBaseDir);
+            Check("DiscoverAll 忽略 .rollback_*，不讓舊包覆蓋正式目錄",
+                discoveredWithRollback["custom-test"].Meta.Version == "1.0.0");
+            Directory.Delete(orphanRollback, recursive: true);
+            validMeta.Version = "1.0.0";
+
+            // B. 安全檢查：路徑走訪 (Path Traversal) 拒絕
+            string traversalSource = Path.Combine(testBaseDir, "SourceTraversal");
+            Directory.CreateDirectory(traversalSource);
+            var traversalMeta = new LanguagePackMeta
+            {
+                Id = "evil-pack",
+                Name = "Evil Pack",
+                NativeName = "邪惡包",
+                Version = "1.0.0",
+                GameLangFolder = "EVIL",
+                GameLangKey = "evil",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta { Ui = "../../../outside.json" }
+            };
+            File.WriteAllText(Path.Combine(traversalSource, "pack.json"), JsonSerializer.Serialize(traversalMeta));
+
+            var travRes = LangPackService.ImportPack(traversalSource, testBaseDir);
+            Check("宣告檔案含路徑走訪 (../) 被拒絕", !travRes.Success);
+            Check("未建立邪惡語言包目錄", !Directory.Exists(Path.Combine(testBaseDir, "langpacks", "evil-pack")));
+
+            // C. 安全檢查：絕對路徑 (Rooted Path) 拒絕
+            string rootedSource = Path.Combine(testBaseDir, "SourceRooted");
+            Directory.CreateDirectory(rootedSource);
+            var rootedMeta = new LanguagePackMeta
+            {
+                Id = "rooted-pack",
+                Name = "Rooted Pack",
+                NativeName = "根路徑包",
+                Version = "1.0.0",
+                GameLangFolder = "ROOTED",
+                GameLangKey = "rooted",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta { Ui = @"C:\windows\system32\calc.exe" }
+            };
+            File.WriteAllText(Path.Combine(rootedSource, "pack.json"), JsonSerializer.Serialize(rootedMeta));
+
+            var rootRes = LangPackService.ImportPack(rootedSource, testBaseDir);
+            Check("宣告檔案含絕對根路徑被拒絕", !rootRes.Success);
+
+            // D. 安全檢查：非法 Pack ID (含斜線、連鎖點) 拒絕
+            Check("IsValidPackId 正確判定合法 ID", LangPackService.IsValidPackId("zh-TW") && LangPackService.IsValidPackId("fr_custom-1"));
+            Check("IsValidPackId 拒絕含 .. 之 ID", !LangPackService.IsValidPackId("../bad_id"));
+            Check("IsValidPackId 拒絕含斜線之 ID", !LangPackService.IsValidPackId("bad/id") && !LangPackService.IsValidPackId(@"bad\id"));
+            Check("IsValidPackId 拒絕含冒號之 ID", !LangPackService.IsValidPackId("bad:id"));
+            Check("IsValidPackId 拒絕前後空白與超長 ID",
+                !LangPackService.IsValidPackId(" spaced ") &&
+                !LangPackService.IsValidPackId(new string('a', 65)));
+
+            // D2. 宣告存在但缺檔也必須拒絕，不可讓 PackLoader 靜默略過
+            string missingSource = Path.Combine(testBaseDir, "SourceMissingDeclaredFile");
+            Directory.CreateDirectory(missingSource);
+            var missingMeta = new LanguagePackMeta
+            {
+                Id = "missing-pack",
+                Name = "Missing Pack",
+                NativeName = "Missing Pack",
+                Version = "1.0.0",
+                GameLangFolder = "MISSING",
+                GameLangKey = "missing",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta { Ui = "missing-ui.json" }
+            };
+            File.WriteAllText(Path.Combine(missingSource, "pack.json"), JsonSerializer.Serialize(missingMeta));
+            Check("pack.json 宣告的翻譯檔案遺失時拒絕匯入",
+                !LangPackService.ImportPack(missingSource, testBaseDir).Success);
+
+            // E. 安全檢查：來源與目的為同一路徑拒絕
+            var sameRes = LangPackService.ImportPack(installedDir, testBaseDir);
+            Check("來源與目的為同一路徑被拒絕", !sameRes.Success);
+
+            // F. 安全覆寫測試：Staging + 原子替換
+            validMeta.Version = "2.0.0";
+            File.WriteAllText(Path.Combine(validSource, "pack.json"), JsonSerializer.Serialize(validMeta));
+
+            bool promptCalled = false;
+            var overwriteRes = LangPackService.ImportPack(validSource, testBaseDir, (id, path) =>
+            {
+                promptCalled = true;
+                return true; // 使用者同意覆寫
+            });
+
+            Check("覆寫既有包時觸發詢問回呼", promptCalled);
+            Check("同意覆寫後成功更新版本至 2.0.0", overwriteRes.Success && overwriteRes.Value?.Meta.Version == "2.0.0");
+
+            // F2. API 未提供明確覆寫確認時不得靜默覆寫
+            validMeta.Version = "2.5.0";
+            File.WriteAllText(Path.Combine(validSource, "pack.json"), JsonSerializer.Serialize(validMeta));
+            var noPromptRes = LangPackService.ImportPack(validSource, testBaseDir);
+            Check("既有同 ID 語言包未提供覆寫確認時被拒絕", !noPromptRes.Success);
+            var checkStill2BeforeCancel = PackLoader.LoadFromDirectory(installedDir);
+            Check("拒絕靜默覆寫後仍保持 2.0.0",
+                checkStill2BeforeCancel.Success && checkStill2BeforeCancel.Value?.Meta.Version == "2.0.0");
+
+            // G. 取消覆寫保護測試
+            validMeta.Version = "3.0.0";
+            File.WriteAllText(Path.Combine(validSource, "pack.json"), JsonSerializer.Serialize(validMeta));
+
+            var cancelRes = LangPackService.ImportPack(validSource, testBaseDir, (id, path) => false); // 取消
+            Check("使用者取消覆寫時未覆寫", !cancelRes.Success);
+
+            var checkStill2 = PackLoader.LoadFromDirectory(installedDir);
+            Check("取消後安裝目錄仍保持先前 2.0.0 版本未受損壞", checkStill2.Success && checkStill2.Value?.Meta.Version == "2.0.0");
+        }
+        finally
+        {
+            try { if (Directory.Exists(testBaseDir)) Directory.Delete(testBaseDir, true); } catch { }
         }
     }
 

@@ -831,5 +831,178 @@ region        : base 0x61FA0000  size 0x5C0000  state FREE
    - `dotnet build`：0 警告 0 錯誤。
    - `SelfTest`：全部 33 組測試群組 100% 通過（Phase 1–4 & Phase 6 全綠）。
 
+---
 
+## HD/2K/4K 解析度支援現況 (2026-08-21 收尾)
+
+### 結論摘要
+
+| 項目 | 狀態 |
+|---|---|
+| 1920x1080（出廠預設） | 穩定，原有基線，未受今天任何改動影響 |
+| 2048x1152 | **確認穩定，且不需要任何額外 runtime patch**。舊筆記記載「2048x1152 以上進遊戲即崩潰」是錯的，已在 SPEC.md §3 更正並移除 CLI/GUI 對應的錯誤警告文字 |
+| 2560x1440 | **閃退已解決**（多場實機驗證：6,000+ 物件、跑滿整場、零 crash report，原版此解析度進關卡數秒內必崩）。**但畫面未修好**：捲動鏡頭時右側 x≈2048 起出現方向相依的貼圖塗抹，成因尚未定位 |
+| 3840x2160（4K） | 僅完成設定面的支援（CLI/GUI 可設定、`data.pak`／`vxSettings.ini` 正確寫入），**未實機測試過**。理論上會有跟 2560 相同或更嚴重的畫面缺陷 |
+
+**目前不建議把 2560x1440／3840x2160 開放給終端使用者**，`Perf_HdCeilingWarning`
+字串已更新為誠實描述（不再宣稱會崩潰，但清楚寫明畫面缺陷未修復）。
+
+### 已解決：CVXVisible 75 格陣列溢位閃退
+
+`CVXVisible`（引擎的可見性管理物件）在原版有一個寫死 75 格的 16-byte 內嵌陣列
+（`this+0x10..this+0x4BF`），緊接著 `+0x4C0..+0x50F` 是 live bounds 與容器指標。
+容量不足時，consumer 迴圈會寫爆物件尾端，數秒內觸發 first-chance fault
+（已有 fault report 佐證）。
+
+`src/CKPerf/hires.cpp`（新增，已整合進 CKPerf，`ckperf.h`/`dllmain.cpp`/
+`CKPerf.vcxproj` 同步更新）以 runtime code cave 把所有槽位定址計算重導向到
+外部配置的 sidecar 陣列，物件本身佈局完全不動：
+
+- 逐位元組核對 Steam 版原始 machine code，任一站點不符即整個修補拒絕安裝，
+  不寫入任何 byte（唯讀驗證失敗只是不啟用，不影響遊戲本體）。
+- 兩個關鍵缺陷已修：(1) `0x0047A020` 函式內一處三運算元 `lea` 定址原本未被
+  掃到，會在 index ≥ 75 時繼續寫內嵌陣列造成堆積損毀；(2) `0x00478840`
+  內四個 producer 站點原本被跳過（誤判「物件身分未證實」），造成讀寫分屬
+  sidecar 與內嵌陣列兩塊不同儲存區。
+- 建置：`tools/perf/build-ckperf.ps1` 重建 `ckperf.dll` 後 `dotnet build`
+  內嵌進 `CKToolkit.exe`。
+
+**這是今天唯一被多場實機證據支撐、且可獨立交付的成果。**
+
+### 未解決：捲動時的畫面塗抹
+
+用量測而非猜測的方式逐層排除：
+
+- `SetDIBitsToDevice`（引擎唯一的上螢幕途徑，`src/CKPerf/frames.cpp` 已掛鉤
+  記錄實際 blit 幾何）確認每幀送出完整 2560 寬、正確的 16bpp 影像。輸出路徑
+  本身沒有問題。
+- 引擎有一塊寫死 2048×2048 的區塊表面（`push 0x800`／`push 0x800` 建構
+  於 `0x00479E49`/`0x0047D9E0` 與 `0x004780EA`/`0x004784E0` 兩處），已透過
+  runtime patch 放大到 2560×2048（依 `g_capacity` 推導，4K 會是 4096×2560），
+  以除錯器讀取執行中行程記憶體確認寬度確實變成 2560——**但畫面塗抹沒有改善**。
+- 因此問題不在表面尺寸、不在 consumer 端上限（同步加了第六個上限站點
+  `kLimitSiteF` 並確認有觸發），成因在更早的光柵化階段，**尚未定位**。
+
+**一個需要更正的重要結論**：稽核過程中一度認定 `CVXVisible+0x4C8` 是
+begin/end/capacity 三指標的矩形容器，並據此量出「2560 需要約 1,171～1,286
+個矩形」。**這個模型在 2026-08-21 傍晚以除錯器直接讀取執行中行程記憶體證明
+是錯的**——`+0x4C8`/`+0x4CC` 讀到的其實是普通座標數值（如 1692、17151），
+不是指標；真正的三個小型指標容器在 `+0x4E8`／`+0x4F4`／`+0x500`，每個只有
+5 個元素。連帶地，「矩形容量不足」「sidecar 需要 2,342 格」等結論都建立在
+誤讀上，不代表真實限制。`hires.cpp` 裡因此新增的 sidecar 容量推導、欄位上限
+cave 邏輯本身無害（一樣受 `ValidateAll()` 位元組驗證保護），但**沒有解決
+實際問題**，予以保留只是因為移除的風險高於保留的成本，不代表它是有效修補。
+
+`docs/hires-sidecar-audit.md` 記錄了完整的位址級證據鏈與這次更正，繼續排查
+時應以這份文件與本節為準，不要重新驗證已經量測否定的假設（矩形容器模型、
+表面尺寸、consumer 上限）。
+
+### 下一步建議
+
+繼續原生高解析度路線的話，下一個該查的是「把地形畫進 2560 寬緩衝區」那一段
+光柵化程式碼——今天完全沒碰過。備選方案是內部維持 2048x1152（已驗證零缺陷）
+或 1920x1080，後端縮放輸出到 3840x2160，可立即交付穩定的 4K 輸出，代價是
+非原生銳利度。
+
+### 已還原的基線狀態
+
+解析度實驗過程中，遊戲目錄一度只剩效能修補、語言包與修改器都被正規化移除。
+收尾時已用 `apply` + `lang install --pack zh-TW` + `trainer set --numpad on`
++ `trainer apply` 完整復原：1920x1080 + `langpack_CHINESE` + `trainer_marker`
++ `key_map`，五個檔案 `status` 均為「已套用修補」。
+
+---
+
+## 語言頁面最佳化與語言包匯入／匯出 GUI 完成紀錄 (2026-08-21)
+
+實作「語言頁面最佳化與語言包匯入／匯出 GUI」與核心安全服務：
+
+### 完成項目
+
+1. **翻譯資料模型與範本匯出 (`LangInstaller.cs`, `CliHost.cs`)**：
+   - 翻譯資料模型統一以英文原文（`LocXml.SourceText`）為穩定鍵值 (`key`)。
+   - 預設由 `ENGLISH` 匯出範本，翻譯值 (`value`) 亦預填英文，翻譯者直接替換 `value` 為目標語言。
+   - 選取其他官方語言（如 `GERMAN`、`FRENCH`、`BULGARIAN`）匯出時，`key` 仍為英文原文，`value` 預填該官方語言之翻譯 `result`（若缺少自動回退英文）。
+   - 新增 `LangInstaller.DetectStockLanguages(localPak)`，動態列出 `local.pak` 中實際存在之官方語言，禁止列出不存在的語系；匯出不存在語系嚴格拒絕。
+   - CLI `lang export-template` 預設 `--template` 改為 `ENGLISH`，並保留 `--template <lang>` 相容選項。
+
+2. **安全匯入與 Staging 原子替換服務 (`LangPackService.cs`)**：
+   - 新增 `LangPackService.cs`，提供完整的安全驗證與匯入管線：
+     - 路徑走訪防護：拒絕包含 `..`、絕對根路徑、或超出來源目錄之宣告檔案路徑。
+     - Pack ID 安全驗證：僅允許英數字、底線與連字號，拒絕非法字元。
+     - 來源與目的目錄相同檢查：嚴格拒絕同路徑匯入。
+     - 符號連結防護：檢查並拒絕 Reparse Point / Symlink。
+     - 必要檔案檢查：確保 `pack.json` 與 `ui.json` 等必要檔案完整。
+   - 覆寫防護與 Staging 原子替換：
+     - 遇到既有同 ID 目錄時於 UI 彈窗確認覆寫。
+     - 採 Staging (`.staging_<id>_<guid>`) + 原子替換 (`Directory.Move`)，若中途失敗自動還原 backup，絕不破壞既有安裝。
+     - 遊戲檔案零寫入保證：匯入／匯出僅操作 `langpacks/` 目錄與範本檔案，只有使用者在主視窗按「一鍵套用」時才會寫入 `local.pak`。
+
+3. **GUI 介面與雙語多國語言 (`LanguagePage.cs`, `MainForm.cs`, `strings.*.json`)**：
+   - `LanguagePage` 新增「📥 匯入語言包…」與「📤 匯出翻譯範本…」按鈕。
+   - 匯入動線：透過 `FolderBrowserDialog` 挑選資料夾，安全匯入後自動重載清單、選取新語言包並更新字型與中繼資料。
+   - 匯出動線：透過 `ExportTemplateDialog` 讓使用者自 `local.pak` 實體偵測到的官方語言中選擇來源語言並指定匯出目錄。
+   - 取得主視窗目前遊戲目錄（`GameDirProvider`）；無有效遊戲或 pak 無法辨識時以雙語 I18n 訊息提示，不崩潰。
+   - 介面清楚標記相容性說明：Unicode BMP、LTR、無複雜塑形；CJK 支援需合適字型與精準 ranges；不支援 RTL、Indic/Thai 塑形、Emoji 及非 BMP 字元。
+   - `strings.en.json` 與 `strings.zh-TW.json` 同步新增 22 組鍵值對，雙語完全對齊。
+
+4. **核心測試套件 (`CKToolkit.SelfTest/Program.cs`)**：
+   - Group 29: 驗證官方語言動態偵測、預設英文匯出（英文 key + 英文 value）、德文匯出（英文 key + 德文 value）、不存在語系拒絕。
+   - Group 30: 驗證 CLI `lang export-template` 預設 ENGLISH 匯出、`--template GERMAN` 匯出與錯誤語言退出碼。
+   - Group 30b: 驗證合法語言包匯入、路徑走訪 (../) 拒絕、絕對根路徑拒絕、非法 Pack ID 拒絕、來源目的同路徑拒絕、Staging + 原子覆寫與取消覆寫保護。
+
+5. **建置與驗證狀態**：
+   - `git diff --check` 通過，無空白字元或編碼錯誤。
+   - 因專案既有之未提交檔案 `src/CKToolkit/Core/Trainer/Cheats.cs` 存在語法錯誤，`dotnet build` 與 SelfTest 執行仍被該檔案阻擋；嚴格遵守安全約束未擅自修改 `Cheats.cs`。
+
+### 父代理驗收補正（2026-08-21）
+
+- AGY 初版有兩個需補正的安全邊界：`PackLoader` 曾在 traversal 驗證前讀取宣告檔；覆寫復原失敗時
+  `finally` 仍可能刪除 rollback。現已改為先只解析 `pack.json`、驗證所有宣告路徑與 reparse point
+  後才載入翻譯；復原失敗時保留 `.rollback_*`，不得刪除唯一可恢復的舊包。
+- 既有同 ID 目標若呼叫端未提供明確覆寫確認，核心服務直接拒絕；取消覆寫不再於 GUI 顯示錯誤。
+  Pack ID 另加入未修剪與 64 字元上限，宣告但缺少的 help/campaign 檔案也會拒絕。
+- `PackLoader.DiscoverAll` 會忽略點號開頭的 staging/rollback 與 reparse 目錄，避免保留下來的舊包
+  在下次啟動時覆蓋正式語言包；SelfTest 已加入對應回歸案例。
+- 目前共享工作樹的 `dotnet build` 仍只被他人未提交且損壞的 `Cheats.cs` 阻擋。為驗證本次語言變更，
+  已建立隔離暫存副本：以 `HEAD` 的正常 `Cheats.cs` 疊加本次全部語言相關差異；該副本
+  `dotnet build` 為 **0 warnings / 0 errors**，完整 `CKToolkit.SelfTest` **全部通過**，含新增 Group 29、
+  30、30b 與既有所有回歸測試。這不代表目前共享工作樹可建置，兩者必須分開陳述。
+
+---
+
+### 4K producer-cap 實機否決（10:20，優先於 09:15 實驗狀態）
+
+- 已確定真正的 `CVXVisible` 生成器是 `0x0047ABF0`；唯一 `last` 寫入點
+  `0x0047AF07: sar edx,4 / pop esi / mov [ecx+4],edx`。把 `last` 夾到 74 可讓
+  2560x1440 與 3840x2160 進關卡，不再覆寫 `this+0x4C0..+0x50F`。
+- 此 cap 已暫時整合進 CKPerf（`hires.cpp`），並把 `SetProcessDPIAware()` 移到遊戲 entry point
+  前。實體桌面 3840x2160@60 時，log 確認 DPI applied、cap installed；內部 inspector 確認
+  `capacity=3840`、viewport `3840x2026`，且沒有 crash report。
+- **但使用者移動畫面後，右半部出現大量重複貼圖／列資料破壞；producer cap 只能防 crash，
+  不能提供 4K 正確畫面，已由實機截圖否決，絕不可作為完成方案。** 原因是 4K 約需 120 個
+  16-byte visible-column slots，截到 75 後 consumer 仍渲染完整 viewport，後 45 欄缺資料。
+- 正確下一步只剩兩條：完整擴充 `CVXVisible` inline storage 並系統性搬移/重寫所有
+  `+0x4C0..+0x50F` tail member access；或採可驗證輸入/顯示都正常的 2560/1920 internal render
+  + 4K scaling backend。不要再加入 consumer guards 或 tail snapshot/restore；那些已造成 UAF/fault。
+- 該測試場次已退出；桌面恢復 helper 首次嘗試 2560x1440@75 的 `CDS_TEST=-1`，需先完成可靠恢復。
+  暫時的 `HIGHDPIAWARE` appcompat value 已移除。
+
+---
+
+## Trainer Cheats.cs 重構修復完成紀錄 (2026-08-21)
+
+修復 `src/CKToolkit/Core/Trainer/Cheats.cs` 中未完成的 `Cheat` 建構子具名引數傳遞：
+
+- **變更檔案**：
+  - `src/CKToolkit/Core/Trainer/Cheats.cs`：
+    - 在 `Cheats.All` 內的 17 筆作弊建構式呼叫中，補回具名引數 `defaultKey`、`numpadKey` 以及 `defaultEnabled`。
+    - 4 筆實驗性作弊（`spawn_unit`、`cycle_unit`、`spawn_item`、`cycle_item`）維持 `experimental: true`，補齊 `defaultKey` 與 `numpadKey`。
+    - 其餘 13 筆作弊依規範明確設定 `defaultEnabled: true/false`、`defaultKey` 與 `numpadKey`。
+    - 17 筆 `NumpadKey` 互不相同且皆落在 `Cheats.Keys` 合法按鍵清單內。
+- **建置與測試驗證**：
+  - `dotnet build CKToolkit.sln -c Release`：0 個警告、0 個錯誤。
+  - `dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release`：33 大項自動化測試全部通過（0 項失敗）。
+
+---
 

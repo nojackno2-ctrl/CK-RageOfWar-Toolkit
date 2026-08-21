@@ -91,6 +91,7 @@
     <ClCompile Include="crash.cpp" />
     <ClCompile Include="frames.cpp" />
     <ClCompile Include="guard.cpp" />
+    <ClCompile Include="hires.cpp" />
     <ClCompile Include="nullstore.cpp" />
     <ClCompile Include="telemetry.cpp" />
     <ClCompile Include="dllmain.cpp" />

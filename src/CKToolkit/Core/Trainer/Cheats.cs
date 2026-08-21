@@ -404,17 +404,15 @@ public static class Cheats
             "把我方每座聚落的金錢補到該聚落的儲存上限（max_gold）。"
             + "上限本身無法用腳本提高——地圖裡原本就有的聚落，容量是存在地圖檔中的，"
             + "「遊戲設定」分頁的聚落容量只對遊戲中新建立的聚落有效。",
-            "F2",
             (player, p) => ForEachSettlement(player, "s.SetGold(s.max_gold);",
                                              "[修改器] 金錢已補滿"),
-            numpadKey: "F1"),
+            defaultEnabled: true, defaultKey: "F2", numpadKey: "F1"),
 
         new Cheat("food_fill", "食物補滿",
             "把我方每座聚落的食物補到儲存上限（max_food）。",
-            "F3",
             (player, p) => ForEachSettlement(player, "s.SetFood(s.max_food);",
                                              "[修改器] 食物已補滿"),
-            numpadKey: "F2"),
+            defaultEnabled: true, defaultKey: "F3", numpadKey: "F2"),
 
         new Cheat("population_boost", "人口暴增（突破人口上限）",
             "把我方每座城鎮／村莊的人口直接往上加。收入是「人口 × 生產率 ÷ 100」"
@@ -424,32 +422,28 @@ public static class Cheats
             + "但引擎每 4 秒會把超出上限的部分削掉 10%，"
             + "要讓人口留得住，請到「遊戲設定」→「經濟」把"
             + "「超出上限的人口流失間隔」調到很大。",
-            "Tab",
             (player, p) => ForEachCentralBuilding(player,
                 $"s.AddToPopulation({Int(p, "amount")});",
                 "[修改器] 人口已增加"),
             [new CheatParam("amount", "每次增加的人口", 500, 1, 1000000, englishLabel: "Population Increase Amount")],
-            defaultEnabled: false, numpadKey: "F11"),
+            defaultEnabled: false, defaultKey: "Tab", numpadKey: "F11"),
 
         new Cheat("loyalty_max", "忠誠度全滿",
             "我方所有聚落忠誠度設為 100，避免叛變。",
-            "Backspace",
             (player, p) => ForEachSettlement(player, "s.SetLoyalty(100);",
                                              "[修改器] 忠誠度已全滿"),
-            numpadKey: "F3"),
+            defaultEnabled: true, defaultKey: "Backspace", numpadKey: "F3"),
 
         new Cheat("production_boost", "生產力大幅提升",
             "把我方聚落的金錢與食物生產率調到指定值（原版基準值為 24 / 20）。",
-            "Add",
             (player, p) => ForEachSettlement(player,
                 $"s.SetGoldProduction({Int(p, "rate")}); s.SetFoodProduction({Int(p, "rate")});",
                 "[修改器] 生產力已提升"),
             [new CheatParam("rate", "生產率", 200, 1, 10000, englishLabel: "Production Rate")],
-            defaultEnabled: false, numpadKey: "F12"),
+            defaultEnabled: false, defaultKey: "Add", numpadKey: "F12"),
 
         new Cheat("heal_army", "我方全體回血",
             "我方所有單位補滿血量（Heal 不會超過該單位的 maxhealth）。",
-            "F4",
             (player, p) => $"""
                 Query q;
                 q = ClassPlayerObjs("Unit", {player});
@@ -457,7 +451,7 @@ public static class Cheats
                 pr("[修改器] 全軍已回血");
                 """,
             [new CheatParam("amount", "回血量", 100000, 1, 1000000, englishLabel: "Heal Amount")],
-            numpadKey: "F4"),
+            defaultEnabled: true, defaultKey: "F4", numpadKey: "F4"),
 
         new Cheat("buff_army", "強化我方單位（只有我變強）",
             "只替我方現有單位加上攻擊／防禦／血量加成，電腦玩家完全不受影響。"
@@ -468,7 +462,6 @@ public static class Cheats
             + "同一個單位只會被加成一次（加過的會丟進 trainerbuff 群組），"
             + "所以新生產出來的單位要再按一次才會拿到加成。"
             + "血量加成不會自動補血，腳本會順手把加上去的血補滿。",
-            "Del",
             (player, p) => $$"""
                 Query q; ObjList ol; Unit u; int i;
                 q = ClassPlayerObjs("Unit", {{player}});
@@ -492,11 +485,10 @@ public static class Cheats
             [new CheatParam("attack", "攻擊加成（原版步兵約 8~40）", 50, 0, 1000000, englishLabel: "Attack Bonus (Vanilla Infantry ~8-40)"),
              new CheatParam("defense", "防禦加成（斬擊與穿刺，原版約 4~26）", 50, 0, 1000000, englishLabel: "Defense Bonus (Slash & Pierce, Vanilla ~4-26)"),
              new CheatParam("health", "血量上限加成（原版步兵約 220）", 500, 0, 1000000, englishLabel: "Health Bonus (Vanilla Infantry ~220)")],
-            numpadKey: "F5"),
+            defaultEnabled: true, defaultKey: "Del", numpadKey: "F5"),
 
         new Cheat("heal_buildings", "我方建築修復",
             "我方所有建築補滿耐久。",
-            "Sub",
             (player, p) => $"""
                 Query q;
                 q = ClassPlayerObjs("Building", {player});
@@ -504,12 +496,11 @@ public static class Cheats
                 pr("[修改器] 建築已修復");
                 """,
             [new CheatParam("amount", "修復量", 100000, 1, 1000000, englishLabel: "Repair Amount")],
-            defaultEnabled: false, numpadKey: "F6"),
+            defaultEnabled: false, defaultKey: "Sub", numpadKey: "F6"),
 
         new Cheat("smite_enemies", "重創全圖敵軍",
             "對全地圖敵方單位造成指定傷害。傷害調高即等同一鍵殲滅，"
             + "但單位會正常播放死亡流程、照常給經驗值。",
-            "F11",
             (player, p) => $"""
                 Query q;
                 q = EnemyObjs({player}, "Unit");
@@ -517,21 +508,17 @@ public static class Cheats
                 pr("[修改器] 敵軍已重創");
                 """,
             [new CheatParam("damage", "傷害值", 9999, 1, 1000000, englishLabel: "Damage Value")],
-            numpadKey: "F7"),
+            defaultEnabled: true, defaultKey: "F11", numpadKey: "F7"),
 
         new Cheat("explore_all", "探索全地圖",
             "一次揭開整張地圖（ExploreAll）。不可逆，但不影響戰爭迷霧。",
-            "Ins",
             (player, p) => "ExploreAll(); pr(\"[修改器] 全地圖已探索\");",
-            numpadKey: "F8"),
+            defaultEnabled: true, defaultKey: "Ins", numpadKey: "F8"),
 
         new Cheat("toggle_fog", "切換戰爭迷霧",
-            "開關戰爭迷霧（ToggleFog）。可重複按，來回切換。"
-            + "原版鍵位下與「強化我方單位」同為 Del——空著的鍵只有 8 個而作弊有 14 項，"
-            + "兩者只能擇一；小鍵盤模式下鍵夠分，它有自己的小鍵盤 9。",
-            "Del",
+            "開關戰爭迷霧（ToggleFog）。可重複按，來回切換。",
             (player, p) => "ToggleFog(); pr(\"[修改器] 戰爭迷霧已切換\");",
-            defaultEnabled: false, numpadKey: "F9"),
+            defaultEnabled: false, defaultKey: "Del", numpadKey: "F9"),
 
         new Cheat(SpawnUnitId, "在滑鼠位置生成單位",
             "在滑鼠游標所指的地面上生成指定數量、等級與攜帶物品的單位。"
@@ -543,7 +530,6 @@ public static class Cheats
             + "生成的單位初始食物會自動補滿（20/20）避免剛生出來就挨餓；"
             + "若設定了初始等級，會自動套用 SetLevel；若設定了攜帶物品，會自動透過 AddItem 裝備。"
             + "若清單選取「滿載食物的騾車」，會生成貿易騾車（Trader）並自動裝載 1000 食物（呼叫 Wagon.LoadFood(1000)），同樣出現在游標位置。",
-            "Pause",
             // 這段同時含 VS 的大括號與 C# 插值，所以用 $$ 讓插值變成 {{...}}
             (player, p) =>
             {
@@ -591,15 +577,12 @@ public static class Cheats
              new CheatParam("count", "數量", 5, 1, 50, englishLabel: "Spawn Count"),
              new CheatParam("level", "初始等級", 1, 1, 100, englishLabel: "Spawn Level"),
              new CheatParam("items", "攜帶物品", string.Empty, options: ItemOptions, multi: true, englishLabel: "Carried Items")],
-            experimental: true, numpadKey: "Sub"),
+            experimental: true, defaultKey: "Pause", numpadKey: "Sub"),
 
         new Cheat(CycleUnitId, "切換生成單位",
             "在遊戲中按一下就換成清單裡的下一種單位，並把單位名稱印在畫面上。"
             + "清單就是「在滑鼠位置生成單位」那一列勾的那份，兩項共用同一個環境變數，"
-            + "所以不需要重新套用修改器、也不必重開遊戲就能換。"
-            + "原版鍵位下已經沒有空鍵了，預設落在 F5（按下去會同時開啟外交畫面），"
-            + "建議改用小鍵盤模式，它有自己的小鍵盤 ＋。",
-            "F5",
+            + "所以不需要重新套用修改器、也不必重開遊戲就能換。",
             (player, p) =>
             {
                 var units = ParseUnitList(Str(p, "units"));
@@ -616,7 +599,7 @@ public static class Cheats
             // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
                             options: UnitOptions, multi: true, hidden: true, englishLabel: "Switchable Units")],
-            experimental: true, numpadKey: "Add"),
+            experimental: true, defaultKey: "F5", numpadKey: "Add"),
 
         new Cheat(SpawnItemId, "在滑鼠位置生成物品",
             "在滑鼠游標所指的地面上生成裝有指定物品的皮袋（DefItemHolder）。"
@@ -624,7 +607,6 @@ public static class Cheats
             + "要生成哪一種物品由「可切換的物品」決定，遊戲中可用「切換生成物品」"
             + "熱鍵即時換，不必重新套用修改器。"
             + "若設定了數量，會在同一皮袋中放入指定數量的該物品。",
-            "Ins",
             (player, p) =>
             {
                 var items = ParseItemList(Str(p, "items"));
@@ -649,13 +631,12 @@ public static class Cheats
             [new CheatParam("items", "可切換的物品", DefaultItemList,
                             options: ItemOptions, multi: true, englishLabel: "Switchable Items"),
              new CheatParam("count", "數量", 1, 1, 20, englishLabel: "Spawn Count")],
-            experimental: true, numpadKey: "Mul"),
+            experimental: true, defaultKey: "Ins", numpadKey: "Mul"),
 
         new Cheat(CycleItemId, "切換生成物品",
             "在遊戲中按一下就換成清單裡的下一種物品，並把物品名稱印在畫面上。"
             + "清單就是「在滑鼠位置生成物品」那一列勾的那份，兩項共用同一個環境變數，"
             + "所以不需要重新套用修改器、也不必重開遊戲就能換。",
-            "F6",
             (player, p) =>
             {
                 var items = ParseItemList(Str(p, "items"));
@@ -673,13 +654,12 @@ public static class Cheats
             // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
             [new CheatParam("items", "可切換的物品", DefaultItemList,
                             options: ItemOptions, multi: true, hidden: true, englishLabel: "Switchable Items")],
-            experimental: true, numpadKey: "Del"),
+            experimental: true, defaultKey: "F6", numpadKey: "Del"),
 
         new Cheat(SetSelectedLevelId, "修改選取單位等級",
             "將當前選取的單位（或英雄）等級直接設定為指定目標等級（1～1000 級），並自動補滿該等級之血量上限。"
             + "若選取的是英雄，英雄麾下所有部隊士兵亦會一併升級並補滿血量。"
             + "底層呼叫引擎內部未公開函式 selu() 取得選取物件，並透過 Unit::SetLevel 設定等級。",
-            "F7",
             (player, p) =>
             {
                 int level = Int(p, "level");
@@ -711,18 +691,17 @@ public static class Cheats
                     """;
             },
             [new CheatParam("level", "目標等級", 100, 1, 1000, englishLabel: "Target Level")],
-            defaultEnabled: false, numpadKey: "Pause"),
+            defaultEnabled: false, defaultKey: "F7", numpadKey: "Pause"),
 
         new Cheat("diagnose", "診斷（確認修改器運作）",
             "在畫面上印出玩家編號與單位數量。裝好後先按這個鍵確認熱鍵有生效；"
             + "若腳本有錯，遊戲也會把錯誤訊息印在同一個位置。",
-            "F12",
             (player, p) => $"""
                 Query q;
                 q = ClassPlayerObjs("Unit", {player});
                 pr("[修改器] 正常運作  玩家=" + {player} + "  單位數=" + q.count);
                 """,
-            numpadKey: "F10"),
+            defaultEnabled: true, defaultKey: "F12", numpadKey: "F10"),
     ];
 
     public static readonly IReadOnlyDictionary<string, Cheat> ById =
@@ -771,8 +750,8 @@ public static class Cheats
                 throw new InvalidOperationException($"未知的作弊代號：{selection.Id}");
 
             string key = string.IsNullOrEmpty(selection.Key) ? cheat.DefaultKey : selection.Key;
-            if (!Keys.Contains(key, StringComparer.Ordinal))
-                throw new InvalidOperationException($"不支援的按鍵代號：{key}");
+            if (string.IsNullOrEmpty(key) || !Keys.Contains(key, StringComparer.Ordinal))
+                throw new InvalidOperationException($"作弊 {cheat.Id} 未指定按鍵或按鍵代號無效：{key}");
             if (!used.Add(key))
                 throw new InvalidOperationException($"按鍵 {key} 被指定給多個功能");
 
@@ -833,10 +812,10 @@ public sealed class CheatParamOption(string value, string label, string? categor
 }
 
 public sealed class CheatParam(string name, string label, object defaultValue,
-                               decimal minimum = 0, decimal maximum = 0,
-                               IReadOnlyList<CheatParamOption>? options = null,
-                               bool multi = false, bool hidden = false,
-                               string? englishLabel = null)
+                              decimal minimum = 0, decimal maximum = 0,
+                              IReadOnlyList<CheatParamOption>? options = null,
+                              bool multi = false, bool hidden = false,
+                              string? englishLabel = null)
 {
     public string Name { get; } = name;
     public string Label { get; } = label;
@@ -858,37 +837,35 @@ public sealed class CheatParam(string name, string label, object defaultValue,
 }
 
 public sealed class Cheat(
-    string id, string name, string description, string defaultKey,
+    string id, string name, string description,
     Func<string, IReadOnlyDictionary<string, object>, string> builder,
     IReadOnlyList<CheatParam>? parameters = null,
     bool experimental = false,
-    bool defaultEnabled = true,
+    bool defaultEnabled = false,
+    string? defaultKey = null,
     string? numpadKey = null)
 {
     public string Id { get; } = id;
     public string Name { get; } = name;
     public string Description { get; } = description;
-    public string DefaultKey { get; } = defaultKey;
+    public string DefaultKey { get; } = defaultKey ?? string.Empty;
     public bool Experimental { get; } = experimental;
 
     /// <summary>
-    /// 小鍵盤模式下的預設按鍵。小鍵盤有 15 顆可用鍵，14 項作弊各自獨立、一對一對應，
-    /// 不像原版模式要搶那 8 個空鍵。
+    /// 小鍵盤模式下的預設按鍵。
     /// </summary>
-    public string NumpadKey { get; } = numpadKey ?? defaultKey;
+    public string NumpadKey { get; } = numpadKey ?? defaultKey ?? string.Empty;
 
     /// <summary>
-    /// 是否預設啟用。沒被佔用的按鍵只有 8 個，所以只有 8 項預設開啟，
-    /// 其餘預設關閉並落在需要自行挪動的按鍵上。
+    /// 是否預設啟用。
     /// </summary>
-    public bool DefaultEnabled { get; } = defaultEnabled && !experimental;
+    public bool DefaultEnabled { get; } = defaultEnabled && !experimental && !string.IsNullOrEmpty(defaultKey);
 
     /// <summary>
-    /// 小鍵盤模式下是否預設啟用。落在 Add／Sub／Mul 的那兩項要先取消
-    /// 「保留原版按鍵功能」才不會跟速度控制相撞，所以預設仍然關閉。
+    /// 小鍵盤模式下是否預設啟用。
     /// </summary>
     public bool NumpadDefaultEnabled =>
-        !Experimental && !Cheats.VanillaReservedKeys.ContainsKey(NumpadKey);
+        !Experimental && !string.IsNullOrEmpty(NumpadKey) && !Cheats.VanillaReservedKeys.ContainsKey(NumpadKey);
 
     public string DefaultKeyFor(bool numpadKeys) => numpadKeys ? NumpadKey : DefaultKey;
 

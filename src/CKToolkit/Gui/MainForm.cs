@@ -51,6 +51,7 @@ public sealed class MainForm : Form
         _config = ToolkitConfig.Load();
         Strings.Language = _config.UiLanguage;
         InitializeComponent();
+        _languagePage.GameDirProvider = () => _gamePath.Text.Trim();
         LoadConfigurationIntoControls();
         ApplyLanguage();
         _initialising = false;

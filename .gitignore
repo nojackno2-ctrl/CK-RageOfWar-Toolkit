@@ -3,6 +3,7 @@
 **/bin/
 **/obj/
 *.user
+*.obj
 *.suo
 dist/
 publish/

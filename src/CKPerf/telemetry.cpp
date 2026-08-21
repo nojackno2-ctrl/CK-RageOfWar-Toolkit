@@ -186,6 +186,15 @@ static DWORD WINAPI TelemetryThread(LPVOID) {
                  suppressed, suppressed - lastSuppressed);
             lastSuppressed = suppressed;
         }
+
+        // Same only-when-it-moves discipline as the guard counter above: the sidecar own
+        // redirect-hit counters, so a session log shows which of the 31 redirected sites
+        // actually fired without repeating 32 unchanged numbers every second.
+        HighResolutionLogHitCounts();
+
+        // Measures real CVXVisible rectangle generation against the 127-slot sidecar capacity
+        // to detect whether live gameplay ever overflows the consumer loop cap.
+        HighResolutionLogVisibleCount();
     }
 
     Logf("telemetry stopped. peak private bytes %d MB, peak live objects %ld.",

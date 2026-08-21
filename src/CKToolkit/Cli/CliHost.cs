@@ -798,7 +798,7 @@ public static partial class CliHost
                                 warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, "1600x1200", 3));
                             }
 
-                            if (w >= 2048)
+                            if (w > 2048)
                             {
                                 warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
                             }
@@ -1179,7 +1179,7 @@ public static partial class CliHost
     private static int HandleLangExportTemplate(List<string> options, string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
     {
         string? outDir = null;
-        string templateLang = "GERMAN";
+        string templateLang = "ENGLISH";
 
         for (int i = 0; i < options.Count; i++)
         {

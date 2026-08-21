@@ -208,6 +208,15 @@ public static class PackLoader
         {
             foreach (string subDir in Directory.GetDirectories(langpacksDir))
             {
+                var directory = new DirectoryInfo(subDir);
+                // 匯入管線的 staging / rollback 目錄以點號開頭；復原失敗時必須保留，
+                // 但絕不能被當成正式語言包載入。手動放入的 reparse point 也不追蹤。
+                if (directory.Name.StartsWith(".", StringComparison.Ordinal) ||
+                    (directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    continue;
+                }
+
                 string subPackJson = Path.Combine(subDir, "pack.json");
                 if (File.Exists(subPackJson))
                 {
