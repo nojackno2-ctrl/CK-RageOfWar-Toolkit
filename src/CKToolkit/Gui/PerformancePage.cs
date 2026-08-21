@@ -15,12 +15,15 @@ public sealed class PerformancePage : UserControl
     private readonly NumericUpDown _capacity = new();
     private readonly Label _resolutionLabel = new();
     private readonly ComboBox _resolution = new();
+    private readonly Button _autoDetectBtn = new();
     private readonly RadioButton _autoSwitch = new();
     private readonly RadioButton _suppressDisplay = new();
     private readonly Label _warning = new();
     private readonly GroupBox _animationGroup = new();
     private readonly CheckBox _noObjectAnimations = new();
     private readonly CheckBox _noWaterAnimation = new();
+
+    private bool _isLoading;
 
     public PerformancePage()
     {
@@ -63,10 +66,28 @@ public sealed class PerformancePage : UserControl
         _resolutionLabel.AutoSize = true;
         _resolutionLabel.Anchor = AnchorStyles.Left;
         res.Controls.Add(_resolutionLabel, 0, 2);
+
+        var resPanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0)
+        };
         _resolution.DropDownStyle = ComboBoxStyle.DropDown;
-        _resolution.Items.AddRange(["1024x768", "1152x864", "1280x1024", "1600x1200", "1600x900", "1920x1080", "2048x1152", "2560x1440", "3840x2160"]);
+        _resolution.Items.AddRange(["1024x768", "1152x864", "1280x1024", "1600x1200", "1920x1080", "2560x1440", "3840x2160"]);
         _resolution.Width = 180;
-        res.Controls.Add(_resolution, 1, 2);
+        _resolution.SelectedIndexChanged += (_, _) => OnResolutionChanged();
+        _resolution.TextChanged += (_, _) => OnResolutionChanged();
+
+        _autoDetectBtn.AutoSize = true;
+        _autoDetectBtn.Margin = new Padding(6, 0, 0, 0);
+        _autoDetectBtn.Click += (_, _) => AutoDetectScreenResolution();
+
+        resPanel.Controls.Add(_resolution);
+        resPanel.Controls.Add(_autoDetectBtn);
+        res.Controls.Add(resPanel, 1, 2);
+
         _autoSwitch.AutoSize = true;
         _suppressDisplay.AutoSize = true;
         res.Controls.Add(_autoSwitch, 0, 3);
@@ -114,17 +135,25 @@ public sealed class PerformancePage : UserControl
 
     public void LoadConfig(PerfConfig config)
     {
-        _laa.Checked = config.Laa;
-        _videoFix.Checked = config.VideoFix;
-        _keepResolution.Checked = config.KeepRes;
-        _hires.Checked = config.Hires >= 1600;
-        _capacity.Value = Math.Clamp(config.Hires <= 0 ? 1920 : config.Hires, 1600, 16384);
-        _resolution.Text = string.IsNullOrWhiteSpace(config.Resolution) ? "1920x1080" : config.Resolution;
-        _autoSwitch.Checked = !string.Equals(config.DesktopMode, "suppress", StringComparison.OrdinalIgnoreCase);
-        _suppressDisplay.Checked = !_autoSwitch.Checked;
-        _noObjectAnimations.Checked = config.NoObjectAnimations;
-        _noWaterAnimation.Checked = config.NoWaterAnimation;
-        RefreshEnabledState();
+        _isLoading = true;
+        try
+        {
+            _laa.Checked = config.Laa;
+            _videoFix.Checked = config.VideoFix;
+            _keepResolution.Checked = config.KeepRes;
+            _resolution.Text = string.IsNullOrWhiteSpace(config.Resolution) ? "1920x1080" : config.Resolution;
+            _hires.Checked = config.Hires >= 1600;
+            _capacity.Value = Math.Clamp(config.Hires <= 0 ? 1920 : config.Hires, 1600, 16384);
+            _autoSwitch.Checked = !string.Equals(config.DesktopMode, "suppress", StringComparison.OrdinalIgnoreCase);
+            _suppressDisplay.Checked = !_autoSwitch.Checked;
+            _noObjectAnimations.Checked = config.NoObjectAnimations;
+            _noWaterAnimation.Checked = config.NoWaterAnimation;
+            RefreshEnabledState();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
     }
 
     public void SaveConfig(PerfConfig config)
@@ -158,6 +187,7 @@ public sealed class PerformancePage : UserControl
         _hires.Text = Strings.Get("Gui_Perf_Hires");
         _capacityLabel.Text = Strings.Get("Gui_Perf_Capacity");
         _resolutionLabel.Text = Strings.Get("Gui_Perf_Resolution");
+        _autoDetectBtn.Text = Strings.Get("Gui_Perf_AutoDetectScreen");
         _autoSwitch.Text = Strings.Get("Gui_Perf_AutoSwitch");
         _suppressDisplay.Text = Strings.Get("Gui_Perf_SuppressDisplay");
         _warning.Text = Strings.Get("Perf_HdCeilingWarning");
@@ -169,6 +199,39 @@ public sealed class PerformancePage : UserControl
     private void RefreshEnabledState()
     {
         _capacity.Enabled = _hires.Checked;
+    }
+
+    private void OnResolutionChanged()
+    {
+        if (_isLoading) return;
+
+        string text = _resolution.Text.Trim();
+        if (TryParseResolution(text, out int width, out _))
+        {
+            if (width > 1600)
+            {
+                _hires.Checked = true;
+                _capacity.Value = Math.Clamp(width, 1600, 16384);
+            }
+            else
+            {
+                _capacity.Value = 1600;
+            }
+        }
+    }
+
+    private void AutoDetectScreenResolution()
+    {
+        var bounds = Screen.PrimaryScreen?.Bounds ?? Screen.AllScreens.FirstOrDefault()?.Bounds;
+        if (bounds is { Width: > 0, Height: > 0 })
+        {
+            string detRes = $"{bounds.Value.Width}x{bounds.Value.Height}";
+            if (!_resolution.Items.Contains(detRes))
+            {
+                _resolution.Items.Add(detRes);
+            }
+            _resolution.Text = detRes;
+        }
     }
 
     private static bool TryParseResolution(string text, out int width, out int height)

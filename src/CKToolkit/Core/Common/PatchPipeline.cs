@@ -338,9 +338,10 @@ public sealed class PatchPipeline
             }
 
             var dataPakLayered = new List<string>();
-            if (config.Perf.AddRes is { Count: > 0 })
+            bool hasCustomRes = (config.Perf.Hires >= 1600 && !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) || (config.Perf.AddRes is { Count: > 0 });
+            if (hasCustomRes)
             {
-                dataPakLayered.Add($"resolutions_append ({string.Join(", ", config.Perf.AddRes)})");
+                dataPakLayered.Add("resolutions_append");
             }
             if (TrainerHasPayload(config.Trainer))
             {
@@ -739,7 +740,8 @@ public sealed class PatchPipeline
                 break;
 
             case GameFile.DataPak:
-                if (config.Perf.AddRes is { Count: > 0 })
+                bool hasCustomDataRes = (config.Perf.Hires >= 1600 && !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) || (config.Perf.AddRes is { Count: > 0 });
+                if (hasCustomDataRes)
                 {
                     list.Add("resolutions_append");
                 }
@@ -760,12 +762,9 @@ public sealed class PatchPipeline
                 {
                     string r = config.Perf.Resolution.Trim();
                     if (int.TryParse(r, out int idx))
-                        isCustomRes = idx >= 4;
+                        isCustomRes = idx != 3;
                     else
-                        isCustomRes = !r.Equals("1024x768", StringComparison.OrdinalIgnoreCase) &&
-                                      !r.Equals("1152x864", StringComparison.OrdinalIgnoreCase) &&
-                                      !r.Equals("1280x1024", StringComparison.OrdinalIgnoreCase) &&
-                                      !r.Equals("1600x1200", StringComparison.OrdinalIgnoreCase);
+                        isCustomRes = !r.Equals("1600x1200", StringComparison.OrdinalIgnoreCase);
                 }
                 if (config.Perf.NoObjectAnimations || config.Perf.NoWaterAnimation || isCustomRes)
                 {

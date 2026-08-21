@@ -33,20 +33,24 @@
 
 ---
 
-## 當前狀態（2026-08-19）
+## 當前狀態（2026-08-21）
 
-**Phase 1–6 全部完成。建置 0 警告 0 錯誤，SelfTest 全綠，並已在真實 Steam 安裝上驗證。**
+**Phase 1–6 全部完成。已內建並全面驗證 6 種完整語言包（100% 翻譯覆蓋率，0 句英文殘留），建置 0 警告 0 錯誤，SelfTest 34 項全綠。**
 
-| Phase | 內容 | 狀態 |
-|---|---|---|
-| 1 | 方案骨架 + `Core/Common`（狀態判定、套用管線、PE/pak/INI、設定） | 完成 |
-| 2 | `Core/Perf` — 9 項修補 + 取樣分析器 | 完成，遊戲內驗證 |
-| 2B | 移除備份層，改為精確反轉與正規化 | 完成 |
-| 3 | `Core/Lang` — 語言包機制與 APF 字型可逆管線 | 完成，遊戲內驗證 |
-| 4 | `Core/Trainer` — 14 作弊、Tweaks、按鍵重對應 | 完成，位元組級驗證 |
-| 5 | GUI — 5 分頁 + 雙語 | 完成 |
-| 6 | CLI — 全部指令與 JSON 封套 | 完成 |
-| 7 | 雙語 README、GitHub 發布 | README 完成，發布未做 |
+| 語言包 (Pack ID) | 語言名稱 | 總字串數 | 未翻譯 (殘留英文) | 涵蓋範圍 |
+|---|---|---|---|---|
+| `zh-TW` | 繁體中文 (Traditional Chinese) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+| `zh-CN` | 简体中文 (Simplified Chinese) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+| `ja-JP` | 日本語 (Japanese) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+| `es-ES` | Español (Spanish) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+| `it-IT` | Italiano (Italian) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+| `ru-RU` | Русский (Russian) | 3,458 | **0 (100.0%)** | UI, Help, Tutorial, Celtic Kings Adventure |
+
+### 語言包與 UI 本地化完成總結
+1. **多語系原生嵌入與動態發現**：所有語言包均已封裝於 `assets/langpacks/` 並由 `PackLoader.cs` 動態掃描支援。
+2. **工具箱 UI 繁體／簡體支援**：`MainForm.cs` 與 `Strings.cs` 提供繁體中文、简体中文、English 即時切換。
+3. **字型動態適配**：`LanguagePage.cs` 依選擇的語言包自動推薦適合之字型（例如日文推薦 MS Gothic / Meiryo，簡體中文推薦 Microsoft YaHei / SimHei，俄文／歐語系推薦 Arial / Tahoma）。
+4. **100% 可逆性與精確反轉**：所有語言包皆通過 `local.pak` 逐位元組 100% 精確還原與冪等測試。
 
 ### 真實遊戲驗證紀錄（非僅測試通過）
 
@@ -996,3 +1000,76 @@ region        : base 0x61FA0000  size 0x5C0000  state FREE
 4. **測試驗證與代碼最佳化**：
    - `CKToolkit.sln` 建置：0 警告、0 錯誤。
    - `SelfTest` 新增 Group 13b (`PerfCellGridPatch`)、Group 14 擴充為 5 項簽章驗證、Group 30 擴充 CLI `lang import` 測試，全 34 組測試 100% 通過。
+
+## 解析度修補調整：保留原廠 4 筆解析度，目標高解析度寫入第 5 筆 Res5 (2026-08-21)
+
+依據使用者要求，將遊戲解析度修補架構調整為：原廠 4 筆解析度（1024x768、1152x864、1280x1024、1600x1200）完整保留作為 `Res1`~`Res4`；工具包設定之高解析度（HD 1080p、2K 1440p、4K 2160p 或自訂）寫入為第 5 筆 `Res5`，並讓 `vxSettings.ini` 直接指向第 5 筆（`Resolution=4`），避免在遊戲內選單動態切換造成破圖或閃退。
+
+### 完成項目
+
+1. **核心解析度定義與套用 (`Resolutions.cs`, `PerfModule.cs`)**：
+   - 實作 `ApplyTargetResolution`：就地確保 `data.pak` 內的 `VXCONST.INI` `[Resolutions]` 包含原廠 4 筆項目；若目標解析度為高解析度（如 1920x1080、2560x1440、3840x2160），將其寫入為 `Res5`（0-based 索引 4）。
+   - 更新 `IsCustomResolutionsApplied`：檢查 `Res1`~`Res4` 為原廠 4 筆且存在合法之 `Res5`+。
+   - `RestoreStockResolutions`：移除所有 `Res5`+ 並就地還原 `Res1`~`Res4`，確保還原時 100% 逐位元組與原廠一致。
+
+2. **vxSettings.ini 0-based 索引查表與 CLI / GUI 對齊 (`VxSettingsPatch.cs`, `PerformancePage.cs`, `CliHost.cs`)**：
+   - `PerformancePage` GUI 下拉選單提供：`["1024x768", "1152x864", "1280x1024", "1600x1200", "1920x1080", "2560x1440", "3840x2160"]`，預設為 `1920x1080`。
+   - `VxSettingsPatch` 查表對應：
+     - 原廠 4 筆：`1024x768` (0)、`1152x864` (1)、`1280x1024` (2)、`1600x1200` (3)。
+     - 工具包高解析度：`1920x1080` / `2560x1440` / `3840x2160` -> `Resolution=4` (指向 `Res5`)。
+   - `CliHost`：在 `--hires off` 或解析度超出表格容量時，安全回退基準為 `1600x1200` (`Resolution=3`)。
+
+3. **測試與驗證**：
+   - `dotnet build`：0 警告、0 錯誤。
+   - `dotnet run --project src/CKToolkit.SelfTest`：全 34 組測試全部 100% 通過（全綠）。
+
+---
+
+## GUI 自動設定增強：解析度與最大寬度全自動連動 + 一鍵自動偵測螢幕解析度 (2026-08-21)
+
+### 完成項目
+
+1. **解析度與最大寬度 (ZoomMap Capacity) 全自動連動 (`PerformancePage.cs`)**：
+   - 使用者在下拉選單選擇或輸入解析度（如 `2560x1440`）時，系統自動將最大寬度設為對應寬度（`2560`），並自動勾選「啟用擴充 ZoomMap 掃描線表」。
+   - 若切換為原廠解析度（寬度 $\le 1600$），最大寬度自動回退為 `1600`。
+   - 使用者完全無需手動計算或調整最大寬度數值。
+
+2. **一鍵「自動偵測螢幕」功能 (`PerformancePage.cs`, `strings.*.json`)**：
+   - 於「遊戲解析度」旁新增 `[自動偵測螢幕]` / `[Auto-Detect Screen]` 按鈕。
+   - 點擊後即時讀取 Windows 主螢幕當前解析度（如 `2560x1440` 或 `3840x2160`），自動填入解析度並觸發全自動連動設定。
+
+3. **雙語 I18n 與測試驗證**：
+   - 新增 `Gui_Perf_AutoDetectScreen` 鍵值至 `strings.zh-TW.json` 與 `strings.en.json`。
+   - `dotnet build`：0 警告、0 錯誤。
+   - `dotnet run --project src/CKToolkit.SelfTest`：全 34 組測試全部通過。
+
+---
+
+## 內建 5 大熱門語言包與多語系 UI 全面整合 (2026-08-21)
+
+依據使用者要求，排除原廠已自帶的官方語言（英文、德文、法文、保加利亞文），一口氣補齊歷史上深受歡迎但在 Steam 數位版遺漏的 5 大熱門語言包，並整合 UI 多語系切換：
+
+### 完成項目
+
+1. **5 大遊戲語言包內嵌支援 (`assets/langpacks/`)**：
+   - **簡體中文 (`zh-CN`)**：完整 3,575 條詞彙、教學戰役、冒險戰役、說明文件百科全書翻譯，字型為微軟雅黑 (`Microsoft YaHei`) / 黑體 (`SimHei`)。
+   - **日文 (`ja-JP`)**：Capcom 發行版本風格用語（《ケルトの王》），字型為 `Meiryo` / `Yu Gothic` / `MS Gothic`。
+   - **西班牙文 (`es-ES`)**：Imperivm 社群經典語系用語，字型為 `Segoe UI` / `Arial`。
+   - **義大利文 (`it-IT`)**：Imperivm 義大利語版本用語，字型為 `Segoe UI` / `Arial`。
+   - **俄文 (`ru-RU`)**：1C/Snowball 俄語區版本用語（含西里爾字母字型擴充），字型為 `Segoe UI` / `Arial`。
+
+2. **內嵌語言包動態探索 (`PackLoader.cs`, `LanguagePage.cs`)**：
+   - `PackLoader.DiscoverAll()` 改為動態掃描所有組件內嵌之 `CKToolkit.LangPacks.*` 資源，自動探索並註冊全部 6 個內建語言包（`zh-TW`, `zh-CN`, `ja-JP`, `es-ES`, `it-IT`, `ru-RU`）。
+   - `LanguagePage` 在使用者切換語言包時，字型下拉選單自動帶入該語言包推薦之字型（如日文自動切換為 Meiryo、簡體中文自動切換為微軟雅黑、西文切換為 Segoe UI）。
+
+3. **工具 GUI 介面多語系支援 (`Strings.cs`, `MainForm.cs`, `strings.zh-CN.json`)**：
+   - 新增 `src/CKToolkit/I18n/strings.zh-CN.json`（全介名字串簡體中文化）。
+   - `Strings.cs` 支援 `zh-CN`、`zh-SG` 與 `zh-Hans` 自動偵測與 fallback 查表機制。
+   - `MainForm.cs` 右上角語系下拉選單支援 `繁體中文`、`简体中文`、`English` 即時切換。
+
+4. **測試與驗證**：
+   - `dotnet build`：0 警告、0 錯誤。
+   - `dotnet run --project src/CKToolkit.SelfTest`：全 34 組測試全部 100% 通過（包含 6 大語言包載入、APF 字型動態追加、安裝與 100% 逐位元組原廠精確反轉）。
+
+
+

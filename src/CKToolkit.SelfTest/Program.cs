@@ -628,21 +628,26 @@ internal static class Program
     // --- 9. I18n 字串鍵一致性測試 -------------------------------------------
     private static void TestI18nConsistency()
     {
-        Console.WriteLine("\n9. I18n 繁體中文與英文語系鍵值一致性測試");
+        Console.WriteLine("\n9. I18n 繁體中文、簡體中文與英文語系鍵值一致性測試");
 
         var zh = Strings.GetAll("zh-TW");
+        var cn = Strings.GetAll("zh-CN");
         var en = Strings.GetAll("en");
 
         Check("繁體中文字串表不為空", zh.Count > 0, $"共 {zh.Count} 條");
+        Check("簡體中文字串表不為空", cn.Count > 0, $"共 {cn.Count} 條");
         Check("英文字串表不為空", en.Count > 0, $"共 {en.Count} 條");
 
         var missingInEn = zh.Keys.Where(k => !en.ContainsKey(k)).ToList();
         var missingInZh = en.Keys.Where(k => !zh.ContainsKey(k)).ToList();
+        var missingInCn = zh.Keys.Where(k => !cn.ContainsKey(k)).ToList();
 
         Check("繁體中文所有鍵皆存在於英文表", missingInEn.Count == 0,
             missingInEn.Count == 0 ? null : $"缺少：{string.Join(", ", missingInEn)}");
         Check("英文所有鍵皆存在於繁體中文表", missingInZh.Count == 0,
             missingInZh.Count == 0 ? null : $"缺少：{string.Join(", ", missingInZh)}");
+        Check("繁體中文所有鍵皆存在於簡體中文表", missingInCn.Count == 0,
+            missingInCn.Count == 0 ? null : $"缺少：{string.Join(", ", missingInCn)}");
     }
 
     // --- 10. Perf: LargeAddressAware 個別精確反轉測試 -----------------------
@@ -869,11 +874,17 @@ internal static class Program
 
         Check("原版 data.pak IsOriginal=true", Resolutions.IsOriginal(dataPak));
 
-        // 附加 1920x1080
-        Resolutions.AppendResolutions(dataPak, [(1920, 1080)]);
-        Check("附加後 data.pak 包含 5 筆解析度", Resolutions.ReadResolutions(dataPak).Count == 5);
-        Check("附加後 IsCustomResolutionsApplied=true", Resolutions.IsCustomResolutionsApplied(dataPak));
-        Check("附加後保留後續 [Ranks] 節區與註解", dataPak.ReadText("VXCONST.INI").Contains("[Ranks]\r\n; Rank definitions"));
+        // 套用目標高解析度 1920x1080 (保留原廠 4 筆，第 5 筆為 1920x1080)
+        Resolutions.ApplyTargetResolution(dataPak, 1920, 1080, 3840);
+        var appliedRes = Resolutions.ReadResolutions(dataPak);
+        Check("套用後 data.pak 包含 5 筆解析度", appliedRes.Count == 5);
+        Check("套用後 Res1 為 1024x768", appliedRes[0].Width == 1024 && appliedRes[0].Height == 768);
+        Check("套用後 Res2 為 1152x864", appliedRes[1].Width == 1152 && appliedRes[1].Height == 864);
+        Check("套用後 Res3 為 1280x1024", appliedRes[2].Width == 1280 && appliedRes[2].Height == 1024);
+        Check("套用後 Res4 為 1600x1200", appliedRes[3].Width == 1600 && appliedRes[3].Height == 1200);
+        Check("套用後 Res5 為 1920x1080 (HD)", appliedRes[4].Width == 1920 && appliedRes[4].Height == 1080);
+        Check("套用後 IsCustomResolutionsApplied=true", Resolutions.IsCustomResolutionsApplied(dataPak));
+        Check("套用後保留後續 [Ranks] 節區與註解", dataPak.ReadText("VXCONST.INI").Contains("[Ranks]\r\n; Rank definitions"));
 
         // 模擬改設定為 1600x900 並重新套用（先正規化再疊加）
         var normRes = PatchState.Normalise(GameFile.DataPak, dataPak.ToBytes());
@@ -883,7 +894,7 @@ internal static class Program
         string restoredIniText = reloadedPak.ReadText("VXCONST.INI");
         Check("還原後 VXCONST.INI 全文與原版逐位元組完全相同 (包含節區終結空白行、[Ranks] 與註解)", restoredIniText == vanillaIniText);
 
-        Resolutions.AppendResolutions(reloadedPak, [(1600, 900)]);
+        Resolutions.ApplyTargetResolution(reloadedPak, 1600, 900, 3840);
         var newResList = Resolutions.ReadResolutions(reloadedPak);
         Check("改設定後 data.pak 僅留下 1 筆非原廠自訂解析度 (共 5 筆，非累積 6 筆)", newResList.Count == 5 && newResList[4].Width == 1600 && newResList[4].Height == 900);
 
@@ -902,12 +913,14 @@ internal static class Program
             }
         };
 
+        // 重新在 reloadedPak 套用 1920x1080 取得可用清單
+        Resolutions.ApplyTargetResolution(reloadedPak, 1920, 1080, 3840);
         var availableList = Resolutions.GetAvailableResolutionsList(reloadedPak);
         VxSettingsPatch.Apply(ini, config, availableList);
 
         Check("NoObjectAnimations 寫入 [Options] 且值為 1", ini.GetValue("Options", "NoObjectAnimations") == "1");
         Check("NoWaterAnimation 寫入 [Options] 且值為 1", ini.GetValue("Options", "NoWaterAnimation") == "1");
-        Check("Resolution 寫入 [Options] 且查表值為 4", ini.GetValue("Options", "Resolution") == "4");
+        Check("Resolution 寫入 [Options] 且查表值為 4 (1920x1080 為第 5 筆 Res5)", ini.GetValue("Options", "Resolution") == "4");
         Check("頂層無孤兒 NoObjectAnimations 鍵值", !ini.HasKey(null, "NoObjectAnimations"));
         Check("頂層無孤兒 Resolution 鍵值", !ini.HasKey(null, "Resolution"));
 
@@ -1280,7 +1293,7 @@ internal static class Program
 
             var pipeline = PatchPipeline.CreateDefault();
 
-            // 步驟 1: 套用 1920x1080 (hires = 1920, resolution = 1920x1080, addRes = ["1920x1080"])
+            // 步驟 1: 套用 1920x1080 (hires = 1920, resolution = 1920x1080)
             var cfg1920 = new ToolkitConfig
             {
                 Perf = new PerfConfig
@@ -1603,15 +1616,22 @@ internal static class Program
         var resNoUi = LanguagePack.ParseMeta(jsonNoUi);
         Check("缺少 'files.ui' 欄位被拒絕", !resNoUi.Success && resNoUi.ErrorMessage!.Contains("'files.ui'"));
 
-        // 2. 測試內建 zh-TW 載入
-        var zhRes = PackLoader.LoadEmbeddedPack("zh-TW");
-        Check("載入內建 zh-TW 成功", zhRes.Success);
-        var zh = zhRes.Value!;
-        Check("zh-TW ID 為 zh-TW", zh.Meta.Id == "zh-TW");
-        Check("zh-TW gameLangFolder 為 CHINESE", zh.Meta.GameLangFolder == "CHINESE");
-        Check("zh-TW gameLangKey 為 chinese", zh.Meta.GameLangKey == "chinese");
-        Check("zh-TW 載入翻譯詞彙數 > 0", zh.Translations.PhraseCount > 0);
-        Check("zh-TW 載入說明文件段落數 > 0", zh.Translations.Help.Count > 0);
+        // 2. 測試 6 大內建語言包載入
+        string[] allBuiltInIds = ["zh-TW", "zh-CN", "ja-JP", "es-ES", "it-IT", "ru-RU"];
+        foreach (string id in allBuiltInIds)
+        {
+            var packRes = PackLoader.LoadEmbeddedPack(id);
+            Check($"載入內建 {id} 成功", packRes.Success);
+            var p = packRes.Value!;
+            Check($"{id} ID 吻合", p.Meta.Id == id);
+            Check($"{id} gameLangFolder 非空", !string.IsNullOrWhiteSpace(p.Meta.GameLangFolder));
+            Check($"{id} gameLangKey 非空", !string.IsNullOrWhiteSpace(p.Meta.GameLangKey));
+            Check($"{id} 載入翻譯詞彙數 > 0", p.Translations.PhraseCount > 0);
+            Check($"{id} 載入說明文件段落數 > 0", p.Translations.Help.Count > 0);
+        }
+
+        var discovered = PackLoader.DiscoverAll();
+        Check("DiscoverAll 成功探索並包含全部 6 個內建語言包", allBuiltInIds.All(id => discovered.ContainsKey(id)));
     }
 
     // --- 25. 字型字形集由 pack.json 範圍驅動測試 ----------------------------
@@ -1866,6 +1886,19 @@ internal static class Program
         bool finalEq = finalBytes.SequenceEqual(vanillaPakBytes);
         Check("重疊範圍語言包 Uninstall 後 local.pak 逐位元組 100% 精確還原", finalEq,
             finalEq ? null : ApfFont.DiagnoseByteDifference(vanillaPakBytes, finalBytes));
+
+        // 7. 驗證內建 zh-CN 安裝與逐位元組精確反轉
+        var zhCnRes = PackLoader.LoadEmbeddedPack("zh-CN");
+        Check("載入內建 zh-CN 成功", zhCnRes.Success);
+        var zhCnPack = zhCnRes.Value!;
+        LangInstaller.Install(localPak, zhCnPack);
+        Check("zh-CN 安裝後 local.pak 包含 SCHINESE\\LOCAL.LOC.XML", localPak.Contains(@"SCHINESE\LOCAL.LOC.XML"));
+        Check("zh-CN 安裝後 local.pak 包含 SCHINESE\\HELP.XML", localPak.Contains(@"SCHINESE\HELP.XML"));
+        LangInstaller.Uninstall(localPak);
+        byte[] zhCnUninstalledBytes = localPak.ToBytes();
+        bool zhCnEq = zhCnUninstalledBytes.SequenceEqual(vanillaPakBytes);
+        Check("zh-CN 語言包 Uninstall 後 local.pak 逐位元組 100% 精確還原", zhCnEq,
+            zhCnEq ? null : ApfFont.DiagnoseByteDifference(vanillaPakBytes, zhCnUninstalledBytes));
     }
 
     // --- 28. vxSettings.ini [Language] Default 設定與還原測試 ----------------

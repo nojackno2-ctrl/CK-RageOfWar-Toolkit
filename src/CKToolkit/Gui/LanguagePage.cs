@@ -212,6 +212,24 @@ public sealed class LanguagePage : UserControl
             string authors = languagePack.Meta.Authors.Count > 0 ? string.Join(", ", languagePack.Meta.Authors) : "-";
             _details.Text = Strings.Get("Gui_Lang_Details", languagePack.Meta.Version, authors,
                 languagePack.IsBuiltIn ? Strings.Get("Gui_Lang_BuiltIn") : languagePack.SourcePath ?? "-");
+
+            var fontFaces = new List<string>();
+            if (!string.IsNullOrWhiteSpace(languagePack.Meta.Font.Face))
+                fontFaces.Add(languagePack.Meta.Font.Face);
+            if (languagePack.Meta.Font.FallbackFaces is not null)
+                fontFaces.AddRange(languagePack.Meta.Font.FallbackFaces.Where(f => !string.IsNullOrWhiteSpace(f)));
+            fontFaces.AddRange(["微軟正黑體", "Microsoft YaHei", "Meiryo", "Segoe UI", "Arial", "Tahoma"]);
+
+            _font.Items.Clear();
+            foreach (var face in fontFaces.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                _font.Items.Add(face);
+            }
+
+            if (string.IsNullOrWhiteSpace(_font.Text) || !_font.Items.Contains(_font.Text))
+            {
+                _font.Text = string.IsNullOrWhiteSpace(languagePack.Meta.Font.Face) ? "微軟正黑體" : languagePack.Meta.Font.Face;
+            }
         }
         else _details.Text = Strings.Get("Gui_Lang_NoPack");
     }

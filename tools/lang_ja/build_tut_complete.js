@@ -1,0 +1,775 @@
+const fs = require('fs');
+const path = require('path');
+
+const srcPath = path.join(__dirname, '../../assets/langpacks/zh-TW/campaign-tutorial.json');
+const destPath = path.join(__dirname, '../../assets/langpacks/ja-JP/campaign-tutorial.json');
+
+const twData = JSON.parse(fs.readFileSync(srcPath, 'utf8').replace(/^\uFEFF/, ''));
+
+// Complete dictionary for campaign-tutorial.json
+const baseDict = {
+  // Names & Locations (0 - 155)
+  "GERGOVIA": "ゲルゴヴィア",
+  "Dahram": "ダーラム",
+  "Larax": "ララックス",
+  "Roman": "ローマ人",
+  "Lleldoryn": "レルドリン",
+  "Villager": "村人",
+  "Thorax": "ソラックス",
+  "TeutonLeader": "テウトンの首領",
+  "Thoric": "ソリック",
+  "Teuton?": "テウトン人？",
+  "Verhiil": "ヴェリール",
+  "Degedyc": "デゲディク",
+  "Vard": "ヴァルド",
+  "Gorix": "ゴリクス",
+  "Maios": "マイオス",
+  "Daranix": "ダラニクス",
+  "Peasant": "農民",
+  "Kathobodua": "カソボドゥア",
+  "Rod": "ロッド",
+  "Elder": "長老",
+  "Teuton leader": "テウトンの首領",
+  "Cyana": "シアナ",
+  "Enemy chief": "敵の首長",
+  "Village chief": "村長",
+  "Krum": "クルム",
+  "Kushmer": "クシュメル",
+  "Adatel": "アダテル",
+  "Tropcho": "トロプチョ",
+  "Mahmurlukow": "マフムルク",
+  "Murdukas": "ムルドゥカス",
+  "Metolys": "メトリス",
+  "Silvera": "シルヴェラ",
+  "Caesar": "カエサル",
+  "Platonius": "プラトニウス",
+  "Principle": "プリンキペス",
+  "Pretorian": "プラエトリアン",
+  "Markus": "マルクス",
+  "Spartakus": "スパルタクス",
+  "Praetorian": "プラエトリアン",
+  "Gregorius III": "グレゴリウス3世",
+  "Lazarus": "ラザルス",
+  "Vercingetorix": "ウェルキンゲトリクス",
+  "Druid": "ドルイド",
+  "wolf": "オオカミ",
+  "Guard?": "衛兵？",
+  "Rulinix": "ルリニクス",
+  "Lekevyt": "レケヴィト",
+  "Verhilla": "ヴェリラ",
+  "Kethill": "ケシル",
+  "Tarham": "タハム",
+  "Guttuatr": "グトゥアトル",
+  "Guard": "衛兵",
+  "Larax??": "ララックス？？",
+  "Repinii": "レピニ",
+  "Ceaser": "カエサル",
+  "Borii": "ボリイ",
+  "Leaver": "立ち去る者",
+  "Luthal": "ルサル",
+  "RomanRunner": "ローマの伝令",
+  "GaulRunner": "ガリアの伝令",
+  "Pena": "ペナ",
+  "Claudius": "クラウディウス",
+  "Chieftain?": "首長？",
+  "Vigorious": "ヴィゴリウス",
+  "Relicii": "レリキイ",
+  "Warrior": "戦士",
+  "Pesant": "農民",
+  "Druid?": "ドルイド？",
+  "Villager?": "村人？",
+  "LeadThief": "盗賊の頭領",
+  "LeadDefender": "防衛隊長",
+  "Caravan?": "隊商？",
+  "Bloodstone?": "血石？",
+  "Leprian": "レプリアン",
+  "Lleldoryn?": "レルドリン？",
+  "Lilely": "リレリー",
+  "Bandit?": "盗賊？",
+  "Ravgalod": "ラヴガロド",
+  "Dumnorix": "ドゥムノリクス",
+  "Sharkum": "シャルクム",
+  "Teuton Leader": "テウトンの首領",
+  "Decatia": "デカティア",
+  "Silon": "シロン",
+  "Silonion": "シロニオン",
+  "Slowk": "スローク",
+  "Ruthevak\\nRuthevak": "ルテヴァク",
+  "Ruthevak\nRuthevak": "ルテヴァク",
+  "Mompunt": "モンパント",
+  "Remnechyc": "レムネチク",
+  "Akul": "アクル",
+  "Kubris": "クブリス",
+  "Truzoun": "トルゾン",
+  "Metolys\\n": "メトリス",
+  "Metolys\n": "メトリス",
+  "Dolannyn": "ドラニン",
+  "Bibracte Inn": "ビブラクテの宿屋",
+  "Druid House": "ドルイドの庵",
+  "Bibracte": "ビブラクテ",
+  "Etathull": "エタスル",
+  "Egigel": "エギゲル",
+  "Mirhumt": "ミルフムト",
+  "Rinnix": "リニクス",
+  "Lothimys": "ロシミシス",
+  "Vercengetorix": "ウェルキンゲトリクス",
+  "Aquitania II": "アキタニア II",
+  "Bave": "バーヴ",
+  "Ghost wolf": "亡霊の狼",
+  "Rulinix\\r\\nRulinix": "ルリニクス",
+  "Rulinix\r\nRulinix": "ルリニクス",
+  "Rulinix\n\nRulinix": "ルリニクス",
+  "Gergovia Inn": "ゲルゴヴィアの宿屋",
+  "Gergovia of Arvernii": "アルウェルニ族のゲルゴヴィア",
+  "Eduii": "エドゥイ族",
+  "Duttuatr": "ドゥトゥアトル",
+  "Delvania": "デルヴァニア",
+  "Netod": "ネトド",
+  "Gog": "ゴグ",
+  "Zleen": "ズリーン",
+  "Minerva": "ミネルヴァ",
+  "Sarabat": "サラバト",
+  "Emhudull": "エムフドゥル",
+  "Apebell": "アペベル",
+  "Mamhelyn": "マムヘリン",
+  "Ropenox": "ロペノクス",
+  "Aquitania": "アキタニア",
+  "Tratua": "トラトゥア",
+  "Elite Archer": "精鋭弓兵",
+  "Elite Gladiator": "精鋭剣闘士",
+  "Elite Scout": "精鋭斥候",
+  "Elite Archerr": "精鋭弓兵",
+  "Revechar": "レヴェシャル",
+  "Elelhull": "エレルフル",
+  "Kothor": "コソール",
+  "Limpax": "リンパクス",
+  "Aquitanium": "アキタニウム",
+  "Milred": "ミルレッド",
+  "Dunra": "ダンラ",
+  "Ilgox": "イルゴクス",
+  "Theod": "テオド",
+  "Arivosterix": "アリオヴォステリクス",
+  "Noviomagun": "ノヴィオマグス",
+  "Dendomos": "デンドモス",
+  "Emnoll": "エムノル",
+  "Odhel": "オデル",
+  "Egherhox": "エゲルホクス",
+  "Eghalatr": "エガラトル",
+  "Dibax": "ディバクス",
+  "Cesaria Inn": "カエサリアの宿屋",
+  "Cesaria": "カエサリア",
+  "DarkWolf": "暗黒狼",
+  "GateKeeper": "門番",
+  "Evil Summoner": "邪悪な召喚士",
+  "Cryda": "クライダ",
+  "Druid Sanctuary Inn": "ドルイドの聖域の宿屋",
+  "Keltill": "ケルティル",
+  "Haaser": "ハサー",
+  "Pavonius": "パウォニウス",
+  "Mule": "荷ロバ",
+  "Mraxis": "ムラクシス",
+  "Runakh": "ルナク",
+  "Weapons' Master": "武器指南役",
+  "Outpost Barezia": "バレジア前哨基地",
+  "Barezia": "バレジア",
+  "Kebatha": "ケバサ",
+  "Tutorial": "チュートリアル",
+
+  "The wise Haaser tells the young Larax what he needs to know about the world of \\'Celtic Kings\\'.":
+    "賢者ハサーが若きララックスに、『ケルトの王』の世界を生き抜くために必要な知識を授ける。",
+  "The wise Haaser tells the young Larax what he needs to know about the world of 'Celtic Kings'.":
+    "賢者ハサーが若きララックスに、『ケルトの王』の世界を生き抜くために必要な知識を授ける。",
+
+  "Wise Haaser, I know you are the best teacher in the land!\\nI beg you to accept this boy - Larax, and teach him the way of our people!\\n\\n(click to continue)":
+    "賢者ハサー様、あなたがこの地で最も優れた導き手であることは承知しております！\nどうかこの少年ララックスを受け入れ、我らの民の生き方を教えてやってください！\n\n（クリックして次へ）",
+
+  "Chieftain Keltill, wait!\\nWhat can I possibly learn from a dying old man that is not even a warrior?\\n\\n(click to continue)":
+    "ケルティル族長、お待ちを！\n戦士ですらない、死にかけの老いぼれから何を学べというのです？\n\n（クリックして次へ）",
+
+  "I can teach only if one is trying to learn. \\nIt was good to see you Keltill, it reminds me about times long since past.\\n\\n(click to continue)":
+    "学ぶ意志のある者にしか、私は何も教えられぬ。\n会えて嬉しかったぞ、ケルティル。遥か昔の良き日々を思い出すな。\n\n（クリックして次へ）",
+
+  "Wait, Haaser! Please, forgive the impatience of the youth!\\n\\nLarax, from now on you will listen and obey this wise man.":
+    "お待ちください、ハサー様！どうか若者の無礼と短気をお許しください！\n\nララックス、これより先はこの賢者のお言葉をよく聞き、その教えに従うのだ。",
+
+  "I will do as you command, chieftain Keltill.":
+    "仰せの通りにいたします、ケルティル族長。",
+
+  "Very well then. I will teach you my wisdom, boy.\\nFarewell, Keltill.\\n":
+    "よろしい、ならば我が知恵を授けよう、若造よ。\nさらばだ、ケルティル。\n",
+
+  "Let us begin with ... mmm ... giving orders.\\n\\n(click to continue)":
+    "ではまず……ふむ……部隊への命令の下し方から始めるとしよう。\n\n（クリックして次へ）",
+
+  "To order someone, you have to select him first by clicking on him with the left mouse button.\\n\\nYou can issue most commands by right-clicking on the appropriate object or on the ground.":
+    "誰かに命令を下すには、まずマウスの左ボタンでクリックして選択せねばならぬ。\n\n大半の命令は、対象の物体や地面を右クリックすることで実行できる。",
+
+  "Now go to that stone relic east of here.":
+    "さあ、ここから東にある石碑の場所へ向かってみよ。",
+
+  "I have little more to teach you Larax, but Keltill can tell you a lot about running a stronghold.\\nFind him at the north-east gate of Barezia.\\n":
+    "私からララックスに教えられることはもう多くない。だがケルティルならば、要塞の治め方について多くを教えてくれるだろう。\nバレジアの北東の城門で彼を探すがよい。\n",
+
+  "Excellent job! You did very well so far, warrior Larax.":
+    "見事だ！ここまでの務め、実によくやり遂げたぞ、戦士ララックス。",
+
+  "Now order all the axemen to enter the outpost by selecting them and right-clicking on it.":
+    "では斧兵たちを選択し、前哨基地を右クリックして全員を入城させよ。",
+
+  "You should stay right here. It is the axemen you should command.":
+    "そなたはここに残っておれ。指揮すべきは斧兵たちだ。",
+
+  "Good day to you, boy!":
+    "ごきげんよう、若者よ！",
+
+  "Good day!\\nWhat is this black mist that flows around while I'm moving?":
+    "こんにちは！\n移動しているときに周囲を漂っているこの黒い霧は何ですか？",
+
+  "It is called fog of war. You can clearly see in all bright areas. Everything in dark might hide enemy warriors. The black areas are completely unknown.\\n\\nWhat brings you around?":
+    "それは「戦争の霧」と呼ばれるものだ。明るい場所は見渡せるが、薄暗い霧の中には敵の戦士が潜んでいるかもしれぬ。完全な暗闇は未探索の地だ。\n\nところで、何の用で参ったのだ？",
+
+  "My name is Larax. Haaser sent me to you for weapons.":
+    "私の名はララックス。ハサー様に武器を受け取ってくるよう言われて参りました。",
+
+  "Take this sword and shield then, warrior Larax!\\nAnd get back to Haaser quickly.":
+    "ならばこの剣と盾を受け取るがよい、戦士ララックス！\nそしてハサーのもとへ早く戻るのだ。",
+
+  "You can select an outpost and look at the upper interface strip to see what units are inside.\\n\\nClick on the outpost to select it.":
+    "前哨基地を選択し、画面上部の情報欄を見ることで、中にどんな部隊がいるか確認できる。\n\n前哨基地をクリックして選択してみよ。",
+
+  "You see that the axemen are displayed with their icon and their number below the icon.":
+    "斧兵のアイコンが表示され、その下に駐留人数が記されているのが見えるはずだ。",
+
+  "To select a group of units within an outpost, click on their icon.\\nYou can give them any command you want and they will exit the outpost to perform it.\\n\\nNow get all the axemen outside.":
+    "前哨基地内の部隊を選択するには、そのアイコンをクリックする。\n任意の命令を下せば、基地から出て実行に移る。\n\nさあ、すべての斧兵を外に出してみよ。",
+
+  "Larax, you should attach these horsemen to yourself, before going anywhere.":
+    "ララックス、どこかへ向かう前に、まずこの騎兵たちを自部隊に配属させるのだ。",
+
+  "Larax, I don't want you to enter the stronghold with your army attached. Leave it there.":
+    "ララックス、軍勢を引き連れたまま要塞に入ってはならぬ。部隊はそこに置いてまいれ。",
+
+  "I want you in front of me all the time. Get back.":
+    "常に私の目の届くところにおれ。戻るのだ。",
+
+  "All these buildings around are part of stronghold Barezia which is under your control.":
+    "周囲に見えるこれらの建物はすべて、そなたの統治下にあるバレジア要塞の施設だ。",
+
+  "The nearest one is the townhall, which is the central building of the stronghold.\\nWhen you capture the townhall, you capture the whole stronghold.\\nThe warriors can enter the townhall just as an outpost.":
+    "最も近い建物が町役場であり、要塞の中枢を担う施設だ。\n町役場を制圧すれば、要塞全体を掌握できる。\n戦士たちは前哨基地と同様に町役場内に入城できる。",
+
+  "Click on the townhall to select it, so I can explain its interface.":
+    "町役場をクリックして選択せよ。画面の見方を説明しよう。",
+
+  "When you select a building in the stronghold, the upper interface shows the stronghold's population, gold storage, food storage and loyalty.":
+    "要塞内の建物を選択すると、画面上部に要塞の人口、ゴールド備蓄量、食料備蓄量、忠誠度が表示される。",
+
+  "What does the interface show?": "画面には何が表示されているのですか？",
+
+  "The population tributes taxes to your gold storage. The more people you have the faster your gold will increase.":
+    "人口は税としてゴールドを納めてくれる。民が多ければ多いほど、ゴールドの蓄積速度も速くなるのだ。",
+
+  "What's the meaning of the population?": "人口にはどんな意味があるのですか？",
+
+  "Your population grows slowly on its own.\\n\\nYou can give food in the Tavern to increase your population, or move in peasants from the villages.\\n\\nThe population decreases when you equip new warriors or when it is above the maximum that your stronghold could hold.":
+    "人口は時間とともに少しずつ自然増加する。\n\n酒場で食料を消費して人口を増やすことも、村から農民を移住させることも可能だ。\n\n新たな戦士を装備した際や、要塞の収容上限を超えた場合は人口が減少する。",
+
+  "What makes the population change?": "人口が増減する仕組みはどうなっているのですか？",
+
+  "The building south of here is the Tavern. Select it and use the \\'add population\\' command so you can have more people to pay you taxes.":
+    "ここから南にある建物が酒場だ。酒場を選択し「人口追加」コマンドを実行して、税を納める民を増やすのだ。",
+
+  "I can do that.": "承知いたしました。",
+
+  "Well, well, well! It seems my stronghold is in capable hands.":
+    "うむ、見事だ！要塞の差配も頼もしい限りだな。",
+
+  "Your next task is to hire another hero.\\n\\nThis is done in the arena, which is the building furthest north of here.":
+    "次の任務は、もう1名の英雄を雇用することだ。\n\nここから最も北にある建物、闘技場で行うことができる。",
+
+  "It is time to take care of our food supplies.":
+    "そろそろ食料補給の手配を整える時だ。",
+
+  "All villages have a surplus of food that they store. The greater the population of a village the faster its surplus grows.":
+    "すべての村には余剰食料が備蓄されておる。村の人口が多いほど、余剰食料の増加も早くなるのだ。",
+
+  "Farewell, Keltill!": "さらばです、ケルティル殿！",
+
+  "What do you want to know?": "何を知りたいのだ？",
+
+  "Can I ask something else?": "他に質問してもよろしいですか？",
+
+  "To select someone click on his figure with the left mouse button or drag a rectangle around his figure with the left mouse button held down.\\nThe selected warriors have circles under their feet.":
+    "ユニットを選択するには左クリックするか、左ボタンを押しながらドラッグして囲む。\n選択された戦士の足元にはサークルが表示される。",
+
+  "Hot to select warriors?": "戦士はどうやって選択するのですか？",
+
+  "You can move units around by selecting them and then right-clicking on the spot that you want them to go to.":
+    "ユニットを選択し、行かせたい場所を右クリックすることで移動させることができる。",
+
+  "How to move the warriors around?": "戦士はどうやって移動させるのですか？",
+
+  "The second line shows your damage interval and attack type (slashing or piercing). When you hit a foe you inflict damage between these two numbers depending on your level and the defense of the foe.":
+    "2行目はダメージ範囲と攻撃属性（斬撃または刺突）を示しておる。敵を攻撃した際、自らのレベルと敵の防御力に応じて、この2つの数値の間のダメージを与えるのだ。",
+
+  // Tutorial Dialogue & Guides (156 - 374)
+  "Greetings, traveler.\\n\\nMy name is Haaser. I am the high druid of Barezia. \\n\\nAre you here to learn the ways of war?":
+    "旅人よ、よくぞ参られた。\n\n我が名はハサー。バレジアの大ドルイドである。\n\nそなたは戦の道を学ぶためにここへ参ったのか？",
+
+  "I have no doubt in that. \\n\\nFirst you should learn how to move around.\\n\\nRight to the east of us there is a stone relic. Select your figure and go to the relic.":
+    "その覚悟に疑いはない。\n\nまずは基本的な移動の仕方を学ぶとよい。\n\n我らのすぐ東に石碑がある。自らの姿を選択し、その石碑の場所まで移動してみよ。",
+
+  "I'm on my way": "分かりました、向かいます",
+
+  "Yes, show me what to do": "はい、何をすべきか教えてください",
+
+  "You should already have a general idea what is happening around here.":
+    "この地で何が起きているか、大体の察しはついているはずだ。",
+
+  "Tell me about this area": "この地域について教えてください",
+
+  "Barezia is one of the oldest Gaul strongholds. It has high walls, many buildings and large population.":
+    "バレジアはガリアで最も古い要塞の一つだ。高い城壁と多くの建物、そして大勢の民を擁している。",
+
+  "What is Barezia?": "バレジアとは何ですか？",
+
+  "A hero is more than just a warrior. \\nHe has the power to command whole armies of warriors.\\nAttached warriors receive part of the hero's experience and arrangement bonuses.":
+    "英雄は単なる戦士以上の存在だ。\n軍勢全体を統率する力を持ち、配下に編成された戦士たちは英雄の経験値の一部と陣形ボーナスを享受できる。",
+
+  "What is a hero?": "英雄とは何ですか？",
+
+  "Items are scattered throughout the land. Warriors could take items to receive benefits.\\n\\nSome items increase warrior's skills, while others are magical and can be used to achieve various results.":
+    "この大地には様々なアイテムが散らばっている。戦士がアイテムを拾得すれば、その恩恵を受けることができる。\n\n戦士の能力を高めるものもあれば、使用することで様々な魔力を発揮するものもある。",
+
+  "What are the items?": "アイテムとは何ですか？",
+
+  "Every warrior needs food in order to fight.\\n\\nOutposts and pack mules can carry large amounts of food to supply your warriors.":
+    "すべての戦士は戦うために食料を必要とする。\n\n前哨基地や荷ロバは大量の食料を運搬し、そなたの戦士たちに補給することができる。",
+
+  "What is food supply?": "食料補給とは何ですか？",
+
+  "Strongholds and outposts produce gold and warriors. \\n\\nVillages produce food and can have defensive garrisons.":
+    "要塞や前哨基地はゴールドを生み出し、戦士を装備する。\n\n村は食料を生産し、防衛部隊を駐留させることができる。",
+
+  "What are the buildings?": "建物とは何ですか？",
+
+  "In Celtic Kings you play the role of the famous Gaul hero Larax. You start as a young warrior and advance to become a great chieftain.\\n\\nYour goal is to conquer the lands of Gaul and defeat the Roman invaders.":
+    "『ケルトの王』において、そなたはガリアの名高き英雄ララックスとして生きる。若き戦士から身を起こし、偉大なる首長へと成長していくのだ。\n\nそなたの目的は、ガリアの大地を束ね、侵略者たるローマ軍を討ち払うことにある。",
+
+  "What is my goal?": "私の目標は何ですか？",
+
+  "You can move warriors around by selecting them and then right-clicking on the spot that you want them to go to.":
+    "戦士を選択し、行かせたい場所で右クリックすることで移動させることができる。",
+
+  "Tell me how to move": "移動方法を教えてください",
+
+  "To select someone click on him with the left mouse button.\\nTo select several units drag a rectangle around them with the left mouse button held down.\\nThe selected warriors have circles under their feet.":
+    "ユニットを選択するにはマウス左クリックをする。\n複数のユニットを選択する場合は、左ボタンを押しながらドラッグして四角形で囲む。\n選択された戦士たちの足元にはサークルが表示される。",
+
+  "What was that? \\'se-lec-tion\\'": "「選択」とはどうやるのですか？",
+
+  "Try it now.\\nAnd remember you can always click me to ask for my help. ":
+    "さあ、試してみよ。\n困ったときはいつでも私をクリックして助言を求めるとよい。",
+
+  "I'm on it": "了解しました",
+
+  "In the name of Rome, stop and identify yourself!":
+    "ローマの名において命ずる、止まれ！素性を名乗れ！",
+
+  "I am carrying food for our camp. What are you doing in our lands?":
+    "我らの陣営に食料を運んでいるところだ。お前たちこそ我らの地で何をしている？",
+
+  "I am asking the questions here. How many Gaul warriors are around?":
+    "質問しているのはこちらだ。この近辺にガリアの戦士は何人いる？",
+
+  "I'm a simple man... don't know anything.":
+    "私はしがない農民です……何も存じません。",
+
+  "Your are free to go. Get out of my sight!":
+    "立ち去るがよい。二度と私の視界に入るな！",
+
+  "Archers, in the name of Rome, capture the outpost!":
+    "弓兵隊、ローマの名において、あの前哨基地を制圧せよ！",
+
+  "Very well. You know a lot about being a warrior.\\n\\nDo you know why Keltill, the man who brought you here, rides a white horse?":
+    "見事だ。戦士の基本は心得ているようだな。\n\nそなたをここに導いたケルティルが、なぜ白馬に乗っているか知っているか？",
+
+  "Because he likes white horses?": "白馬が好きだからですか？",
+
+  "Because only the heroes ride white horses.":
+    "英雄のみが白馬に乗ることを許されるからだ。",
+
+  "What is it to be a hero?": "英雄とはどういう存在ですか？",
+
+  "Heroes are powerful warriors but it is their leadership that makes them special.":
+    "英雄は屈強な戦士であるが、何よりもその統率力こそが特別なのだ。",
+
+  "Heroes let other warriors benefit from their skill.\\n\\nA warrior that is attached to a hero receives part of the hero's experience and becomes stronger.":
+    "英雄は自らの武芸を他の戦士たちにも分け与える。\n\n英雄の部隊に配属された戦士は、英雄の経験値の一部を受け取り、より強くなるのだ。",
+
+  "What are the heroes?": "英雄とはどのようなものですか？",
+
+  "To attach a warrior to a hero, select the warrior and right-click on the hero.\\n\\nThe attached warriors have yellow selection circles, that also appear when the hero is selected.":
+    "戦士を英雄の部隊に配属するには、戦士を選択して英雄の上で右クリックする。\n\n配属された戦士には黄色の選択サークルが付き、英雄を選択した際にも同時に表示される。",
+
+  "How does the attaching work?": "配属はどのように機能するのですか？",
+
+  "The warriors attached to a hero cannot be ordered directly. You give orders to the hero and he commands his warriors.\\n\\nIf you command an attached warrior directly he detaches from the hero and loses the experience bonus.":
+    "英雄に配属された戦士には直接命令を下すことはできない。英雄に命令を与えれば、英雄が配下の戦士たちを指揮するのだ。\n\n配属中の戦士に直接命令を下すと、配属が解除されて経験値ボーナスを失ってしまう。",
+
+  "How to command the warriors?": "戦士たちをどう指揮するのですか？",
+
+  "Are you ready for such a responsibility?":
+    "その重責を担う覚悟はできているか？",
+
+  "I believe I am ready.": "覚悟はできています。",
+
+  "Haaser, a group of Romans captured the outpost!\\nWhy didn't you do anything?":
+    "ハサー様、ローマ軍の一隊が前哨基地を占領しました！\nなぜ何もしなかったのですか？",
+
+  "Calm down, warrior. We have the food we needed AND there is an interesting task for you. \\n\\nTake that outpost back.":
+    "落ち着け、若き戦士よ。必要な食料は確保できたし、そなたにぴったりの役目がある。\n\nあの前哨基地を奪還してまいれ。",
+
+  "You want me to face the famous legions of Rome alone?\\n\\nIf need be I will face them all and die in a glorious battle.":
+    "名高きローマ軍団に私一人で立ち向かえと？\n\n必要とあらば全軍を相手に回し、名誉ある討ち死にを遂げてみせますが。",
+
+  "I wish I had that spirit of yours ...\\n\\nThere are 10 axemen awaiting your orders on the road to the Outpost.":
+    "その威勢の良さは頼もしいが……\n\n前哨基地へ続く道に、そなたの命令を待つ10名の斧兵がおる。",
+
+  "And they will chop the outpost to pieces with their axes?\\n\\nIt is archers we need.":
+    "斧で前哨基地を粉々に切り刻めと？\n\n必要なのは弓兵では？",
+
+  "Don't be sarcastic with me, warrior.\\n\\nUse the axemen to build a catapult near the outpost and use it to kill all Romans inside. Then capture the outpost back.":
+    "軽口を叩くものではない、戦士よ。\n\n斧兵たちを使って前哨基地の近くにカタパルトを建造し、中にいるローマ兵を一網打尽にするのだ。その後、基地を奪還せよ。",
+
+  "You can build a catapult by selecting some warriors and using the \\'build catapult\\' command.\\n\\nIt is best operated by 10 warriors. It works with less but is not as effective.":
+    "戦士を選択し「カタパルト建造」コマンドを使えば、カタパルトを作ることができる。\n\n10名で操作するのが最も効果的だ。それより少なくても動くが、効率は落ちる。",
+
+  "Making catapults": "カタパルトの製造",
+
+  "You can capture the outpost by right-clicking on it with your axemen selected. They will surround it and start to shout. You can see how the outpost's loyalty decreases until it reaches zero and you become the new owner of that outpost.":
+    "斧兵を選択した状態で前哨基地を右クリックすれば占領できる。兵たちが基地を取り囲み喚声を上げる。\n基地の忠誠度が徐々に低下し、0になるとそなたの支配下に収まるのだ。",
+
+  "Capturing buildings": "建物の占領",
+
+  "Do you know everything you need?": "必要なことはすべて理解できたか？",
+
+  "Use the 10 axemen on the road to the outpost to take it back from Roman hands.":
+    "前哨基地への道にいる10名の斧兵を率い、ローマ人の手から基地を取り戻すのだ。",
+
+  "What should I do": "何をすべきですか",
+
+  "Take our outpost back!": "我らの前哨基地を取り戻せ！",
+
+  "Ok. Ready to start": "よし、準備完了です",
+
+  "You should stay right here.\\nFind the outpost on the map, create a mule and send it over here.":
+    "そなたはここに残るがよい。\nマップで前哨基地を見つけ、荷ロバを生産してここへ送り届けるのだ。",
+
+  "Well, well, well ... it can happen to anyone. Take 10 more axemen and try to take control of outpost Barezia.":
+    "おやおや……誰にでも失敗はある。さらに10名の斧兵を連れて、バレジア前哨基地の奪還に再挑戦せよ。",
+
+  "Welcome, Larax!\\nI'm glad to see that you have become one of the heroes of Gaul.":
+    "ようこそ、ララックス！\nそなたがガリアの英雄の一人に名を連ねたこと、嬉しく思うぞ。",
+
+  "Good day, Keltill!\\nI've come to learn from you.\\n":
+    "ご機嫌麗しゅう、ケルティル殿！\n教えを乞いに参りました。\n",
+
+  "And you will, indeed.\\nI give you the control of this stronghold, so you can learn how to manage it.\\n\\nLeave your army here and follow me to the townhall of Barezia.":
+    "うむ、大いに学ぶがよい。\nこの要塞の統治をそなたに任せよう。いかに管理すべきか学ぶのだ。\n\n軍勢をここに残し、バレジアの町役場まで私についてまいれ。",
+
+  "Ahh, you might learn to manage a stronghold after all.\\n\\nAnd now the most important - the equipment of warriors.":
+    "ふむ、要塞の統治も板についてきたな。\n\nそして最も重要なこと——戦士たちの武装についてだ。",
+
+  "The barracks are used to equip new warriors.\\nThey are located north of the townhall.\\n":
+    "兵舎は新たな戦士を装備・訓練する場所だ。\n町役場の北に位置している。\n",
+
+  "Examine the different equip commands and equip at least one warrior.\\n\\nEach equipped warrior costs you some gold and one man of your population.":
+    "様々な装備コマンドを確認し、少なくとも1名の戦士を装備せよ。\n\n戦士を装備するごとに一定のゴールドと、人口1名を消費する。",
+
+  "Very well. You've completed your task admirably.\\n\\nNow that you know how to build units, look at this arena.\\n\\nIt is used to hire new heroes, and to train warriors to higher levels.":
+    "見事だ。立派に役目を果たしたな。\n\n部隊の編成法が分かったところで、この闘技場を見るがよい。\n\nここは新たな英雄を雇用し、戦士たちをより高みへと訓練する場所だ。",
+
+  "Now let me see you hire a hero.\\n\\nDo so by selecting the Arena and using the \\'hire hero\\' command.":
+    "さあ、英雄を1名雇用してみよ。\n\n闘技場を選択し、「英雄雇用」コマンドを実行するのだ。",
+
+  "You can add population by selecting the tavern and using the \\'add population\\' command.\\n\\nEach 10 villagers added to the stronghold cost 400 food.\\n\\nAdd 10 villagers to the stronghold population.":
+    "酒場を選択して「人口追加」コマンドを使えば、人口を増やせる。\n\n村人10名を追加するごとに食料400が必要だ。\n\n要塞の人口に村人10名を追加してみよ。",
+
+  "Now select the townhall.": "さあ、町役場を選択せよ。",
+
+  "You can view the nearby area by moving the mouse pointer near the boundaries of the screen.":
+    "マウスカーソルを画面の端に移動させることで、周辺の地域を見渡すことができる。",
+
+  "How to move the view?": "視点はどうやって動かすのですか？",
+
+  "The map is a bird's eye view of the region. You can open and close it by pressing the spacebar.\\nThe white rectangle shows the area displayed in the game view. Clicking on the map will move the game view there (and close the map).\\n":
+    "マップはこの地域を上空から俯瞰した全体図だ。スペースキーで開閉できる。\n白い四角形は現在の画面が表示している範囲を示す。マップ上をクリックすると、その地点へ画面が移動する（そしてマップが閉じる）。\n",
+
+  "Where is the map?": "マップはどこにありますか？",
+
+  "Very well then. You know where to find me.":
+    "よろしい。私がどこにいるかは分かっているな。",
+
+  "I have no more questions.": "質問はもうありません。",
+
+  "Under the light of the summer sun,\\nI, the druid Haaser, \\nproclaim the warrior Larax \\na hero equal to all other heroes of Gaul!":
+    "夏の陽光のもと、\n大ドルイド・ハサーの名において、\n戦士ララックスを\nガリアのすべての英雄と同等の勇者として称えよ！",
+
+  "I thank you for the honor, Haaser.":
+    "この栄誉に感謝いたします、ハサー様。",
+
+  "There are some more Romans southwest of the outpost.\\n\\nAttach these horsemen to yourself and attack the Romans. You can use the axemen that fought at the outpost as well.":
+    "前哨基地の南西にまだローマ兵が残っておる。\n\nこの騎兵たちを率いてローマ軍を攻撃せよ。前哨基地で戦った斧兵たちを連れて行ってもよい。",
+
+  "Keep this healing water. You may need it for your next quest.":
+    "この癒しの水を持っておくがよい。次の試練で役立つはずだ。",
+
+  "There lives a great Viking warrior called Runakh. It is rumored that no sword is a match for his hammer. \\nWord is he sold his soul for an item of divine power - a concentration stone. With the power of the stone he is nearly unbeatable.":
+    "ルナクと呼ばれる偉大なるヴァイキング戦士が棲みついておる。いかなる剣も彼の戦槌には敵わぬという噂だ。\n神の力を秘めた秘宝「集中の石」に魂を売り渡したとも言われ、その石の力でほぼ無敵を誇っておる。",
+
+  "Unfortunately he settled in the ruins north-west of here and there will be no peace in our land while he is alive.\\n\\nI want you to face him and come back with the concentration stone that he owns.":
+    "不幸にも奴は北西の遺跡に居座り、奴が生きている限り我らの地に平和は訪れぬ。\n\n奴と対決し、奴の持つ「集中の石」を持ち帰ってまいれ。",
+
+  "Excellent work! Now that Barezia is well supplied, I can tell you about the items.":
+    "見事な働きだ！バレジアの補給も整ったゆえ、アイテムについて教えよう。",
+
+  "Every warrior can carry up to 4 items that are visible at the top of the screen when the warrior is selected. \\n\\nWhen you roll over an item with the pointer the item's description appears at the bottom of the screen.\\n\\nWhen a warrior dies, he drops a bag on the ground with the items he carried.":
+    "すべての戦士は最大4つのアイテムを所持でき、戦士を選択した際に画面上部に表示される。\n\nカーソルをアイテムに合わせると、画面下部に説明が表示される。\n\n戦士が倒れると、所持していたアイテムの入った袋をその場に落とすのだ。",
+
+  "Items?": "アイテムとは？",
+
+  "Some items aid the warrior that carries them by increasing his damage, health or experience.\\n\\nOther items can be used by double-clicking them. Often such items have a limited number of uses indicated with a number at the bottom of the item icon.":
+    "所持しているだけで攻撃力、体力、経験値を高めて戦士を助けるアイテムもある。\n\nダブルクリックで使用できるアイテムもあり、多くはアイコン下部に使用可能回数が記されておる。",
+
+  "What is the use of the items?": "アイテムにはどんな効果があるのですか？",
+
+  "There are places like this oak stump that can hold items. People mark them with a circle of stones so they can be recognized more easily.\\n\\nWithin such places you will often find useful items of nature - a feather, some healing water, or a snake skin.":
+    "この樫の木の切り株のように、アイテムが眠る場所がある。見分けやすいよう石の輪で囲まれておる。\n\nそうした場所からは、鳥の羽、癒しの水、蛇の皮など、自然の恵みによる有用な品が見つかるのだ。",
+
+  "Where I can find an item?": "アイテムはどこで見つかりますか？",
+
+  "Now get some healing water from this Oak stump by right-clicking on it.":
+    "さあ、この樫の切り株を右クリックして、癒しの水を手に入れてみよ。",
+
+  "I'll be back with the water in a minute.": "すぐに水を取って戻ります。",
+
+  "If you cannot kill Runakh alone, equip a group of archers to aid you.":
+    "もし一人でルナクを倒せぬなら、弓兵隊を編成して援護させるとよい。",
+
+  "Get the concentration stone from the bag that Runakh left.":
+    "ルナクが落とした袋から「集中の石」を回収せよ。",
+
+  "You've completed your first quest with honor and I will judge your actions no more. \\nYou are on your own, Larax.":
+    "そなたは見事に最初の試練を果たした。もはや私が口を挟むことはない。\nこれからは自らの足で歩むのだ、ララックス。",
+
+  "This tutorial is complete. You know a lot about the world of Celtic Kings but your learning is far from over ...\\n\\nYou can complete the remaining objectives if you please.":
+    "チュートリアルはこれで完了だ。『ケルトの王』の世界について多くを学んだが、学びの旅はまだ始まったばかりだ……\n\n望むなら、残りの目標を達成してみるがよい。",
+
+  "Very well, now you know how to move around.\\n\\nThe second lesson is about scrolling around.":
+    "よろしい、これで移動の基本は覚えたな。\n\n第二の講義は、画面のスクロールについてだ。",
+
+  "You can view the nearby area by moving the mouse pointer near the boundaries of the screen. (This does not work during a conversation.)\\n\\nIt is called scrolling the view.":
+    "マウスカーソルを画面の端に移動させることで、周辺の地域を見渡すことができる（会話中は無効）。\n\nこれを「画面スクロール」と呼ぶ。",
+
+  "Scrolling?": "スクロールとは？",
+
+  "The map is a bird's eye view of the region. You can open and close it by pressing spacebar. (This does not work during a conversation.)\\n\\nThe white rectangle shows the area displayed in the view. Clicking on the map will move the game view there (and close the map).":
+    "マップはこの地域を俯瞰した全体図だ。スペースキーで開閉できる（会話中は無効）。\n\n白い四角形が表示範囲を示し、マップ上をクリックするとその地点へカメラが移動する。",
+
+  "What is the map?": "マップとは何ですか？",
+
+  "When your figure is selected, the people you can talk to have an yellow exclamation icon above their heads. To start a conversation just right-click on such a person.":
+    "自キャラクターを選択しているとき、会話可能な人物の頭上には黄色の「！」アイコンが表示される。右クリックで会話を始められる。",
+
+  "How to start a conversation?": "会話はどうやって始めるのですか？",
+
+  "Find the nearby tent of our weapon master and speak to him about your equipment. He is the only one carrying large axe, so you cannot miss him.":
+    "近くにある武器指南役の天幕を探し、装備について相談せよ。大斧を背負った唯一の男ゆえ、見落とすことはあるまい。",
+
+  "Great! Let me get a sword": "素晴らしい！剣を受け取ってきます",
+
+  "Welcome back, warrior!\\n\\nLet me explain the interface.":
+    "よく戻った、戦士よ！\n\nインターフェースについて説明しよう。",
+
+  "The top part of the screen contains information about the selected warrior(s).\\nThere is an icon and a name.\\nUnder the name lies a health bar.\\nTo the right are the warrior's stats - level, damage interval, defenses and food.":
+    "画面上部には選択した戦士の情報が表示される。\nアイコンと名前があり、名前の下には体力ゲージがある。\n右側には戦士の能力値（レベル、ダメージ範囲、防御力、所持食料）が示されておる。",
+
+  "Do you understand all that?": "ここまでは理解できたか？",
+
+  "The icon is like a picture of the selected warrior.\\nThe name can be a general category like \\'Swordsman\\' or the specific name of the selected person. ":
+    "アイコンは選択された戦士の肖像画だ。\n名前は「剣士」のような兵種名か、固有の名前が表示される。",
+
+  "What are the icon and the text for?": "アイコンと文字は何のためのものですか？",
+
+  "When the bar is all green it indicates full health.\\nAs the health decreases the right red part becomes more and more visible.\\nWhen the whole bar is red it is an indication of death condition. Don't do that!\\nThe numbers under the health bar show your current health and maximum health.":
+    "バーが完全に緑色のときは体力が満全であることを示す。\n体力が減るにつれ、右側の赤い部分が広がっていく。\nすべてが赤くなると死亡状態を意味する。死んではならぬぞ！\nバーの下の数値は現在体力と最大体力を示しておる。",
+
+  "How that green bar displays health?": "緑のバーはどうやって体力を示しているのですか？",
+
+  "The topmost number is your level which becomes larger as you become more experienced. You gain experience by fighting foes or by training with friends.\\nThe higher the level the more health you have and the stronger you hit.":
+    "一番上の数値はレベルで、経験を積むほど上昇する。敵と戦うか、仲間と訓練することで経験値を獲得できる。\nレベルが上がるほど体力が増加し、攻撃も強力になるのだ。",
+
+  "What's the meaning of these stats?": "これらの能力値の意味は何ですか？",
+
+  "The second line shows the damage you inflict when attacking. The left number is the minimal and the right the maximal damage.\\nWhether you make more or less damage depends on how experienced you are, and how well defended the opponent is.":
+    "2行目は攻撃時に与えるダメージ範囲だ。左が最小、右が最大の攻撃力を示す。\n与えるダメージの多寡は、そなたのレベルと敵の防御力によって決まる。",
+
+  "The third line shows your defenses against slashing or piercing attacks.\\nTo inflict maximum damage to a foe you should be as many levels ahead of him as his defense against your type of attacks.":
+    "3行目は斬撃および刺突攻撃に対する防御力を示す。\n敵に最大ダメージを与えるには、敵の防御力と同等以上のレベル差で上回る必要がある。",
+
+  "The fourth icon shows the amount of food that you carry. Each warrior can carry up to 10 food.":
+    "4番目のアイコンは携帯している食料の量だ。各戦士は最大10の食料を携帯できる。",
+
+  "Very well.\\n\\nNow look at the bottom part of the screen. There are buttons for the different orders that you can give.":
+    "よろしい。\n\nでは画面下部を見るがよい。部隊に下せる様々な命令ボタンが並んでおる。",
+
+  "Yes, tell me more": "はい、詳しく教えてください",
+
+  "When you roll over a button with the mouse you see its description in the lower left corner of the view.\\nSome commands like \\'training\\' are not available, thus grayed out.":
+    "ボタンにマウスカーソルを重ねると、画面左下に説明が表示される。\n「訓練」など、現時点で実行できないコマンドは灰色で表示される。",
+
+  "Your next task it to train to a higher level.\\n\\nFollow the stony road to the valley north of here. Once you get in front of the face of the god give the \\'training\\' command to Mraxis and yourself. I leave Mraxis at your disposal.":
+    "そなたの次の役目は、訓練を積んでレベルを上げることだ。\n\n石畳の道を辿って北の谷へ向かえ。神の巨顔の前に着いたら、ムラクシスとそなた自身に「訓練」コマンドを命じるのだ。ムラクシスを自由に使え。",
+
+  "Hello, Larax!\\nTraining is like a real fight, but don't worry, I know when to stop.":
+    "やあ、ララックス！\n訓練は実戦さながらだが、安心しろ、手加減の引き際は心得ている。",
+
+  "Go now and come back when you have finished training.":
+    "さあ行き、訓練が終わったら戻ってまいれ。",
+
+  "I see that you are tired and wounded from the training.\\nStay here for a while and I will heal your wounds.":
+    "訓練で疲労し、傷を負ったようだな。\nここに少し留まるがよい、私が傷を癒してやろう。",
+
+  "huuuh-uuuh ...\\nThanks for the training, you are a good partner.\\nI'm leaving you now. See you later.":
+    "ふぅ、ふぅ……\nいい訓練相手になってくれたな、感謝するぜ。\n俺はこれで失礼する。またな。",
+
+  "Now that your health is fully restored, I want you to bring some food from outpost Barezia. Our supplies are running short.":
+    "体力が全快したところで、バレジア前哨基地から食料を運んできてほしい。我らの備蓄が底を突きかけておるのだ。",
+
+  "What should I do?": "何をすればよいですか？",
+
+  "Outpost Barezia is located southwest of here.\\nIt has a significant amount of food. In fact, all villages, outposts and strongholds have a storage space for food.":
+    "バレジア前哨基地はここから南西にある。\nそこには潤沢な食料がある。実際のところ、すべての村、前哨基地、要塞には食料の備蓄庫があるのだ。",
+
+  "Where is the outpost?": "前哨基地はどこにありますか？",
+
+  "All warriors need food in order to be healthy. If left without food for long, their health begins to decrease. When provided with food their health increases again.\\n\\nThe warriors can feed from any nearby food source - a pack mule with food, an outpost, village or stronghold. ":
+    "すべての戦士は健康を維持するために食料を必要とする。長く食料がないと体力が減少し、食料を与えられれば回復する。\n\n戦士は荷ロバ、前哨基地、村、要塞など、近くの食料源から食事をとることができる。",
+
+  "Why do we need this food?": "なぜ食料が必要なのですか？",
+
+  "The pack mules are used to transport resources around. Every mule can carry up to 1000 food or gold.\\n\\nYou can order an outpost to load a mule with food or gold if it has enough resources.":
+    "荷ロバは資源を輸送するために使われる。1頭で最大1000の食料またはゴールドを運搬できる。\n\n十分な資源があれば、前哨基地に命じて食料やゴールドを積んだ荷ロバを仕立てることができる。",
+
+  "How to transport food?": "食料はどうやって輸送するのですか？",
+
+  "Are you ready for this task?": "この役目を引き受ける準備はできたか？",
+
+  "I'll wait right here.": "ここで待っておるぞ。",
+
+  "I'll try.": "やってみます。",
+
+  "Don't wander too far. Get back!": "遠くへ離れすぎてはならぬ。戻れ！",
+
+  "The village of Kebatha is located west of here.\\n\\nCommand it to carry its food surplus to Barezia townhall.":
+    "ケバサの村はここから西にある。\n\nその村に余剰食料をバレジアの町役場へ運ぶよう命じるのだ。",
+
+  "This time, I will not wait until you're ready. I will judge your actions no more. You are on your own, Larax.":
+    "今回は準備ができるまで待つことはせぬ。もはやそなたの行動を指図することはあるまい。すべて自力で切り拓くのだ、ララックス。",
+
+  "This tutorial is complete.\\nYou know a lot about the world of Celtic Kings. \\nBut your learning is not over...":
+    "チュートリアルはこれで修了だ。\nそなたは『ケルトの王』の世界について多くを学んだ。\nだが学びの道に終わりはない……",
+
+  "There are more villages, strongholds and Romans to the south.\\n\\nThere are also more commands and buildings that you can play with on your own.\\n\\nExplore the map and find the wonders it holds.":
+    "南にはさらに多くの村や要塞、そしてローマ軍が待ち受けておる。\n\n自ら試すことのできるコマンドや建物もまだたくさんある。\n\nマップを探索し、そこに眠る驚異を見つけ出すがよい。",
+
+  "Farewell, Larax!\\nIt was my pleasure to see you grow.":
+    "さらばだ、ララックスよ！\nそなたの成長を見届けられたこと、我が無上の喜びであった。",
+
+  // Objectives (328 - 373)
+  "Go to the stone relic": "石碑へ向かう",
+  "Go to the stone relic east of here.": "東にある石碑へ向かう。",
+  "Find the weapon master": "武器指南役を探す",
+  "Find the weapon master and talk to him.": "武器指南役を探し、会話する。",
+  "Get back to Haaser": "ハサーのもとへ戻る",
+  "Get back to Haaser.": "ハサーのもとへ戻る。",
+  "Train": "訓練",
+  "Train Mraxis and Larax in the valley north of Haaser.": "ハサーの北の谷でムラクシスとララックスを訓練する。",
+  "Wait to be healed": "治療を待つ",
+  "Wait until Haaser's healing is over.": "ハサーの治療が終わるまで待つ。",
+  "Bring food": "食料を運ぶ",
+  "Create a mule with food in outpost Barezia and bring it to Haaser.": "バレジア前哨基地で食料を積んだ荷ロバを生産し、ハサーのもとへ運ぶ。",
+  "Retake outpost Barezia": "バレジア前哨基地の奪還",
+  "Find the group of axemen on the road to outpost Barezia.\\nBuild a catapult with them, kill the Romans and capture the outpost.\\n":
+    "バレジア前哨基地への道中にいる斧兵の一隊を見つける。\n彼らとカタパルトを建造し、ローマ軍を殲滅して前哨基地を占領する。\n",
+  "Find the group of axemen on the road to outpost Barezia.\nBuild a catapult with them, kill the Romans and capture the outpost.\n":
+    "バレジア前哨基地への道中にいる斧兵の一隊を見つける。\n彼らとカタパルトを建造し、ローマ軍を殲滅して前哨基地を占領する。\n",
+  "Enter the axemen in outpost Barezia": "斧兵をバレジア前哨基地に入城させる",
+  "Enter the axemen in outpost Barezia.": "斧兵をバレジア前哨基地に入城させる。",
+  "Select outpost Barezia": "バレジア前哨基地を選択する",
+  "Select outpost Barezia.": "バレジア前哨基地を選択する。",
+  "Get the axemen out": "斧兵を出城させる",
+  "Get the axemen out of outpost Barezia.": "斧兵をバレジア前哨基地から出城させる。",
+  "Attack the Romans": "ローマ軍を攻撃する",
+  "Attach these horsemen to yourself and attack the Romans southwest of outpost Barezia.":
+    "騎兵たちを自部隊に配属し、バレジア前哨基地の南西にいるローマ軍を攻撃する。",
+  "Meet Keltill": "ケルティルと会う",
+  "Meet Keltill at the northeast gate of Barezia.": "バレジアの北東の城門でケルティルと会う。",
+  "Follow Keltill": "ケルティルに追従する",
+  "Leave your army here and follow Keltill to the townhall of Barezia.":
+    "軍勢をここに残し、ケルティルに従ってバレジアの町役場へ向かう。",
+  "Select the townhall": "町役場を選択する",
+  "Click on the townhall to select it.": "町役場をクリックして選択する。",
+  "Add population to the stronghold": "要塞の人口を増やす",
+  "Select the Tavern and use the add population command.": "酒場を選択し、「人口追加」コマンドを実行する。",
+  "Equip a warrior": "戦士を装備する",
+  "Equip at least one warrior in the barracks.": "兵舎で少なくとも1名の戦士を装備する。",
+  "Hire a hero": "英雄を雇用する",
+  "Hire another hero in the Arena.": "闘技場で別の英雄を雇用する。",
+  "Supply Barezia with food": "バレジアへ食料を補給する",
+  "Supply Barezia with food from the nearby village Kebatha located west of Barezia.":
+    "バレジアの西にある近隣の村ケバサからバレジアへ食料を補給する。",
+  "Face Runakh": "ルナクとの対決",
+  "Face Runakh and come back with the concentration stone.": "ルナクと対決し、「集中の石」を持ち帰る。",
+  "Healing water": "癒しの水",
+  "Get some healing water from the nearby oak stump.": "近くの樫の切り株から癒しの水を手に入れる。",
+  "Capture a Teuton Tent": "テウトンの天幕を占領する",
+  "Capture a Teuton Tent.": "テウトンの天幕を占領する。",
+  "Capture another stronghold": "別の要塞を占領する",
+  "Capture another stronghold.": "別の要塞を占領する。",
+  "Defeat a Roman legion": "ローマ軍団を撃破する",
+  "Defeat a Roman legion.": "ローマ軍団を撃破する。"
+};
+
+// Build normalized dictionary for robust matching
+const normMap = new Map();
+for (const [k, v] of Object.entries(baseDict)) {
+  const normKey = k.replace(/\r\n/g, '\n').trim();
+  normMap.set(normKey, v);
+}
+
+// Check for missing keys
+const missing = [];
+const result = {};
+for (const key of Object.keys(twData)) {
+  if (baseDict[key] !== undefined) {
+    result[key] = baseDict[key];
+  } else {
+    const normKey = key.replace(/\r\n/g, '\n').trim();
+    if (normMap.has(normKey)) {
+      result[key] = normMap.get(normKey);
+    } else {
+      missing.push(key);
+    }
+  }
+}
+
+console.log(`Matched: ${Object.keys(result).length} / ${Object.keys(twData).length}`);
+if (missing.length > 0) {
+  console.log(`Missing ${missing.length} keys:`);
+  missing.forEach((k, idx) => console.log(`${idx}: ${JSON.stringify(k)}`));
+} else {
+  fs.writeFileSync(destPath, JSON.stringify(result, null, 2), 'utf8');
+  console.log(`Successfully generated ${destPath}`);
+}

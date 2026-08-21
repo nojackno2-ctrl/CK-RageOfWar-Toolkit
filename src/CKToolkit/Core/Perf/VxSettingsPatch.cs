@@ -56,7 +56,8 @@ public static class VxSettingsPatch
             "1024x768",
             "1152x864",
             "1280x1024",
-            "1600x1200"
+            "1600x1200",
+            "1920x1080"
         ];
 
         int zoomCapacity = config.Perf.Hires >= 1600 ? config.Perf.Hires : 1600;
@@ -135,7 +136,7 @@ public static class VxSettingsPatch
 
         if (ini.TryGetValue(SectionName, "Resolution", out string? res))
         {
-            if (int.TryParse(res, out int rIdx) && rIdx >= 4)
+            if (int.TryParse(res, out int rIdx) && rIdx != 3)
                 return true;
         }
 

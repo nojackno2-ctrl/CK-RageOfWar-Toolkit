@@ -1,0 +1,31 @@
+{
+  "id": "ru-RU",
+  "name": "Russian",
+  "nativeName": "Русский",
+  "version": "1.0.0",
+  "authors": [
+    "CKToolkit Team"
+  ],
+  "gameLangFolder": "RUSSIAN",
+  "gameLangKey": "russian",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "Segoe UI",
+    "fallbackFaces": [
+      "Arial",
+      "Tahoma"
+    ],
+    "ranges": [
+      "0400-04FF"
+    ],
+    "sizeAdjust": 0
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": [
+      "campaign-tutorial.json",
+      "campaign-celtic-kings-adventure.json"
+    ]
+  }
+}

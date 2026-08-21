@@ -5,12 +5,12 @@
 
 ## 0. 前身專案位置（唯讀參考）
 
-| 模組 | 前身專案路徑 | 語言 | 行數 |
+| 模組 | 前身專案 | 語言 | 行數 |
 |---|---|---|---|
-| Perf | `（前身 Perf 專案，已刪除）` | C++17 Win32 | 5,214 |
-| Lang | `（前身 Lang 專案，已刪除）` | C# .NET FW 4.8 | 2,255 |
-| Lang (oracle) | `（前身 ckpatch.py，已遷入 tools/）` + `tools\` | Python 3 | 3,709 |
-| Trainer | `（前身 Trainer 專案，已刪除）` | C# .NET 10 | 3,225 |
+| Perf | CK_RageOfWar 性能最佳化（已刪除） | C++17 Win32 | 5,214 |
+| Lang | CK_RageOfWar 中文化（已刪除） | C# .NET FW 4.8 | 2,255 |
+| Lang (oracle) | 同上，Python 交叉驗證腳本（已遷入 `tools/`） | Python 3 | 3,709 |
+| Trainer | CK_RageOfWar 修改器（已刪除） | C# .NET 10 | 3,225 |
 
 ---
 

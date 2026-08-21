@@ -78,56 +78,37 @@ public sealed class PerfModule : IPatchModule
     }
 
     /// <summary>
-    /// 對 data.pak 內的 VXCONST.INI 附加自訂解析度清單。
+    /// 對 data.pak 內的 VXCONST.INI 套用解析度清單（保留原廠 4 筆項目，並將目標高解析度寫入為第 5 筆 Res5）。
     /// 嚴格確保 [Resolutions] 不包含寬度大於當前 ZoomMap 表格容量之條目。
-    /// 若有超出容量而被移除或略過之解析度，產生明確警告。
+    /// 若有超出容量而被略過之解析度，產生明確警告。
     /// </summary>
     public void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null)
     {
         var (resW, resH) = ParseDimensions(config.Perf.Resolution, 1920, 1080);
         int zoomMapCapacity = config.Perf.Hires >= 1600 ? Math.Max(config.Perf.Hires, resW) : 1600;
 
-        // 檢查是否有超出容量而被移除之條目
-        string? iniPath = Resolutions.FindConstIniEntryName(pak);
-        if (iniPath is not null)
+        var extraWanted = new List<(int Width, int Height)>();
+        if (config.Perf.AddRes is not null && config.Perf.AddRes.Count > 0)
         {
-            var existing = Resolutions.ParseResolutionsFromText(pak.ReadText(iniPath));
-            var overCapacity = existing.Where(e => e.Width > zoomMapCapacity).ToList();
-            if (overCapacity.Count > 0 && warnings is not null)
+            foreach (string resStr in config.Perf.AddRes)
             {
-                foreach (var r in overCapacity)
+                var (w, h) = ParseDimensions(resStr, 0, 0);
+                if (w > 0 && h > 0)
                 {
-                    warnings.Add(I18n.Strings.Get("Warning_ResolutionOverCapacityRemoved", $"{r.Width}x{r.Height}", zoomMapCapacity));
+                    if (w <= zoomMapCapacity)
+                    {
+                        extraWanted.Add((w, h));
+                    }
+                    else
+                    {
+                        warnings?.Add(I18n.Strings.Get("Warning_ResolutionOverCapacitySkipped", resStr, zoomMapCapacity));
+                    }
                 }
             }
         }
 
-        // 確保 [Resolutions] 不包含寬度大於當前 ZoomMap 容量之條目
-        Resolutions.EnforceCapacity(pak, zoomMapCapacity);
-
-        if (config.Perf.AddRes is null || config.Perf.AddRes.Count == 0) return;
-
-        var wanted = new List<(int Width, int Height)>();
-        foreach (string resStr in config.Perf.AddRes)
-        {
-            var (w, h) = ParseDimensions(resStr, 0, 0);
-            if (w > 0 && h > 0)
-            {
-                if (w <= zoomMapCapacity)
-                {
-                    wanted.Add((w, h));
-                }
-                else
-                {
-                    warnings?.Add(I18n.Strings.Get("Warning_ResolutionOverCapacitySkipped", resStr, zoomMapCapacity));
-                }
-            }
-        }
-
-        if (wanted.Count > 0)
-        {
-            Resolutions.AppendResolutions(pak, wanted, zoomMapCapacity);
-        }
+        // 保留原廠 4 筆解析度，將目標高解析度寫入為 Res5
+        Resolutions.ApplyTargetResolution(pak, resW, resH, zoomMapCapacity, extraWanted);
     }
 
     /// <summary>

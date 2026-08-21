@@ -798,8 +798,10 @@ public static partial class CliHost
                             if (curW > w)
                             {
                                 string oldRes = config.Perf.Resolution;
-                                config.Perf.Resolution = "1600x1200";
-                                warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, "1600x1200", 3));
+                                string safeRes = "1600x1200";
+                                int safeIdx = 3;
+                                config.Perf.Resolution = safeRes;
+                                warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, safeRes, safeIdx));
                             }
 
                             if (w > 2560)

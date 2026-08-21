@@ -193,11 +193,40 @@ public static class PackLoader
     {
         var packs = new Dictionary<string, LanguagePack>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. 載入內建 zh-TW
-        var builtInRes = LoadEmbeddedPack("zh-TW");
-        if (builtInRes.Success && builtInRes.Value is not null)
+        // 1. 載入所有內嵌語言包
+        var targetAsm = typeof(PackLoader).Assembly;
+        var resourceNames = targetAsm.GetManifestResourceNames();
+        var embeddedPackIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string res in resourceNames)
         {
-            packs[builtInRes.Value.Meta.Id] = builtInRes.Value;
+            string clean = res.Replace('\\', '/');
+            if (clean.StartsWith("CKToolkit.LangPacks.", StringComparison.OrdinalIgnoreCase) &&
+                clean.EndsWith("/pack.json", StringComparison.OrdinalIgnoreCase))
+            {
+                string packId = clean.Substring("CKToolkit.LangPacks.".Length, clean.Length - "CKToolkit.LangPacks.".Length - "/pack.json".Length);
+                if (!string.IsNullOrWhiteSpace(packId))
+                {
+                    embeddedPackIds.Add(packId);
+                }
+            }
+        }
+
+        // 保障預設內嵌語言包清單
+        embeddedPackIds.Add("zh-TW");
+        embeddedPackIds.Add("zh-CN");
+        embeddedPackIds.Add("ja-JP");
+        embeddedPackIds.Add("es-ES");
+        embeddedPackIds.Add("it-IT");
+        embeddedPackIds.Add("ru-RU");
+
+        foreach (string packId in embeddedPackIds)
+        {
+            var builtInRes = LoadEmbeddedPack(packId, targetAsm);
+            if (builtInRes.Success && builtInRes.Value is not null)
+            {
+                packs[builtInRes.Value.Meta.Id] = builtInRes.Value;
+            }
         }
 
         // 2. 掃描外部 langpacks 目錄

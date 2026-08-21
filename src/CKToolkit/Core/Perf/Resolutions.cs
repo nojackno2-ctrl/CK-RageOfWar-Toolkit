@@ -51,6 +51,17 @@ public static partial class Resolutions
         (1600, 1200)
     ];
 
+    /// <summary>
+    /// 現代高解析度清單：保留原版 1024x768，其餘取代為 HD (1920x1080)、2K (2560x1440)、4K (3840x2160)。
+    /// </summary>
+    public static readonly (int Width, int Height)[] ModernResolutions =
+    [
+        (1024, 768),
+        (1920, 1080),
+        (2560, 1440),
+        (3840, 2160)
+    ];
+
     [GeneratedRegex(@"^Res(\d+)_([xy])$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ResKeyRegex();
 
@@ -100,6 +111,86 @@ public static partial class Resolutions
     }
 
     /// <summary>
+    /// 向 pak 內之 VXCONST.INI 套用解析度清單：保留原廠 4 筆項目，並將目標高解析度（如 1920x1080、2560x1440、3840x2160）寫入為第 5 筆 (Res5)。
+    /// 若目標解析度為原廠 4 筆之一，則不附加 Res5。
+    /// 完整保留周圍所有空白行、節區終結符號、註解與原始 CRLF 換行格式。
+    /// </summary>
+    public static List<ResolutionEntry> ApplyTargetResolution(
+        HmmPak pak,
+        int targetW,
+        int targetH,
+        int maxCapacity = int.MaxValue,
+        IEnumerable<(int Width, int Height)>? extraWanted = null)
+    {
+        string? iniPath = FindConstIniEntryName(pak);
+        if (iniPath is null) return [];
+
+        string text = pak.ReadText(iniPath);
+        var ini = IniFile.FromText(text);
+
+        // 移除 [Resolutions] 節區內所有 Index > 4 或非原廠的 Res 條目
+        var entries = ini.GetSectionEntries("Resolutions");
+        foreach (var kv in entries)
+        {
+            var m = ResKeyRegex().Match(kv.Key);
+            if (m.Success)
+            {
+                int idx = int.Parse(m.Groups[1].Value);
+                if (idx > 4)
+                {
+                    ini.RemoveKey("Resolutions", kv.Key);
+                }
+            }
+            else
+            {
+                ini.RemoveKey("Resolutions", kv.Key);
+            }
+        }
+
+        // 確保原廠 4 筆項目正確存在
+        ini.SetValue("Resolutions", "Res1_x", "1024");
+        ini.SetValue("Resolutions", "Res1_y", "768");
+        ini.SetValue("Resolutions", "Res2_x", "1152");
+        ini.SetValue("Resolutions", "Res2_y", "864");
+        ini.SetValue("Resolutions", "Res3_x", "1280");
+        ini.SetValue("Resolutions", "Res3_y", "1024");
+        ini.SetValue("Resolutions", "Res4_x", "1600");
+        ini.SetValue("Resolutions", "Res4_y", "1200");
+
+        int nextIdx = 5;
+        var stockSet = StockResolutions.ToHashSet();
+
+        // 若目標解析度非原廠項目且不超過容量限制，寫入為第 5 筆 Res5
+        if (targetW > 0 && targetH > 0 && targetW <= maxCapacity && !stockSet.Contains((targetW, targetH)))
+        {
+            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_x", targetW.ToString());
+            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_y", targetH.ToString());
+            nextIdx++;
+        }
+
+        // 追加使用者額外指定之自訂解析度 (若有)
+        if (extraWanted is not null)
+        {
+            var existing = ParseResolutionsFromText(ini.ToText());
+            var existingPairs = existing.Select(e => (e.Width, e.Height)).ToHashSet();
+
+            foreach (var (w, h) in extraWanted)
+            {
+                if (w > 0 && h > 0 && w <= maxCapacity && !existingPairs.Contains((w, h)))
+                {
+                    ini.AppendToListSection("Resolutions", $"Res{nextIdx}_x", w.ToString());
+                    ini.AppendToListSection("Resolutions", $"Res{nextIdx}_y", h.ToString());
+                    existingPairs.Add((w, h));
+                    nextIdx++;
+                }
+            }
+        }
+
+        pak.WriteText(iniPath, ini.ToText());
+        return ParseResolutionsFromText(ini.ToText());
+    }
+
+    /// <summary>
     /// 向 pak 內之 VXCONST.INI 附加自訂解析度。
     /// 具備冪等性：已存在的解析度會自動略過；超出 ZoomMap 表格容量者嚴格略過。
     /// </summary>
@@ -108,39 +199,10 @@ public static partial class Resolutions
         IEnumerable<(int Width, int Height)> wanted,
         int maxCapacity = int.MaxValue)
     {
-        string? iniPath = FindConstIniEntryName(pak);
-        if (iniPath is null) return [];
-
-        string text = pak.ReadText(iniPath);
-        var ini = IniFile.FromText(text);
-        var existing = ParseResolutionsFromText(text);
-        var existingPairs = existing.Select(e => (e.Width, e.Height)).ToHashSet();
-
-        int nextIdx = existing.Count > 0 ? existing.Max(e => e.Index) + 1 : 1;
-        int nextPos = existing.Count;
-
-        var added = new List<ResolutionEntry>();
-
-        foreach (var (w, h) in wanted)
-        {
-            if (w <= 0 || h <= 0) continue;
-            if (w > maxCapacity) continue;
-            if (existingPairs.Contains((w, h))) continue;
-
-            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_x", w.ToString());
-            ini.AppendToListSection("Resolutions", $"Res{nextIdx}_y", h.ToString());
-
-            added.Add(new ResolutionEntry(nextIdx, w, h, nextPos++));
-            existingPairs.Add((w, h));
-            nextIdx++;
-        }
-
-        if (added.Count > 0)
-        {
-            pak.WriteText(iniPath, ini.ToText());
-        }
-
-        return added;
+        var list = wanted.ToList();
+        if (list.Count == 0) return ReadResolutions(pak);
+        var first = list[0];
+        return ApplyTargetResolution(pak, first.Width, first.Height, maxCapacity, list.Skip(1));
     }
 
     /// <summary>
@@ -206,12 +268,12 @@ public static partial class Resolutions
     }
 
     /// <summary>
-    /// 檢查 data.pak 是否包含非原版之自訂附加解析度。
+    /// 檢查 data.pak 是否包含非原版之自訂附加解析度 (即 Res1..4 為原廠且存在 Res5+)。
     /// </summary>
     public static bool IsCustomResolutionsApplied(HmmPak pak)
     {
         var list = ReadResolutions(pak);
-        if (list.Count < StockResolutions.Length) return false;
+        if (list.Count <= StockResolutions.Length) return false;
 
         for (int i = 0; i < StockResolutions.Length; i++)
         {
@@ -219,7 +281,7 @@ public static partial class Resolutions
                 return false;
         }
 
-        return list.Count > StockResolutions.Length;
+        return list.Count > StockResolutions.Length && list.All(r => r.Width >= 640 && r.Height >= 480);
     }
 
     /// <summary>

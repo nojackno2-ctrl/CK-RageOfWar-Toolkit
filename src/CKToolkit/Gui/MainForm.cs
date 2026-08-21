@@ -110,8 +110,12 @@ public sealed class MainForm : Form
         panel.SetColumnSpan(_subtitle, 3);
 
         _uiLanguage.DropDownStyle = ComboBoxStyle.DropDownList;
-        _uiLanguage.Width = 96;
-        _uiLanguage.Items.AddRange([new LanguageChoice("zh-TW", "中文"), new LanguageChoice("en", "EN")]);
+        _uiLanguage.Width = 110;
+        _uiLanguage.Items.AddRange([
+            new LanguageChoice("zh-TW", "繁體中文"),
+            new LanguageChoice("zh-CN", "简体中文"),
+            new LanguageChoice("en", "English")
+        ]);
         _uiLanguage.SelectedIndexChanged += (_, _) => ChangeUiLanguage();
         panel.Controls.Add(_uiLanguage, 4, 0);
 
@@ -238,7 +242,9 @@ public sealed class MainForm : Form
         _performancePage.LoadConfig(_config.Perf);
         _languagePage.LoadConfig(_config.Lang);
         _trainerPage.LoadConfig(_config.Trainer);
-        _uiLanguage.SelectedIndex = Strings.EffectiveLanguage == "zh-TW" ? 0 : 1;
+        if (Strings.EffectiveLanguage == "zh-CN") _uiLanguage.SelectedIndex = 1;
+        else if (Strings.EffectiveLanguage == "zh-TW") _uiLanguage.SelectedIndex = 0;
+        else _uiLanguage.SelectedIndex = 2;
     }
 
     private void InitialiseGamePath()

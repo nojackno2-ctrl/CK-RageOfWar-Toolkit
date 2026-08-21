@@ -19,6 +19,9 @@ ckprofile.txt
 *.orig
 *.superseded
 
+# Scratch working data (intermediate translation build artifacts)
+scratch/
+
 # Third-party archives (licence forbids redistribution)
 *.zip
 Imperivm1-HD-4-multi*
