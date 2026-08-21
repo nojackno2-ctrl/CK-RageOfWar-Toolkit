@@ -88,6 +88,7 @@ internal static class Program
         RunGroup("11. PerfVideoModePatch", TestPerfVideoModePatchReversal);
         RunGroup("12. PerfResolutionWriteback", TestPerfResolutionWritebackReversal);
         RunGroup("13. PerfZoomTables", TestPerfZoomTablesReversal);
+        RunGroup("13b. PerfCellGridPatch", TestPerfCellGridPatchReversal);
         RunGroup("14. PerfAllExePatchesCombined", TestPerfAllExePatchesCombinedAndReversed);
         RunGroup("15. PerfLauncherMutualExclusion", TestPerfLauncherMutualExclusionAndReversal);
         RunGroup("16. PerfResolutionsAndSettingChange", TestPerfResolutionsReversalAndSettingChange);
@@ -758,6 +759,37 @@ internal static class Program
         Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(revertedBytes));
     }
 
+    // --- 13b. Perf: CellGridPatch (2K/4K 32px 網格) 套用與精確反轉測試 --------
+    private static void TestPerfCellGridPatchReversal()
+    {
+        Console.WriteLine("\n13b. Perf: CellGridPatch (2K/4K 32px 網格) 套用與精確反轉測試");
+
+        byte[] vanillaExe = CreateSyntheticExe32();
+
+        Check("原版 Exe CellGridPatch 為未套用", !CellGridPatch.IsApplied(vanillaExe));
+        Check("原版 Exe CellGridPatch IsOriginal=true", CellGridPatch.IsOriginal(vanillaExe));
+
+        var pe = PeFile.Parse(vanillaExe);
+
+        // 套用 32px 網格
+        CellGridPatch.Apply(pe, enable: true);
+        Check("套用後 CellGridPatch IsApplied=true", CellGridPatch.IsApplied(pe));
+        Check("套用後 CellGridPatch IsOriginal=false", !CellGridPatch.IsOriginal(pe));
+
+        // 冪等性測試
+        byte[] patchedBytes = pe.ToBytes();
+        var peTwice = PeFile.Parse(patchedBytes);
+        CellGridPatch.Apply(peTwice, enable: true);
+        Check("重複套用結果完全相同（冪等）", patchedBytes.SequenceEqual(peTwice.ToBytes()));
+
+        // 精確反轉測試
+        CellGridPatch.Apply(pe, enable: false);
+        byte[] revertedBytes = pe.ToBytes();
+
+        Check("反轉後 CellGridPatch IsOriginal=true", CellGridPatch.IsOriginal(pe));
+        Check("反轉後與原版逐位元組完全一致 (Vanilla -> Apply -> Reverse -> Vanilla)", vanillaExe.SequenceEqual(revertedBytes));
+    }
+
     // --- 14. Perf: 全部 Exe 修補複合疊加與 Normalise 正規化還原測試 ---------
     private static void TestPerfAllExePatchesCombinedAndReversed()
     {
@@ -781,8 +813,8 @@ internal static class Program
         module.ApplyExe(ref patchedExe, configAllOn);
 
         var inspectPatched = PatchState.Inspect(GameFile.Exe, patchedExe);
-        Check("複合套用後 Inspect 回報 PatchedByUs 且包含全部 4 項簽章",
-            inspectPatched.IsPatched && inspectPatched.AppliedPatches.Count == 4);
+        Check("複合套用後 Inspect 回報 PatchedByUs 且包含全部 5 項簽章",
+            inspectPatched.IsPatched && inspectPatched.AppliedPatches.Count == 5 && inspectPatched.AppliedPatches.Contains("cell_grid"));
 
         // 執行 Normalise 正規化還原
         var normRes = PatchState.Normalise(GameFile.Exe, patchedExe);
@@ -2045,6 +2077,31 @@ internal static class Program
                 int exitCode = CliHost.Execute(["lang", "export-template", "--out", exportOutBad, "--template", "SPANISH", "--game", tempGameDir, "--json"], stdout, stderr);
                 Check("CLI lang export-template 不存在語言退出碼非 0", exitCode != ExitCodes.Success);
             }
+
+            // 9. lang import 缺少 --src -> 退出碼 2
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "import", "--json"], stdout, stderr);
+                Check("CLI lang import 缺少 --src 退出碼 2", exitCode == ExitCodes.InvalidArgs);
+            }
+
+            // 10. lang import 合法目錄 -> 成功 (exitCode 0)
+            string importSrcDir = Path.Combine(tempDir, "Import_Valid_Pack");
+            Directory.CreateDirectory(importSrcDir);
+            File.WriteAllText(Path.Combine(importSrcDir, "pack.json"),
+                "{\"id\":\"test-cli-pack\",\"name\":\"Test Pack\",\"nativeName\":\"Test Native\",\"version\":\"1.0.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}");
+            File.WriteAllText(Path.Combine(importSrcDir, "ui.json"), "{\"Start Game\":\"開始遊戲\"}");
+
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["lang", "import", "--src", importSrcDir, "--json"], stdout, stderr);
+                Check("CLI lang import 執行成功 退出碼 0", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={stderr}");
+
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("CLI lang import JSON 封套 ok == true", env is not null && env.Ok && env.Command == "lang import");
+            }
         }
         finally
         {
@@ -2558,6 +2615,13 @@ internal static class Program
         {
             int off = (int)(rw.Va - 0x00400000);
             rw.Orig.CopyTo(pe.AsSpan(off, rw.Orig.Length));
+        }
+
+        // C2. CellGridPatch (9 sites)
+        foreach (var site in CellGridPatch.Sites)
+        {
+            int off = (int)(site.Va - 0x00400000);
+            site.Orig.CopyTo(pe.AsSpan(off, site.Orig.Length));
         }
 
         // D. Trainer KeyMap 原版 F1~F12 / 其他按鍵立即數與指令前綴

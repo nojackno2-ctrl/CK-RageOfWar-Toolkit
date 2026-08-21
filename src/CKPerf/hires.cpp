@@ -1,4 +1,14 @@
-// hires.cpp -- CVXVisible sidecar storage for native widths above 2400 px.
+// hires.cpp -- CVXVisible repairs for native resolutions above the engine's design limits.
+//
+// Two independent repairs live here, one per axis of the same structure:
+//
+//   * ROW axis (the crash): the 75 inline 16-byte slots overflow into the object tail
+//     once the viewport is taller than 75 * 16 = 1200 px. Repaired by redirecting every
+//     slot-address calculation to an external sidecar array.
+//   * COLUMN axis (the scrolling smear): one slot is 4 dwords = 128 bits and one bit is
+//     one 16x16-pixel cell, so the grid is only 128 * 16 = 2048 px wide and no column at
+//     x >= 2048 can ever be marked dirty or repainted. Repaired by kCellSites, which
+//     enlarges the cell to 32 px so the same 128 x 75 grid covers 4096 x 2400 px.
 //
 // CVXVisible embeds 75 16-byte visibility slots at this+0x10..this+0x4BF.
 // Live bounds and three owning containers immediately follow at +0x4C0..+0x50F,
@@ -171,12 +181,76 @@ constexpr unsigned char kSurfaceCtorOriginal2[] = {
     0x68, 0x00, 0x08, 0x00, 0x00   // push 800h (width)
 };
 
+// ------------------------------------------------------- dirty-cell size (16 -> 32 px)
+//
+// CVXVisible+0x10 is a 75-row x 128-column bit grid. One row is one 16-byte slot,
+// i.e. 4 dwords = 128 bits, and one bit is one 16x16-pixel screen cell. 128 * 16 is
+// exactly 2048, so no screen column at x >= 2048 has a bit to be marked dirty with,
+// is therefore never repainted, and smears as the camera scrolls. This is the whole
+// cause of the 2560x1440 smear; see docs/reverse-engineering-notes.md, section
+// "2560x1440 捲動塗抹 — 根因已定位" for the full evidence chain.
+//
+// Raising the column comparison (kLimitSiteF) cannot help: a 16-byte slot has no
+// bit 128 to scan. Widening the row mask would mean rewriting three fully unrolled
+// 4-dword cascades plus every slot stride. Enlarging the *cell* instead costs nine
+// bytes: with 32x32 cells the stock 128x75 grid covers 4096x2400 px, past 4K.
+//
+// Producer 0x0047ABF0 is the only writer (all 15 call sites funnel through it) and
+// converts pixels to cells; consumer 0x0047A020 converts cells back to pixels. Both
+// directions must move together, which is exactly what these nine bytes do. Every
+// other `shl/sar reg,4` in 0x00478000..0x0047C600 is 16-byte slot or rectangle
+// addressing and must stay as it is.
+constexpr unsigned kStockCellPixels  = 16;
+constexpr unsigned kWideCellPixels   = 32;
+// 128 columns x 32 px, and 75 rows x 32 px. Beyond this the grid is out of bits again.
+constexpr unsigned kWideCellMaxWidth = 128 * kWideCellPixels;
+
+struct ByteRewrite {
+    uintptr_t     site;
+    unsigned      length;
+    unsigned char original[4];
+    unsigned char patched[4];
+    const char*   what;
+};
+
+constexpr ByteRewrite kCellSites[] = {
+    // producer 0x0047ABF0 -- pixels to cells
+    {0x0047AC64, 3, {0xC1,0xF8,0x04}, {0xC1,0xF8,0x05}, "sar eax,N startCol"},
+    {0x0047AC78, 3, {0xC1,0xF9,0x04}, {0xC1,0xF9,0x05}, "sar ecx,N endCol"},
+    {0x0047AEE6, 3, {0xC1,0xFA,0x04}, {0xC1,0xFA,0x05}, "sar edx,N firstRow"},
+    {0x0047AF07, 3, {0xC1,0xFA,0x04}, {0xC1,0xFA,0x05}, "sar edx,N lastRow"},
+    // consumer 0x0047A020 -- cells back to pixels
+    {0x0047A7F1, 3, {0xC1,0xE3,0x04}, {0xC1,0xE3,0x05}, "shl ebx,N left"},
+    {0x0047A802, 3, {0xC1,0xE3,0x04}, {0xC1,0xE3,0x05}, "shl ebx,N right"},
+    {0x0047A805, 4, {0x8D,0x5C,0x2B,0x0F}, {0x8D,0x5C,0x2B,0x1F}, "lea ebx,[ebx+ebp+cell-1]"},
+    {0x0047A814, 3, {0xC1,0xE3,0x04}, {0xC1,0xE3,0x05}, "shl ebx,N top"},
+    {0x0047A822, 3, {0xC1,0xE1,0x04}, {0xC1,0xE1,0x05}, "shl ecx,N bottom"},
+};
+
+bool CellGridValidate() {
+    for (const auto& site : kCellSites) {
+        if (memcmp(reinterpret_cast<const void*>(site.site), site.original, site.length) != 0)
+            return false;
+    }
+    return true;
+}
+
+void CellGridWrite() {
+    for (const auto& site : kCellSites)
+        memcpy(reinterpret_cast<void*>(site.site), site.patched, site.length);
+}
+
 enum class InstallState {
     NotNeeded, Prepared, Installed, RefusedCapacity, ByteMismatch,
     AllocationFailed, ProtectFailed, DeferredTimeout
 };
 
 InstallState g_state = InstallState::NotNeeded;
+// The nine-byte cell-size rewrite is gated and reported independently of the sidecar:
+// the sidecar repairs the row axis (the crash), this repairs the column axis (the smear),
+// and the two have different capacity thresholds.
+InstallState g_cellState = InstallState::NotNeeded;
+unsigned g_cellPixels = kStockCellPixels;
 unsigned g_capacity = 1600;
 unsigned g_sidecarSlots = 127;
 unsigned g_columnCap = 127;
@@ -361,17 +435,18 @@ void HighResolutionInstallEarly() {
     g_sidecarSlots = slots;
 
     // Derive column limit (g_columnCap) for Site F dynamically from configured width (g_capacity).
-    // Stock limit 127 (0x7F) indexed 16-pixel-wide screen columns ([esp+0x18] is later scaled via
-    // `shl ebx, 4` at 0x0047A7FE to index 16-byte rectangle storage). At 16 px/column, the stock
-    // cap of 127 covered only 128 * 16 = 2048 px -- explaining why column corruption began at 2560x1440.
-    // For higher resolutions:
-    //   - At 2560 px: 2560 / 16 = 160 columns needed.
-    //   - At 3840 px (4K): 3840 / 16 = 240 columns needed.
-    // We compute columns_needed = ceil(capacity / 16.0), add a modest fixed safety headroom of +8
-    // columns for sub-tile rounding and scroll-wrap edge cases (unlike g_sidecarSlots which is a
-    // 2D rectangle count requiring area-based multiplicative margin, this is a 1D linear column index),
-    // floor at the original 127 cap to ensure low resolutions never regress below stock, and hard clamp
-    // to never exceed g_sidecarSlots so column indices can never overrun allocated sidecar storage.
+    //
+    // CORRECTION (2026-08-21): raising this cap does NOT fix the column axis, and the
+    // original reasoning recorded here was wrong. 0x0047A122 caps the *bit index* inside
+    // a row mask, and a row mask is one 16-byte slot = 4 dwords = 128 bits. There is no
+    // bit 128 to scan, so a higher cap has nothing to find; the site fires and changes
+    // nothing, which is exactly what the play-session hit counters showed. The column
+    // axis is repaired by kCellSites (16 -> 32 px per cell) instead.
+    //
+    // The cap is still widened here because it is harmless and keeps the run-end value
+    // from being pinned at 127 when the cell rewrite is active: the emitted right edge is
+    // clamped back to the view rect at 0x0047A846 either way. It is floored at the stock
+    // 127 so low resolutions never regress, and clamped to g_sidecarSlots.
     unsigned columnsNeeded = static_cast<unsigned>((static_cast<double>(g_capacity) / 16.0) + 0.999);
     unsigned colCap = columnsNeeded + 8; // additive margin for scroll/rounding edge cases
     if (colCap < 127) colCap = 127;
@@ -408,6 +483,16 @@ void HighResolutionInstallEarly() {
     unsigned surfHeight = ((estimatedHeight + 511) / 512) * 512;
     if (surfHeight < 2048) surfHeight = 2048;
     g_surfaceHeight = surfHeight;
+
+    // Column axis. The stock 128-bit row mask covers 128 * 16 = 2048 px, so anything
+    // wider needs the 32-pixel cell. This is decided independently of the sidecar
+    // because the two failures have different thresholds: 2048x1152 is clean without
+    // either, and a 2240-wide setting smears while still being under the sidecar's
+    // 2400 threshold. 32-pixel cells top out at 128 * 32 = 4096 px wide.
+    if (g_capacity > kWideCellMaxWidth)   g_cellState = InstallState::RefusedCapacity;
+    else if (g_capacity > 2048)           g_cellState = CellGridValidate()
+                                              ? InstallState::Prepared
+                                              : InstallState::ByteMismatch;
 
     if (g_capacity <= 2400) { g_state = InstallState::NotNeeded; return; }
     if (g_capacity > kMaxSupportedWidth) { g_state = InstallState::RefusedCapacity; return; }
@@ -472,42 +557,10 @@ void ResumeThreads(HANDLE* handles, size_t count) {
     }
 }
 
-} // namespace
-
-void HighResolutionInstallDeferred() {
-    if (g_state != InstallState::Prepared) return;
-
-    HWND gameWindow = nullptr;
-    for (unsigned attempt = 0; attempt < 200 && !gameWindow; ++attempt) {
-        EnumWindows(FindProcessWindow, reinterpret_cast<LPARAM>(&gameWindow));
-        if (!gameWindow) Sleep(100);
-    }
-    if (!gameWindow) {
-        g_state = InstallState::DeferredTimeout;
-        HighResolutionLogStatus();
-        return;
-    }
-
-    // The executable can initialise or verify its code before creating the main
-    // window. Re-check immediately before writing, then stop all other threads for
-    // the few microseconds in which the multi-site patch becomes visible.
-    if (!ValidateAll()) {
-        g_state = InstallState::ByteMismatch;
-        HighResolutionLogStatus();
-        return;
-    }
-    HANDLE suspended[128] = {};
-    size_t suspendedCount = SuspendOtherThreads(suspended, sizeof(suspended) / sizeof(suspended[0]));
-
-    DWORD oldProtect = 0;
-    if (!VirtualProtect(reinterpret_cast<void*>(kTextStart), kTextLength,
-                        PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        ResumeThreads(suspended, suspendedCount);
-        g_state = InstallState::ProtectFailed;
-        HighResolutionLogStatus();
-        return;
-    }
-
+// Writes the sidecar redirects, caves and surface sizes. The caller owns finding the
+// window, re-validating the bytes, suspending the other threads and opening .text for
+// writing, so that this and CellGridWrite() share one suspend/protect window.
+void InstallSidecarPatches() {
     unsigned char* cave = g_caves;
     const uint32_t slotBaseMinus10 =
         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_sidecar) - kSlotBytes);
@@ -647,11 +700,9 @@ void HighResolutionInstallDeferred() {
     // Consumer Limit Site F (0x0047A122): cmp esi, g_columnCap
     // Replaces `cmp esi, 7Fh` (3) + `mov [esp+24h], edi` (4). Overwritten length = 7 bytes (NOP-padded 5..6).
     // Flags set by cmp survive through replayed mov into original `jge short 0x0047A12C`.
-    // NOTE: Although the block surface constructors at Sites 1 and 2 now derive (width/16)-1 dynamically
-    // at runtime into the surface object [0x798C5C+0x1C], the CVXVisible scanline column loop at 0x0047A122
-    // does not read from that field -- it embeds its own hardcoded `cmp esi, 7Fh` immediate in machine code.
-    // Site F remains strictly necessary to prevent CVXVisible from prematurely clamping column iterations
-    // at 127 (2048 px) when rendering higher resolutions.
+    // NOTE: this does NOT fix the column axis on its own -- see the correction next to
+    // g_columnCap. 0x0047A122 caps a bit index within a 128-bit row mask, so widening the
+    // cap finds no extra bits. kCellSites is what repairs the column axis.
     {
         uintptr_t caveAddress = reinterpret_cast<uintptr_t>(cave);
         PutHitCounter(cave, 37);
@@ -672,13 +723,67 @@ void HighResolutionInstallDeferred() {
     // Overwrites push imm32 height (pushed second at 0x004780EA) and width (pushed third at 0x004780EF).
     WriteSiteImm32(kSurfaceCtorHeightSite2, g_surfaceHeight);
     WriteSiteImm32(kSurfaceCtorWidthSite2,  g_surfaceWidth);
+}
+
+} // namespace
+
+void HighResolutionInstallDeferred() {
+    bool wantSidecar = (g_state == InstallState::Prepared);
+    bool wantCells   = (g_cellState == InstallState::Prepared);
+    if (!wantSidecar && !wantCells) return;
+
+    HWND gameWindow = nullptr;
+    for (unsigned attempt = 0; attempt < 200 && !gameWindow; ++attempt) {
+        EnumWindows(FindProcessWindow, reinterpret_cast<LPARAM>(&gameWindow));
+        if (!gameWindow) Sleep(100);
+    }
+    if (!gameWindow) {
+        if (wantSidecar) g_state = InstallState::DeferredTimeout;
+        if (wantCells)   g_cellState = InstallState::DeferredTimeout;
+        HighResolutionLogStatus();
+        return;
+    }
+
+    // The executable can initialise or verify its code before creating the main
+    // window. Re-check immediately before writing, then stop all other threads for
+    // the few microseconds in which the multi-site patch becomes visible.
+    // The two patches are validated and refused independently: a byte mismatch in
+    // one of them must not silently disable the other.
+    if (wantSidecar && !ValidateAll()) { g_state = InstallState::ByteMismatch; wantSidecar = false; }
+    if (wantCells && !CellGridValidate()) { g_cellState = InstallState::ByteMismatch; wantCells = false; }
+    if (!wantSidecar && !wantCells) {
+        HighResolutionLogStatus();
+        return;
+    }
+
+    HANDLE suspended[128] = {};
+    size_t suspendedCount = SuspendOtherThreads(suspended, sizeof(suspended) / sizeof(suspended[0]));
+
+    DWORD oldProtect = 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(kTextStart), kTextLength,
+                        PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        ResumeThreads(suspended, suspendedCount);
+        if (wantSidecar) g_state = InstallState::ProtectFailed;
+        if (wantCells)   g_cellState = InstallState::ProtectFailed;
+        HighResolutionLogStatus();
+        return;
+    }
+
+    if (wantSidecar) {
+        InstallSidecarPatches();
+        g_state = InstallState::Installed;
+    }
+    if (wantCells) {
+        CellGridWrite();
+        g_cellPixels = kWideCellPixels;
+        g_cellState = InstallState::Installed;
+    }
 
     DWORD ignored = 0;
     VirtualProtect(reinterpret_cast<void*>(kTextStart), kTextLength, oldProtect, &ignored);
     FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(kTextStart), kTextLength);
     ResumeThreads(suspended, suspendedCount);
     CKPerfHighResolutionStep = 6;
-    g_state = InstallState::Installed;
     HighResolutionLogStatus();
 }
 
@@ -686,6 +791,11 @@ void HighResolutionLogStatus() {
     Logf("CVXVisible sidecar: %s (HiRes capacity %u, surface %ux%u, slots %u, redirects %u, storage 0x%08X)",
          StateName(g_state), g_capacity, g_surfaceWidth, g_surfaceHeight, g_sidecarSlots, g_redirectCount,
          static_cast<unsigned>(reinterpret_cast<uintptr_t>(g_sidecar)));
+    // The dirty-cell size is the column-axis repair and is reported separately because it
+    // installs, refuses and fails independently of the sidecar's row-axis repair.
+    Logf("CVXVisible dirty cell: %s (%u px per cell, grid covers %ux%u px, %u sites)",
+         StateName(g_cellState), g_cellPixels, 128 * g_cellPixels, 75 * g_cellPixels,
+         static_cast<unsigned>(sizeof(kCellSites) / sizeof(kCellSites[0])));
 }
 
 // Drains CKPerfRedirectHits into the log. Silent when the sidecar was never

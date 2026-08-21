@@ -178,6 +178,10 @@ public static partial class CliHost
                 {
                     return HandleLangUninstall(gameDirOverride, configPathOverride, isJson, stdout, stderr);
                 }
+                if (langSubCmd == "import")
+                {
+                    return HandleLangImport(commands.Skip(2).ToList(), configPathOverride, isJson, stdout, stderr);
+                }
                 if (langSubCmd == "export-template")
                 {
                     return HandleLangExportTemplate(commands.Skip(2).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
@@ -798,7 +802,7 @@ public static partial class CliHost
                                 warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, "1600x1200", 3));
                             }
 
-                            if (w > 2048)
+                            if (w > 2560)
                             {
                                 warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
                             }
@@ -856,7 +860,7 @@ public static partial class CliHost
                                 return w > curCapacity;
                             });
                         }
-                        if (rw >= 2048 || rh >= 1152)
+                        if (rw > 2560 || rh > 1440)
                         {
                             warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
                         }
@@ -1261,6 +1265,79 @@ public static partial class CliHost
         else
         {
             stdout.WriteLine(Strings.Get("Lang_ExportTemplate_Success", Path.GetFullPath(outDir)));
+            if (warnings.Count > 0)
+            {
+                stdout.WriteLine("\n警告 / Warnings:");
+                foreach (string w in warnings) stdout.WriteLine($"  ! {w}");
+            }
+        }
+
+        return ExitCodes.Success;
+    }
+
+    private static int HandleLangImport(List<string> options, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
+    {
+        string? srcDir = null;
+        bool overwrite = false;
+
+        for (int i = 0; i < options.Count; i++)
+        {
+            string opt = options[i];
+            if ((opt.Equals("--src", StringComparison.OrdinalIgnoreCase) ||
+                 opt.Equals("--from", StringComparison.OrdinalIgnoreCase)) && i + 1 < options.Count)
+            {
+                srcDir = options[++i];
+            }
+            else if (opt.Equals("--overwrite", StringComparison.OrdinalIgnoreCase))
+            {
+                overwrite = true;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(srcDir))
+        {
+            string err = Strings.Get("Error_LangImportSourceMissing");
+            return OutputError("lang import", err, ExitCodes.InvalidArgs, isJson, stdout, stderr);
+        }
+
+        Func<string, string, bool>? overwritePrompt = overwrite ? ((_, _) => true) : null;
+        Result<LanguagePack> result = LangPackService.ImportPack(srcDir, customTargetBaseDir: null, overwritePrompt: overwritePrompt);
+
+        if (!result.Success || result.Value is null)
+        {
+            return OutputError("lang import", result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "匯入失敗"), result.ExitCode, isJson, stdout, stderr);
+        }
+
+        LanguagePack pack = result.Value;
+        string targetDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "langpacks", pack.Meta.Id));
+
+        var config = ToolkitConfig.Load(configOverride);
+        var warnings = new List<string>(config.MigrationsApplied);
+        if (config.LoadError is not null) warnings.Insert(0, config.LoadError);
+
+        var data = new
+        {
+            packId = pack.Meta.Id,
+            name = pack.Meta.Name,
+            nativeName = pack.Meta.NativeName,
+            version = pack.Meta.Version,
+            targetDir
+        };
+
+        if (isJson)
+        {
+            var envelope = new JsonEnvelope
+            {
+                Ok = true,
+                Command = "lang import",
+                Data = data,
+                Warnings = warnings
+            };
+            stdout.WriteLine(JsonSerializer.Serialize(envelope, JsonEnvelopeOptions));
+        }
+        else
+        {
+            stdout.WriteLine(Strings.Get("Lang_Import_Success", pack.Meta.Name, pack.Meta.Id, targetDir));
             if (warnings.Count > 0)
             {
                 stdout.WriteLine("\n警告 / Warnings:");

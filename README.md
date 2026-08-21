@@ -1,10 +1,8 @@
-﻿# CK-RageOfWar-Toolkit
+# CK-RageOfWar-Toolkit
 
 *[繁體中文](#繁體中文) · [English](#english)*
 
-A single tool for *Celtic Kings: Rage of War* (2004, Steam) that brings together
-performance and HD patching, translation packs, and a trainer — replacing three
-separate tools that used to fight over the same game files.
+An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: Rage of War* (2004, Steam edition) — combining performance enhancements, 1080p/2K/4K high-resolution support, language pack management, and an in-depth trainer into a single, clean GUI and AI-agent-driven CLI.
 
 ---
 
@@ -12,62 +10,77 @@ separate tools that used to fight over the same game files.
 
 ### 這是什麼
 
-《Celtic Kings: Rage of War》的整合工具包，一個執行檔涵蓋三件事：
+《Celtic Kings: Rage of War》（高盧羅馬同仇錄，2004 年 Steam 版）的現代化全功能整合工具包。單一執行檔 `CKToolkit.exe` 涵蓋三大核心領域：
 
-| 模組 | 功能 |
+| 模組 | 功能特色 |
 |---|---|
-| **效能與相容性** | 現代 Windows 的 16bpp 切換崩潰修復、大位址感知 (LAA)、1920x1080 HD 支援、動畫效能開關、取樣分析器 |
-| **語言包** | 把遊戲文字換成其他語言，內建繁體中文（3,575 條），並可自行擴充其他語言 |
-| **修改器** | 14 項作弊、數十項數值調整、小鍵盤按鍵重對應 |
+| **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
+| **多國語言包** | 內建繁體中文化（3,575 條詞彙）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
+| **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
+
+---
 
 ### 為什麼要整合成一個工具
 
-這三件事原本是三個各自獨立的程式，放在同一個遊戲目錄會互相破壞：
+這三套功能在過去由三個各自獨立的專案維護，在同一個遊戲目錄中會相互破壞：
 
-- `data.pak`：修改器每次都從自己的備份全量重建，會洗掉效能模組附加的解析度條目；
-  而 `vxSettings.ini` 的 `Resolution` 存的是**索引**，條目一消失索引就失效。
-- `Celtic kings.exe`：效能模組與修改器都要改它，各自「從自己的備份重建」，誰後跑誰贏。
-- 三個工具各自維護備份、各自判斷「什麼是原版」，結果互相把對方改過的檔案存成原廠備份。
-  使用者按「還原原版」拿回的，可能不是原版。
+1. **`data.pak` 衝突**：修改器每次從備份全量重建，會抹除效能模組附加的解析度清單；而 `vxSettings.ini` 的 `Resolution` 存的是清單**索引**，索引一旦錯位便會導致引擎異常。
+2. **`Celtic kings.exe` 衝突**：效能修補與修改器都需要修改主程式，各自覆蓋導致後套用者覆蓋先套用者。
+3. **備份汙染**：各工具各自備份，容易將其他工具修改過的檔案誤當成「原廠原版」存入備份。當使用者點擊「還原原版」時，拿回的反而是被污染的檔案。
 
-整合後只有一條套用管線、一套狀態判定，上述衝突從結構上消失。
+整合後的工具包採用**單一套用管線**與**正規化層**，上述衝突從架構層面徹底消除。
 
-### 安全性設計：不保存任何遊戲檔案副本
+---
 
-本工具**不會**建立 `backup/` 目錄，也不複製任何遊戲檔案。這是 Steam 專用工具，
-「驗證遊戲檔案完整性」隨時可用，那就是足夠的安全網。
+### 安全性設計：零備份副本、精確反轉與正規化
 
-取代備份的是**精確反轉**：
+本工具**不建立 `backup/` 目錄，也不複製或保存任何遊戲檔案副本**。作為 Steam 版專用工具，Steam 的「驗證遊戲檔案完整性」隨時可作為終極防線。
 
-- 每個修改都能從被修改後的位元組單獨反轉回原版，不依賴任何外部副本。
-- 套用流程是「讀取現行檔案 → 反轉所有既有修改（正規化回原版）→ 疊加設定要的修改 → 只寫入一次」。
-  因此套用兩次等於套用一次，改設定是取代而不是累積。
-- 檔案若既不是原版、也不是本工具能解釋的狀態（例如被第三方工具改過），
-  一律**拒絕操作**並請你執行 Steam 驗證，絕不猜測、絕不半套寫入。
-- 內容沒有變化的檔案完全不會被重寫。
+取代備份的機制是**精確反轉 (Exact Reversal)**：
 
-自我測試對每一個修補獨立驗證「原版 → 套用 → 反轉 → 逐位元組回到原版」。
-這是取代備份的唯一保障，任何一項失守都等同於使用者只能靠 Steam 還原。
+- **逐位元組精確反轉**：每個修改均能從修補後的位元組單獨反轉回原版 Vanilla 狀態，不依賴任何外部備份檔案。
+- **正規化後疊加**：每次套用均遵循「讀取現行檔案 → 反轉已偵測的本工具修補（正規化回原版）→ 依序疊加目前啟用的修補 → 一次性原子寫入」。
+- **未知狀態嚴格拒絕 (Unrecognised Protection)**：若檔案被第三方未辨識工具修改或損毀，工具一律**拒絕寫入**並提示使用者先透過 Steam 驗證檔案完整性，絕不猜測。
+- **零贅餘寫入**：若正規化疊加後的內容與現行檔案完全一致，嚴格跳過磁碟寫入。
 
-### 安裝與使用
+---
 
-需求：Windows 10/11、.NET 10 Desktop Runtime、Steam 版遊戲。
+### 系統需求與使用方法
 
-下載 Release 的 `CKToolkit.exe`，放在任何地方執行即可（不必放進遊戲目錄）。
-無參數啟動就是圖形介面：
+- **系統需求**：Windows 10 / 11 (x64)、[.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)、Steam 版《Celtic Kings: Rage of War》。
+- **快速開始**：
+  1. 下載最新 Release 的 `CKToolkit.exe`。
+  2. 放置於任意目錄執行（不必放進遊戲目錄）。
+  3. 無參數啟動即開啟 GUI 圖形介面：
+     ```cmd
+     CKToolkit.exe
+     ```
+  4. 五大分頁：**效能 / 語言 / 修改器 / 分析器 / 關於**，右上角可自由切換繁體中文／English。
+  5. 勾選欲啟用的項目（如 2K 2560x1440 或 4K 3840x2160、繁體中文語言包、修改器功能）後點擊「一鍵套用」。
+  6. **套用後可直接從 Steam 或桌面捷徑啟動遊戲**，2K / 4K 高解析度與所有修補均直接靜態生效，無需常駐工具！
+  7. 若需還原原版，於工具中點擊「還原原版」即可逐位元組恢復原版檔案。
 
+#### 帶診斷啟動與背景監看（選用）
+
+工具內建 32 位元原生輔助模組 `ckperf.dll`（自動內嵌於 exe 中，磁碟零寫入）：
+- **帶診斷啟動遊戲**：由工具直接啟動遊戲並注入診斷與防崩潰層。
+- **掛載到執行中的遊戲**：遊戲已由 Steam 開啟時，一鍵手動掛載。
+- **持續監看（Steam 開也會掛上）**：常駐背景監聽，無論何時從 Steam 開啟遊戲均會自動掛載防崩潰與遙測模組。
+
+---
+
+### 語言包擴充與匯出／匯入
+
+語言包為純資料結構，新增語言無需修改任何程式碼。
+
+#### 1. 匯出翻譯範本
+點擊語言分頁的「📤 匯出翻譯範本…」或使用 CLI：
+```cmd
+CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
 ```
-CKToolkit.exe
-```
+這將自動從 `local.pak` 萃取官方詞彙，生成標準 `pack.json`、`ui.json`、`help.json` 與戰役翻譯檔。
 
-五個分頁：**效能 / 語言 / 修改器 / 分析器 / 關於**，右上角可切換中英文介面。
-勾好想要的項目後按「一鍵套用」。要回到原版就按「還原原版」。
-
-### 新增其他語言
-
-語言包是純資料，新增語言不需要改任何程式碼。在執行檔旁建立
-`langpacks/<語言代號>/`，放入 `pack.json` 與翻譯 JSON：
-
+#### 2. `pack.json` 結構範例
 ```json
 {
   "id": "ja-JP",
@@ -90,81 +103,84 @@ CKToolkit.exe
 }
 ```
 
-`ranges` 只需宣告「不論譯文用不用到都必須存在」的字元（標點、符號、假名之類）。
-漢字這種數量龐大的字元不必列——實際用到的字會自動從譯文掃描出來並光柵化。
-曾經在這裡宣告整個 CJK 區塊，結果 12 套字型各產生兩萬多個字形，`local.pak` 從
-4.8MB 膨脹到 24.3MB，而實際只需要約 2,900 個。
-
-要從零開始翻譯，用「匯出語言包範本」產生骨架：
-
+#### 3. 匯入語言包
+點擊語言分頁的「📥 匯入語言包…」選取資料夾，或透過 CLI：
+```cmd
+CKToolkit.exe lang import --src .\my-language [--overwrite]
 ```
-CKToolkit.exe lang export-template --out .\my-language
-```
+工具會自動進行路徑穿越驗證與安全 Staging 原子安裝。
 
-### 給 AI 代理使用的 CLI
+---
 
-CLI **不是設計給人日常使用的**，它的存在是為了讓 AI 代理程式能驅動這個工具。
-所有指令永不互動、永不詢問，並可用 `--json` 取得穩定的結構化輸出。
+### 修改器功能清單
 
-```
+修改器支援 17 項作弊功能與數十項數值平衡調整：
+
+- **資源與內政**：黃金補滿、食物補滿、人口提升、忠誠度全滿、快速生產。
+- **戰鬥與部隊**：部隊完全治療、全軍戰鬥增益、修復建築物、天譴敵軍。
+- **視野與探索**：地圖全開、迷霧開關。
+- **單位與物品生成**：
+  - **滑鼠生成單位 (`spawn_unit`)**：在游標位置叫出指定部隊，可設定生成數量、等級（Lv.1~100）及攜帶裝備。
+  - **切換生成單位 (`cycle_unit`)**：熱鍵循環切換當前生成兵種。
+  - **滑鼠生成物品 (`spawn_item`)**：在游標位置生成地面皮袋，收錄全遊戲 23 種可穿戴物品／神器。
+  - **切換生成物品 (`cycle_item`)**：熱鍵循環切換當前生成物品。
+- **選取單位等級修改 (`set_selected_level`)**：直接將目前選取之單位或英雄部隊設定為指定等級（Lv.1~1000）。
+- **圖形化參數設定對話框**：提供整齊對齊的兵種挑選器、全裝備屬性說明（如王者腰帶、狂亂皮手套、專注之石等）與一鍵神裝推薦組合。
+- **鍵盤配置**：支援標準鍵盤與九宮格小鍵盤 (Numpad) 專屬獨立鍵位配置。
+
+---
+
+### 給 AI 代理與自動化腳本的 CLI
+
+CLI 專為 AI 代理程式與自動化管線設計，所有指令永不互動、永不彈窗，並支援結構化 JSON 輸出：
+
+```cmd
 CKToolkit.exe status  [--json]              檢查遊戲狀態與已套用的修補
-CKToolkit.exe apply   [--json]              依設定套用
+CKToolkit.exe apply   [--json]              依設定套用所有修補
 CKToolkit.exe restore --all [--json]        反轉所有修補回到原版
-CKToolkit.exe verify  [--json]              唯讀驗證（零寫入）
-CKToolkit.exe perf get|set ...              效能與 HD 設定
-CKToolkit.exe lang list|install|uninstall|export-template ...
+CKToolkit.exe verify  [--json]              唯讀驗證現行檔案（零寫入）
+CKToolkit.exe perf get|set ...              效能與 HD 解析度設定
+CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
 CKToolkit.exe profile --seconds <n> --hz <n> --out <file>
-CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域）
+CKToolkit.exe run [--plain|--watch|--attach] 帶診斷執行或掛載遊戲
+CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
 ```
 
-輸出封套：
-
+結構化 JSON 封套範例：
 ```json
-{ "ok": true, "command": "status", "data": {}, "warnings": [], "errors": [] }
+{
+  "ok": true,
+  "command": "status",
+  "data": { ... },
+  "warnings": [],
+  "errors": []
+}
 ```
 
-退出碼：`0` 成功、`1` 一般失敗、`2` 參數錯誤、`3` 找不到遊戲、
-`4` 檔案狀態無法辨識（需 Steam 驗證）、`5` 檔案被佔用。
+- **標準退出碼**：`0` 成功、`1` 一般失敗、`2` 參數錯誤、`3` 找不到遊戲目錄、`4` 檔案狀態無法辨識（需 Steam 驗證）、`5` 檔案被佔用中。
 
-輸出一律為 UTF-8，與主控台的字碼頁無關。
-
-### 已知限制
-
-- **只支援 Steam 版。** 所有記憶體位址都是那一版執行檔專屬的，套用前會逐一驗證，
-  對不上就拒絕修改。
-- **HD 上限為 1920x1080。** 2048x1152 以上主選單開得起來，但一進遊戲就崩潰，
-  而且每次崩潰都會把解析度設定寫成 0。工具本身接受任意尺寸，出廠設定保守。
-- **取樣分析器對遊戲唯讀**：暫停執行緒讀取 EIP 後立即恢復，不注入、不寫入遊戲記憶體。
+---
 
 ### 從原始碼建置與測試
 
-```
+```cmd
 dotnet build CKToolkit.sln -c Release
-dotnet run --project src/CKToolkit.SelfTest
+dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
 ```
 
-自我測試有一部分會拿**真實的原版遊戲檔案**驗證我們對格式的理解——目錄排序、
-原廠語系白名單、APF 字型的精確反轉。這些是遊戲內容，不放在儲存庫裡，
-所以用環境變數指定：
-
-```
-set CKTOOLKIT_VANILLA_DIR=D:\path\to\vanilla
+若欲使用真實的原版遊戲檔案進行 APF 字型往返、目錄排序等深度驗證，可設定環境變數：
+```cmd
+set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ```
 
-該目錄需含 `local.pak.orig` 與 `data.pak.orig`（用 Steam 驗證檔案完整性取得的原版副本）。
-沒設定時這些檢查會自動略過，其餘測試照常通過。
-
-這件事值得強調：本專案最難找的幾個 bug——語言包裝好卻顯示英文、還原後的 pak 少 4 個
-位元組、原版遊戲被工具拒絕——**合成測試全部是綠的**，只有真實檔案才照得出來。
-改動 pak、字型或 INI 相關程式碼時，請務必設定這個變數再跑測試。
+---
 
 ### 授權與致謝
 
-MIT License。翻譯內容由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 完成。
-
-本工具與 Haemimont Games 及遊戲發行商無關，不散布任何遊戲檔案。
-使用前請自行確認符合你所在地區的相關規範。
+- 本專案採用 **MIT License** 開源授權。
+- 繁體中文翻譯資料由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
+- 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關，儲存庫內不包含任何原版遊戲之受版權保護二進位檔案。
 
 ---
 
@@ -172,152 +188,172 @@ MIT License。翻譯內容由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl
 
 ### What this is
 
-An all-in-one tool for *Celtic Kings: Rage of War* (2004, Steam edition):
+An all-in-one modernization and toolkit for *Celtic Kings: Rage of War* (2004, Steam edition). A single executable `CKToolkit.exe` covers three essential domains:
 
-| Module | What it does |
+| Module | Features |
 |---|---|
-| **Performance & compatibility** | Fixes the 16bpp mode-switch crash on modern Windows, Large Address Aware, 1920x1080 support, animation performance switches, sampling profiler |
-| **Language packs** | Replaces the game text with another language. Traditional Chinese is built in (3,575 entries); other languages are a folder drop |
-| **Trainer** | 14 cheats, several dozen value tweaks, numpad key remapping |
+| **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
+| **Language Packs** | Built-in Traditional Chinese translation (3,575 entries), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
+| **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
+
+---
 
 ### Why one tool instead of three
 
-These started as three separate programs, and in a shared game directory they
-corrupted each other:
+Previously, these features were maintained in three separate utilities, which corrupted each other when targeting the same game directory:
 
-- `data.pak`: the trainer rebuilt it from its own backup every time, wiping the
-  resolution entry the performance patcher had appended — and `Resolution` in
-  `vxSettings.ini` is an *index* into that list, so it silently pointed at the
-  wrong entry.
-- `Celtic kings.exe`: both the performance patcher and the trainer edit it, each
-  rebuilding from its own backup, so whichever ran last won.
-- Each tool kept its own backup and its own idea of "vanilla", so each stored the
-  others' patched files as the pristine baseline. "Restore original" could hand
-  you something that was not original at all.
+1. **`data.pak` conflicts**: The trainer rebuilt the pak from its internal backup, wiping resolution entries appended by the performance patcher. Because `Resolution` in `vxSettings.ini` is an *index* into that list, it silently broke engine resolution lookup.
+2. **`Celtic kings.exe` conflicts**: Both the performance patcher and the trainer edited the executable, each overwriting the other depending on which ran last.
+3. **Backup pollution**: Each tool kept its own backup, inadvertently saving another tool's modified file as "vanilla". Clicking "restore original" resulted in restored files that were corrupted or altered.
 
-One pipeline and one state model make those conflicts structurally impossible.
+The unified toolkit uses a **single application pipeline** and **normalization layer**, eliminating cross-tool conflicts by design.
 
-### Safety model: no copies of your game files
+---
 
-This tool does **not** create a `backup/` directory and never copies game files.
-It is Steam-only, and "Verify integrity of game files" is always available — that
-is a sufficient safety net.
+### Safety Model: Zero Backups, Exact Reversal & Normalization
 
-What replaces backups is **exact reversal**:
+This tool **does not create a `backup/` directory and never stores copies of game files**. Because this is a Steam-specific tool, Steam's built-in "Verify integrity of game files" serves as the definitive safety net.
 
-- Every patch can be undone from the patched bytes alone, with no external copy.
-- Applying reads the live file, reverses everything of ours already in it, layers
-  on what the configuration asks for, and writes once. Applying twice equals
-  applying once, and changing a setting replaces rather than accumulates.
-- A file that is neither vanilla nor a combination this tool can explain — a
-  third-party tool has been there — is **refused outright**, with a pointer to
-  Steam verify. Never guessed at, never partially written.
-- A file whose contents would not change is not rewritten at all.
+Backups are replaced by **Exact Reversal**:
 
-The self-test verifies, for every patch independently, that vanilla → apply →
-reverse returns the exact original bytes. That is the only guarantee standing in
-for backups, so it is checked against real game files, not just synthetic ones.
+- **Byte-Exact Reversal**: Every modification can be reversed from the patched bytes back to vanilla without external copies.
+- **Normalize-then-Apply**: Every operation reads the live file, reverses all detected toolkit patches (normalizing back to vanilla), layers the requested settings, and performs a single atomic write.
+- **Unrecognised Protection**: Files modified by third-party tools or corrupted are **refused outright**, prompting the user to verify files via Steam.
+- **Zero Unnecessary Writes**: If normalized and reapplied bytes are identical to live bytes, disk writes are skipped entirely.
 
-### Installing and using
+---
 
-Requires Windows 10/11, the .NET 10 Desktop Runtime, and the Steam edition.
+### Requirements & Usage
 
-Download `CKToolkit.exe` from Releases and run it from anywhere — it does not
-need to live in the game directory. With no arguments it opens the GUI:
+- **Requirements**: Windows 10 / 11 (x64), [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0), Steam edition of *Celtic Kings: Rage of War*.
+- **Quick Start**:
+  1. Download `CKToolkit.exe` from the latest Release.
+  2. Run from anywhere (does not need to be placed inside the game folder).
+  3. Running with no arguments opens the GUI:
+     ```cmd
+     CKToolkit.exe
+     ```
+  4. Five tabs: **Performance / Language / Trainer / Profiler / About**, with a Traditional Chinese / English toggle in the top-right corner.
+  5. Select desired options (e.g. 2K 2560x1440 or 4K 3840x2160, Traditional Chinese language pack, Trainer options) and click "Apply".
+  6. **Launch directly from Steam or standard shortcut** — 2K/4K and all patches are statically applied to game files, no background utility needed!
+  7. Click "Restore" at any time to return all files to byte-exact vanilla.
 
-```
-CKToolkit.exe
-```
+#### Diagnostics & Background Watcher (Optional)
 
-Five tabs — Performance, Language, Trainer, Profiler, About — with an
-English/Chinese switch in the top right. Tick what you want, press Apply. Press
-Restore to put everything back.
+Includes an embedded 32-bit native runtime helper `ckperf.dll` (embedded in the exe, zero disk footprint):
+- **Launch Game with Diagnostics**: Launches the game and injects crash prevention and telemetry hooks before the entry point.
+- **Attach to Running Game**: Attach diagnostic and recovery layers to an already running instance.
+- **Watch & Auto-Attach**: Background watcher that automatically hooks into game instances launched directly from Steam.
 
-### Adding a language
+---
 
-Language packs are data, not code. Create `langpacks/<id>/` next to the
-executable with a `pack.json` and the translation JSON files — see the Chinese
-section above for the schema.
+### Language Pack System
 
-Declare in `ranges` only the characters that must exist regardless of what the
-translation happens to contain — punctuation, symbols, kana. Do not list large
-script blocks: the characters actually used are scanned out of the translation
-text and rasterised automatically. Declaring the whole CJK block once produced
-20,992 glyphs in each of 12 fonts and inflated `local.pak` from 4.8MB to 24.3MB,
-where roughly 2,900 glyphs were needed.
+Language packs are purely data-driven. Adding a new language requires zero code changes.
 
-To start a new translation, export a skeleton:
-
-```
-CKToolkit.exe lang export-template --out .\my-language
+#### 1. Export Translation Template
+Click "📤 Export Template..." in the Language tab or run via CLI:
+```cmd
+CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
 ```
 
-### The CLI is for AI agents
-
-The command line is **not** the intended interface for people — it exists so that
-AI agents can drive the tool. Every command is non-interactive, never prompts,
-and speaks a stable JSON envelope under `--json`.
-
+#### 2. `pack.json` Structure Example
+```json
+{
+  "id": "ja-JP",
+  "name": "Japanese",
+  "nativeName": "日本語",
+  "version": "1.0.0",
+  "gameLangFolder": "JAPANESE",
+  "gameLangKey": "japanese",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "Meiryo",
+    "fallbackFaces": ["MS Gothic"],
+    "ranges": ["3000-303F", "3040-309F", "30A0-30FF", "FF01-FF5F"]
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": ["campaign-tutorial.json"]
+  }
+}
 ```
-CKToolkit.exe status  [--json]
-CKToolkit.exe apply   [--json]
-CKToolkit.exe restore --all [--json]
-CKToolkit.exe verify  [--json]
-CKToolkit.exe perf get|set ...
-CKToolkit.exe lang list|install|uninstall|export-template ...
+
+#### 3. Import Language Pack
+Click "📥 Import Pack..." in the Language tab, or via CLI:
+```cmd
+CKToolkit.exe lang import --src .\my-language [--overwrite]
+```
+
+---
+
+### Trainer Feature Overview
+
+Supports 17 cheats and dozens of gameplay balance tweaks:
+
+- **Economy & Base**: Fill Gold, Fill Food, Population Boost, Max Loyalty, Instant Production.
+- **Combat & Armies**: Heal Army, Buff Army, Repair Buildings, Smite Enemies.
+- **Vision**: Reveal Map, Toggle Fog.
+- **Unit & Item Spawning**:
+  - **Spawn Unit (`spawn_unit`)**: Spawn chosen units at cursor with custom count, level (1–100), and equipment loadout.
+  - **Cycle Unit (`cycle_unit`)**: Hotkey to cycle through available unit types.
+  - **Spawn Item (`spawn_item`)**: Spawn item bags at cursor containing any of the 23 game items / artifacts.
+  - **Cycle Item (`cycle_item`)**: Hotkey to cycle through available items.
+- **Set Selected Unit Level (`set_selected_level`)**: Instantly set the selected unit or hero army to any level (1–1000).
+- **Graphical Parameter Dialog**: Clean 3-column aligned grid with item ability descriptions and recommended gear presets (Godly Gear, Max ATK, Max DEF).
+- **Key Remapping**: Comprehensive keyboard and Numpad key binding support.
+
+---
+
+### CLI for AI Agents & Automation
+
+Designed specifically for AI coding agents and automated pipelines. Non-interactive, no prompts, stable `--json` envelope:
+
+```cmd
+CKToolkit.exe status  [--json]              Check game state and applied patches
+CKToolkit.exe apply   [--json]              Apply configured patches
+CKToolkit.exe restore --all [--json]        Normalize and restore files to vanilla
+CKToolkit.exe verify  [--json]              Read-only verification (zero writes)
+CKToolkit.exe perf get|set ...              Performance & resolution settings
+CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
 CKToolkit.exe profile --seconds <n> --hz <n> --out <file>
-CKToolkit.exe --game <dir>
+CKToolkit.exe run [--plain|--watch|--attach] Launch or attach with diagnostics
+CKToolkit.exe --game <dir>                  Override game directory (global flag)
 ```
 
-Envelope:
-
+JSON output envelope format:
 ```json
-{ "ok": true, "command": "status", "data": {}, "warnings": [], "errors": [] }
+{
+  "ok": true,
+  "command": "status",
+  "data": { ... },
+  "warnings": [],
+  "errors": []
+}
 ```
 
-Exit codes: `0` success, `1` general failure, `2` bad arguments, `3` game not
-found, `4` file state unrecognised (run Steam verify), `5` file locked.
+- **Exit Codes**: `0` Success, `1` General Failure, `2` Invalid Arguments, `3` Game Not Found, `4` Unrecognised File State (run Steam verify), `5` File Locked.
 
-Output is always UTF-8, regardless of the console code page.
+---
 
-### Known limits
+### Building and Testing
 
-- **Steam edition only.** Every address is specific to that build of the
-  executable; each is verified before patching and mismatches are refused.
-- **HD tops out at 1920x1080.** 2048x1152 and above reach the main menu but crash
-  on entering gameplay, and each crash writes the resolution setting back to 0.
-  The machinery accepts any size; the shipped default is conservative.
-- **The profiler is read-only with respect to the game**: it suspends a thread,
-  reads EIP, and resumes. Nothing is injected and nothing is written into the
-  game's memory.
-
-### Building and testing
-
-```
+```cmd
 dotnet build CKToolkit.sln -c Release
-dotnet run --project src/CKToolkit.SelfTest
+dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
 ```
 
-Some of the self-test checks our understanding of the file formats against **real vanilla
-game files** — directory ordering, the stock language list, byte-exact APF font reversal.
-Those are game content and are not in the repository, so point at them with:
-
-```
-set CKTOOLKIT_VANILLA_DIR=D:\path\to\vanilla
+To validate format handling against authentic game files, set the environment variable:
+```cmd
+set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ```
 
-That directory needs `local.pak.orig` and `data.pak.orig`, copied from a Steam-verified
-install. Without it those checks skip and the rest of the suite still passes.
+---
 
-This is worth stressing: the hardest bugs in this project — a language pack that installed
-correctly yet showed English, a restored pak four bytes short, a vanilla game being refused
-outright — **all passed the synthetic tests**. Only real files exposed them. Set the variable
-before touching anything to do with paks, fonts or INI files.
+### Licence & Credits
 
-### Licence and credits
-
-MIT. Translation by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
-
-Not affiliated with Haemimont Games or the publisher. No game files are
-distributed here.
+- Released under the **MIT License**.
+- Traditional Chinese localization created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
+- This is an unofficial community project not affiliated with Haemimont Games or the publisher. No copyrighted game binaries are distributed in this repository.

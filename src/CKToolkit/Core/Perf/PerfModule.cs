@@ -33,8 +33,12 @@ public sealed class PerfModule : IPatchModule
 
         // 3. HiRes ZoomMap Tables (.ckhr 節區搬遷)
         bool hiresEnabled = config.Perf.Hires >= 1600;
-        uint maxDim = hiresEnabled ? (uint)config.Perf.Hires : 1600u;
+        var (resW, resH) = ParseDimensions(config.Perf.Resolution, 1920, 1080);
+        uint maxDim = hiresEnabled ? Math.Max((uint)config.Perf.Hires, (uint)resW) : 1600u;
         ZoomTables.Apply(pe, hiresEnabled, maxDim);
+
+        // 3b. CVXVisible 32px Cell Grid (擴展至 4096x2400，支援 2K/4K 零塗抹零閃退)
+        CellGridPatch.Apply(pe, hiresEnabled);
 
         // 4. Resolution Writeback Suppression (0x00658FAB -> 21x NOP)
         peData = pe.ToBytes();
@@ -80,7 +84,8 @@ public sealed class PerfModule : IPatchModule
     /// </summary>
     public void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null)
     {
-        int zoomMapCapacity = config.Perf.Hires >= 1600 ? config.Perf.Hires : 1600;
+        var (resW, resH) = ParseDimensions(config.Perf.Resolution, 1920, 1080);
+        int zoomMapCapacity = config.Perf.Hires >= 1600 ? Math.Max(config.Perf.Hires, resW) : 1600;
 
         // 檢查是否有超出容量而被移除之條目
         string? iniPath = Resolutions.FindConstIniEntryName(pak);
