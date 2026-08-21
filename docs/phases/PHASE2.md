@@ -7,8 +7,7 @@ FIRST read, in this order:
   - docs/reverse-engineering-notes.md   the 67KB of accumulated findings behind every
                          address below. Consult it whenever an address needs context.
 
-The authoritative behaviour source is the predecessor C++ implementation at
-  （前身 Perf 專案，已刪除）
+The authoritative behaviour source is the predecessor C++ implementation (CK_RageOfWar 性能最佳化, now deleted),
 specifically patches.cpp, patches.h, profile.cpp, profile.h, game.cpp, config.cpp.
 Read them. Port their logic AND their comments. Every hex address and every paragraph of
 reverse-engineering rationale must survive the port - those notes cost real work to obtain

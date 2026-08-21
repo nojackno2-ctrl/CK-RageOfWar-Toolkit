@@ -5,11 +5,11 @@ FIRST read, in this order:
   - docs/SPEC.md         sections 3, 4, 6 and 10
   - AI_HANDOFF.md        current state
 
-Authoritative behaviour sources, both read-only references:
-  （前身 Lang 專案，已刪除）   (C# .NET FW 4.8)
+Authoritative behaviour sources (predecessor projects, now deleted):
+  CK_RageOfWar 中文化 — C# .NET FW 4.8:
       ApfFont.cs  GdiFont.cs  FontBuilder.cs  LocXml.cs  Translations.cs  PakFile.cs  Patcher.cs
-  （前身 ckpatch.py，已遷入 tools/）  plus tools\apf.py, gdifont.py,
-      locxml.py, makefont.py, hmmpak.py                                  (Python oracle)
+  CK_RageOfWar 中文化 — Python oracle:
+      ckpatch.py, tools/apf.py, gdifont.py, locxml.py, makefont.py, hmmpak.py
 
 Port their logic and their comments. Never modify anything under the predecessor directories.
 

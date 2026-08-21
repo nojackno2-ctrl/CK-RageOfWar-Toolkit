@@ -1,0 +1,40 @@
+﻿{
+  "id": "zh-CN",
+  "name": "Simplified Chinese",
+  "nativeName": "简体中文",
+  "version": "1.0.0",
+  "authors": [
+    "nojackno2-ctrl",
+    "CKToolkit Team"
+  ],
+  "gameLangFolder": "SCHINESE",
+  "gameLangKey": "schinese",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "微软雅黑",
+    "fallbackFaces": [
+      "Microsoft YaHei",
+      "SimHei",
+      "SimSun"
+    ],
+    "ranges": [
+      "00B7",
+      "2014-2015",
+      "2026",
+      "3000-303F",
+      "FF01-FF5F",
+      "FF61",
+      "FFE0-FFE1",
+      "FFE5"
+    ],
+    "sizeAdjust": 0
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": [
+      "campaign-tutorial.json",
+      "campaign-celtic-kings-adventure.json"
+    ]
+  }
+}

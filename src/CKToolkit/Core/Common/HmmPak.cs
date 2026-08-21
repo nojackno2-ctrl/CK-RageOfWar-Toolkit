@@ -26,8 +26,7 @@ public sealed class HmmPak
     /// <summary>pak 內的檔名一律以 latin-1 存放。</summary>
     public static readonly Encoding PakEncoding = Encoding.Latin1;
 
-    private static readonly byte[] Magic =
-        [.. "HMMSYS PackFile\n"u8.ToArray(), 0x1A];
+    private static ReadOnlySpan<byte> Magic => "HMMSYS PackFile\n\x1a"u8;
 
     public const int HeaderSize = 0x28;
 

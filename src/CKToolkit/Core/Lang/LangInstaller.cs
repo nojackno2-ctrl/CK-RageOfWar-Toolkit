@@ -1,8 +1,9 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Lang;
 
@@ -69,6 +70,18 @@ public static class LangInstaller
 
         string templateLang = string.IsNullOrWhiteSpace(pack.Meta.TemplateLang) ? "GERMAN" : pack.Meta.TemplateLang.ToUpperInvariant();
         string targetLang = pack.Meta.GameLangFolder.ToUpperInvariant();
+
+        // 若模板語言為 ENGLISH 但 local.pak 中無 ENGLISH\*.XML 翻譯表（如 Steam 原版），
+        // 回退使用第一個包含翻譯表的官方語言（如 GERMAN）作為結構底本
+        if (templateLang.Equals("ENGLISH", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!HasTranslationTables(localPak, "ENGLISH"))
+            {
+                var detectedStock = DetectStockLanguages(localPak);
+                string? fallback = FindStructureTemplateLanguage(localPak, detectedStock);
+                templateLang = !string.IsNullOrEmpty(fallback) ? fallback : "GERMAN";
+            }
+        }
 
         log?.Invoke($"產生語言檔案 (來源模板: {templateLang}, 目標資料夾: {targetLang})...");
 
@@ -293,7 +306,77 @@ public static class LangInstaller
     }
 
     /// <summary>
+    /// 偵測 local.pak 中實際存在之官方語言清單。
+    /// 依據 pak 內部真實存在的路徑列舉，預設以 ENGLISH 優先，其餘依字母排序。
+    /// </summary>
+    public static List<string> DetectStockLanguages(HmmPak localPak)
+    {
+        var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string name in localPak.Names())
+        {
+            string[] parts = name.Split('\\');
+            if (parts.Length == 0) continue;
+
+            if (StockLanguages.Contains(parts[0]))
+            {
+                detected.Add(parts[0].ToUpperInvariant());
+            }
+            else if (parts.Length > 2 && NonLanguageRoots.Contains(parts[0]) && StockLanguages.Contains(parts[2]))
+            {
+                detected.Add(parts[2].ToUpperInvariant());
+            }
+        }
+
+        return detected
+            .OrderBy(lang => lang.Equals("ENGLISH", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(lang => lang, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// GUI 匯出清單：非英文語系本身必須有翻譯表；ENGLISH 可借用任一官方翻譯表的結構。
+    /// </summary>
+    public static List<string> DetectExportableStockLanguages(HmmPak localPak)
+    {
+        List<string> detected = DetectStockLanguages(localPak);
+        bool hasAnyTables = detected.Any(language => HasTranslationTables(localPak, language));
+        return detected.Where(language =>
+                language.Equals("ENGLISH", StringComparison.OrdinalIgnoreCase)
+                    ? hasAnyTables
+                    : HasTranslationTables(localPak, language))
+            .ToList();
+    }
+
+    private static string? FindStructureTemplateLanguage(HmmPak localPak, IReadOnlyCollection<string> detected)
+    {
+        // GERMAN 是本工具歷來使用且已完整驗證的結構底本；只有它不存在時才依序回退。
+        string[] preferred = ["GERMAN", "FRENCH", "BULGARIAN", "SPANISH", "ITALIAN", "RUSSIAN"];
+        return preferred.FirstOrDefault(language =>
+                   detected.Contains(language, StringComparer.OrdinalIgnoreCase) &&
+                   HasTranslationTables(localPak, language))
+               ?? detected.FirstOrDefault(language =>
+                   !language.Equals("ENGLISH", StringComparison.OrdinalIgnoreCase) &&
+                   HasTranslationTables(localPak, language));
+    }
+
+    private static bool HasTranslationTables(HmmPak localPak, string language)
+    {
+        foreach (string name in localPak.Names())
+        {
+            string[] parts = name.Split('\\');
+            bool belongsToLanguage =
+                (parts.Length > 0 && parts[0].Equals(language, StringComparison.OrdinalIgnoreCase)) ||
+                (parts.Length > 2 && parts[2].Equals(language, StringComparison.OrdinalIgnoreCase));
+            if (!belongsToLanguage || !name.EndsWith(".XML", StringComparison.OrdinalIgnoreCase)) continue;
+            if (LocXml.IsTranslationTable(localPak.Read(name))) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 從遊戲 local.pak 既有語系匯出未翻譯之語言包骨架範本 (SPEC.md §6.2)。
+    /// 翻譯資料模型以英文原文為穩定 key/source；預設從 ENGLISH 匯出（value 亦預填英文）。
+    /// 若選取其他官方語言，key 仍是英文原文，value 預填該官方語言之 result（缺少時回退英文）。
     /// </summary>
     public static void ExportTemplate(
         HmmPak localPak,
@@ -301,8 +384,35 @@ public static class LangInstaller
         string outDir,
         Action<string>? log = null)
     {
+        string tLang = string.IsNullOrWhiteSpace(templateLang) ? "ENGLISH" : templateLang.Trim().ToUpperInvariant();
+        var detectedLanguages = DetectStockLanguages(localPak);
+
+        if (!detectedLanguages.Contains(tLang, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(Strings.Get("Error_LangExportLangNotFound", tLang));
+        }
+
         Directory.CreateDirectory(outDir);
-        string tLang = string.IsNullOrWhiteSpace(templateLang) ? "GERMAN" : templateLang.ToUpperInvariant();
+
+        bool isEnglishSelected = tLang.Equals("ENGLISH", StringComparison.OrdinalIgnoreCase);
+
+        // 決定要掃描哪個語系的 XML 來萃取翻譯條目
+        string tableScanLang = tLang;
+        if (isEnglishSelected)
+        {
+            if (!HasTranslationTables(localPak, "ENGLISH"))
+            {
+                // Steam 版 local.pak 的 XML 結構位於 GERMAN / FRENCH / BULGARIAN
+                string? fallback = FindStructureTemplateLanguage(localPak, detectedLanguages);
+                if (string.IsNullOrEmpty(fallback))
+                    throw new InvalidOperationException(Strings.Get("Error_LangExportNoTranslationTables"));
+                tableScanLang = fallback;
+            }
+        }
+        else if (!HasTranslationTables(localPak, tLang))
+        {
+            throw new InvalidOperationException(Strings.Get("Error_LangExportSourceHasNoTables", tLang));
+        }
 
         var buckets = new SortedDictionary<string, SortedDictionary<string, string>>(StringComparer.Ordinal);
 
@@ -310,11 +420,11 @@ public static class LangInstaller
         {
             string[] parts = entry.Name.Split('\\');
             string bucket;
-            if (parts[0].Equals(tLang, StringComparison.OrdinalIgnoreCase))
+            if (parts[0].Equals(tableScanLang, StringComparison.OrdinalIgnoreCase))
             {
                 bucket = "ui";
             }
-            else if (parts.Length > 2 && parts[2].Equals(tLang, StringComparison.OrdinalIgnoreCase))
+            else if (parts.Length > 2 && parts[2].Equals(tableScanLang, StringComparison.OrdinalIgnoreCase))
             {
                 bucket = "campaign-" + parts[1].ToLowerInvariant().Replace(' ', '-');
             }
@@ -337,9 +447,18 @@ public static class LangInstaller
                     buckets[bucket] = map;
                 }
 
-                if (!map.ContainsKey(src))
+                // 英文模式：key 與 value 均為英文原文
+                // 其他官方語言模式：key 為英文原文，value 預填該官方語言之 result (缺少時回退英文)
+                if (isEnglishSelected)
                 {
-                    map[src] = string.Empty;
+                    map[src] = src;
+                }
+                else
+                {
+                    string val = attrs.TryGetValue("result", out string? r) && !string.IsNullOrWhiteSpace(r)
+                        ? r
+                        : src;
+                    map[src] = val;
                 }
             }
         }
@@ -374,10 +493,7 @@ public static class LangInstaller
             byte[] helpXml = localPak.Read(@"ENGLISH\HELP.XML");
             foreach (string seg in LocXml.HelpSegments(helpXml))
             {
-                if (!helpSegs.ContainsKey(seg))
-                {
-                    helpSegs[seg] = string.Empty;
-                }
+                helpSegs[seg] = seg;
             }
 
             string helpPath = Path.Combine(outDir, "help.json");
@@ -386,6 +502,7 @@ public static class LangInstaller
         }
 
         // 產生 pack.json 骨架
+        string packTemplateLang = isEnglishSelected ? tableScanLang : tLang;
         var stubMeta = new LanguagePackMeta
         {
             Id = "new-lang",
@@ -395,7 +512,7 @@ public static class LangInstaller
             Authors = ["Translator Name"],
             GameLangFolder = "CUSTOM",
             GameLangKey = "custom",
-            TemplateLang = tLang,
+            TemplateLang = packTemplateLang,
             Font = new FontMeta
             {
                 Face = "Arial",
@@ -413,7 +530,7 @@ public static class LangInstaller
 
         string stubJson = JsonSerializer.Serialize(stubMeta, jsonOpts);
         File.WriteAllText(Path.Combine(outDir, "pack.json"), stubJson, Utf8NoBom);
-        log?.Invoke($"  {"pack.json",-35} 語言包設定檔骨架");
+        log?.Invoke($"  {"pack.json",-35} 語言包設定檔骨架 (模板: {packTemplateLang})");
         log?.Invoke($"語言包範本已成功匯出至：{outDir}");
     }
 

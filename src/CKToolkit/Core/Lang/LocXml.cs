@@ -66,8 +66,26 @@ public static partial class LocXml
     public static bool IsTranslationTable(byte[] data)
     {
         int n = Math.Min(data.Length, 64);
-        string head = Encoding.ASCII.GetString(data, 0, n);
-        return head.IndexOf("<translationtable", StringComparison.OrdinalIgnoreCase) >= 0;
+        var span = data.AsSpan(0, n);
+        ReadOnlySpan<byte> target = "<translationtable"u8;
+        if (span.Length < target.Length) return false;
+
+        for (int i = 0; i <= span.Length - target.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < target.Length; j++)
+            {
+                byte b = span[i + j];
+                byte lower = (b >= (byte)'A' && b <= (byte)'Z') ? (byte)(b + 32) : b;
+                if (lower != target[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return true;
+        }
+        return false;
     }
 
     public static IEnumerable<Dictionary<string, string>> Entries(byte[] data)

@@ -3,6 +3,7 @@
 **/bin/
 **/obj/
 *.user
+*.obj
 *.suo
 dist/
 publish/
@@ -17,6 +18,9 @@ cktoolkit.json
 ckprofile.txt
 *.orig
 *.superseded
+
+# Scratch working data (intermediate translation build artifacts)
+scratch/
 
 # Third-party archives (licence forbids redistribution)
 *.zip

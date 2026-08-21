@@ -1,4 +1,5 @@
 using CKToolkit.Core.Common;
+using CKToolkit.Core.Runtime;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -37,6 +38,11 @@ public sealed class MainForm : Form
     private readonly Button _apply = new();
     private readonly Button _restore = new();
     private readonly Button _check = new();
+    private readonly Button _diagLaunch = new();
+    private readonly Button _diagAttach = new();
+    private readonly Button _diagWatch = new();
+    private readonly Label _diagHint = new();
+    private CancellationTokenSource? _watchCancel;
     private readonly Label _operationStatus = new();
     private readonly TextBox _log = new();
 
@@ -45,6 +51,7 @@ public sealed class MainForm : Form
         _config = ToolkitConfig.Load();
         Strings.Language = _config.UiLanguage;
         InitializeComponent();
+        _languagePage.GameDirProvider = () => _gamePath.Text.Trim();
         LoadConfigurationIntoControls();
         ApplyLanguage();
         _initialising = false;
@@ -103,8 +110,12 @@ public sealed class MainForm : Form
         panel.SetColumnSpan(_subtitle, 3);
 
         _uiLanguage.DropDownStyle = ComboBoxStyle.DropDownList;
-        _uiLanguage.Width = 96;
-        _uiLanguage.Items.AddRange([new LanguageChoice("zh-TW", "中文"), new LanguageChoice("en", "EN")]);
+        _uiLanguage.Width = 110;
+        _uiLanguage.Items.AddRange([
+            new LanguageChoice("zh-TW", "繁體中文"),
+            new LanguageChoice("zh-CN", "简体中文"),
+            new LanguageChoice("en", "English")
+        ]);
         _uiLanguage.SelectedIndexChanged += (_, _) => ChangeUiLanguage();
         panel.Controls.Add(_uiLanguage, 4, 0);
 
@@ -178,6 +189,28 @@ public sealed class MainForm : Form
         actions.Controls.AddRange([_apply, _restore, _check, _operationStatus]);
         panel.Controls.Add(actions, 0, 0);
 
+        // 診斷這一列刻意獨立於「一鍵套用 / 還原原版」之外：它不寫任何遊戲檔案，
+        // 跟上面那一排的性質完全不同，混在一起會讓人以為按了會改東西。
+        var diagnostics = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false, Padding = new Padding(0, 0, 0, 8)
+        };
+        ConfigureActionButton(_diagLaunch, Color.White, Color.FromArgb(21, 94, 117));
+        ConfigureActionButton(_diagAttach, Color.White, Color.FromArgb(21, 94, 117));
+        ConfigureActionButton(_diagWatch, Color.White, Color.FromArgb(21, 94, 117));
+        _diagLaunch.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: false);
+        _diagAttach.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: true);
+        _diagWatch.Click += (_, _) => ToggleWatch();
+        _diagHint.AutoSize = true;
+        _diagHint.Anchor = AnchorStyles.Left;
+        _diagHint.Margin = new Padding(18, 10, 0, 0);
+        _diagHint.ForeColor = Color.FromArgb(100, 116, 139);
+        diagnostics.Controls.AddRange([_diagLaunch, _diagAttach, _diagWatch, _diagHint]);
+        panel.RowStyles.Insert(1, new RowStyle(SizeType.AutoSize));
+        panel.RowCount = 3;
+        panel.Controls.Add(diagnostics, 0, 1);
+
         _log.Dock = DockStyle.Fill;
         _log.Multiline = true;
         _log.ReadOnly = true;
@@ -187,7 +220,7 @@ public sealed class MainForm : Form
         _log.Font = new Font("Cascadia Mono", 8.5F);
         _log.BorderStyle = BorderStyle.None;
         _log.WordWrap = false;
-        panel.Controls.Add(_log, 0, 1);
+        panel.Controls.Add(_log, 0, 2);
         return panel;
     }
 
@@ -209,7 +242,9 @@ public sealed class MainForm : Form
         _performancePage.LoadConfig(_config.Perf);
         _languagePage.LoadConfig(_config.Lang);
         _trainerPage.LoadConfig(_config.Trainer);
-        _uiLanguage.SelectedIndex = Strings.EffectiveLanguage == "zh-TW" ? 0 : 1;
+        if (Strings.EffectiveLanguage == "zh-CN") _uiLanguage.SelectedIndex = 1;
+        else if (Strings.EffectiveLanguage == "zh-TW") _uiLanguage.SelectedIndex = 0;
+        else _uiLanguage.SelectedIndex = 2;
     }
 
     private void InitialiseGamePath()
@@ -241,6 +276,10 @@ public sealed class MainForm : Form
         _apply.Text = Strings.Get("Gui_Apply");
         _restore.Text = Strings.Get("Gui_Restore");
         _check.Text = Strings.Get("Gui_Check");
+        _diagLaunch.Text = Strings.Get("Gui_Diag_Launch");
+        _diagAttach.Text = Strings.Get("Gui_Diag_Attach");
+        _diagWatch.Text = Strings.Get(_watchCancel is null ? "Gui_Diag_Watch" : "Gui_Diag_WatchStop");
+        _diagHint.Text = Strings.Get("Gui_Diag_Hint");
         _operationStatus.Text = _busy ? Strings.Get("Gui_Working") : Strings.Get("Gui_Ready");
         _performancePage.ApplyLanguage();
         _languagePage.ApplyLanguage();
@@ -339,6 +378,129 @@ public sealed class MainForm : Form
         finally { SetBusy(false); }
     }
 
+    /// <summary>
+    /// 帶診斷層啟動遊戲，或掛載到已經在跑的遊戲。
+    ///
+    /// 這條路徑<b>不寫任何遊戲檔案</b>，只動被啟動／被掛載行程的記憶體，
+    /// 所以刻意不走 <c>TryPrepareOperation</c>（那會存設定並準備寫檔）。
+    /// 但配置清單仍然要寫，否則事後拿到故障報告會不知道當時掛了什麼。
+    /// </summary>
+    private async Task LaunchWithDiagnosticsAsync(bool attachToRunning)
+    {
+        if (_busy) return;
+
+        string gameDir = _gamePath.Text.Trim();
+        if (!GamePaths.IsGameDir(gameDir))
+        {
+            ShowOperationError(Strings.Get("Error_GameNotFound"));
+            return;
+        }
+
+        SetBusy(true);
+        AppendLog(Strings.Get(attachToRunning ? "Gui_Log_DiagAttaching" : "Gui_Log_DiagLaunching"));
+        try
+        {
+            var diag = new DiagnosticsOptions();
+            ToolkitConfig snapshot = SnapshotConfiguration();
+
+            Result<RunOutcome> result = await Task.Run(() =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
+                    RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, snapshot, diag);
+                }
+                catch
+                {
+                    // 清單寫不出來不該擋住診斷本身；故障報告仍然有價值，
+                    // 只是解讀時要自己回想當時的設定。
+                }
+
+                return attachToRunning
+                    ? GameRunner.AttachToRunningGame(diag, m => AppendLog(m))
+                    : GameRunner.LaunchWithDiagnostics(gameDir, diag, m => AppendLog(m));
+            });
+
+            if (!result.Success)
+            {
+                ShowOperationError(result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "Unknown error"));
+                return;
+            }
+
+            foreach (string warning in result.Warnings) AppendLog(Strings.Get("Gui_Log_Warning", warning));
+            RunOutcome outcome = result.Value!;
+            AppendLog(Strings.Get("Gui_Log_DiagReady", outcome.ProcessId, outcome.OutputDirectory));
+            AppendLog(Strings.Get("Gui_Log_DiagFolder", outcome.OutputDirectory));
+            ShowOperationSuccess(Strings.Get("Gui_Log_DiagFolder", outcome.OutputDirectory));
+        }
+        catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
+        finally { SetBusy(false); }
+    }
+
+    /// <summary>
+    /// 開關常駐監看。
+    ///
+    /// 存在的理由是實測出來的：兩次「玩到閃退」都完全沒有資料，因為遊戲是從 Steam
+    /// 啟動的，而那條路上沒有注入點。要求人每次改用別的方式開遊戲，是把工具的缺陷
+    /// 轉嫁給使用者；讓工具自己在背景等，才是正確的分工。
+    ///
+    /// 刻意不走 SetBusy：監看是長時間執行的，把整個介面鎖住反而讓人無法按下停止。
+    /// </summary>
+    private void ToggleWatch()
+    {
+        if (_watchCancel is not null)
+        {
+            _watchCancel.Cancel();
+            return;
+        }
+
+        string gameDir = _gamePath.Text.Trim();
+        if (!GamePaths.IsGameDir(gameDir))
+        {
+            ShowOperationError(Strings.Get("Error_GameNotFound"));
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _watchCancel = cts;
+        _diagWatch.Text = Strings.Get("Gui_Diag_WatchStop");
+        AppendLog(Strings.Get("Gui_Log_WatchStarted"));
+
+        var diag = new DiagnosticsOptions();
+        ToolkitConfig snapshot = SnapshotConfiguration();
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                try
+                {
+                    Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
+                    RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, snapshot, diag);
+                }
+                catch
+                {
+                    // 清單寫不出來不該擋住監看本身。
+                }
+                GameRunner.WatchForever(diag, cts.Token, m => AppendLog(m));
+            }
+            catch (Exception ex)
+            {
+                AppendLog(Strings.Get("Gui_Log_Error", ex.Message));
+            }
+            finally
+            {
+                BeginInvoke(() =>
+                {
+                    _watchCancel = null;
+                    cts.Dispose();
+                    _diagWatch.Text = Strings.Get("Gui_Diag_Watch");
+                    AppendLog(Strings.Get("Gui_Log_WatchStopped"));
+                });
+            }
+        });
+    }
+
     private async Task RestoreAsync()
     {
         if (_busy || !GamePaths.IsGameDir(_gamePath.Text.Trim()))
@@ -401,6 +563,8 @@ public sealed class MainForm : Form
         _apply.Enabled = !busy;
         _restore.Enabled = !busy;
         _check.Enabled = !busy;
+        _diagLaunch.Enabled = !busy;
+        _diagAttach.Enabled = !busy;
         _browse.Enabled = !busy;
         _tabs.Enabled = !busy || profilerOwnsBusy;
         _operationStatus.Text = busy ? Strings.Get("Gui_Working") : Strings.Get("Gui_Ready");

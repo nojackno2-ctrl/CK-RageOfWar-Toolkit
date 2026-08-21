@@ -1,0 +1,36 @@
+﻿{
+  "id": "ja-JP",
+  "name": "Japanese",
+  "nativeName": "日本語",
+  "version": "1.0.0",
+  "authors": [
+    "CKToolkit Team"
+  ],
+  "gameLangFolder": "JAPANESE",
+  "gameLangKey": "japanese",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "Meiryo",
+    "fallbackFaces": [
+      "Yu Gothic",
+      "MS Gothic",
+      "MS PGothic",
+      "Arial Unicode MS"
+    ],
+    "ranges": [
+      "3000-303F",
+      "3040-309F",
+      "30A0-30FF",
+      "FF01-FF5F"
+    ],
+    "sizeAdjust": 0
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": [
+      "campaign-tutorial.json",
+      "campaign-celtic-kings-adventure.json"
+    ]
+  }
+}

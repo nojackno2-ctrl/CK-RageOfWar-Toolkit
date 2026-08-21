@@ -1,0 +1,32 @@
+﻿{
+  "id": "es-ES",
+  "name": "Spanish",
+  "nativeName": "Español",
+  "version": "1.0.0",
+  "authors": [
+    "CKToolkit Team"
+  ],
+  "gameLangFolder": "SPANISH",
+  "gameLangKey": "spanish",
+  "templateLang": "GERMAN",
+  "font": {
+    "face": "Segoe UI",
+    "fallbackFaces": [
+      "Arial",
+      "Tahoma"
+    ],
+    "ranges": [
+      "00A0-00FF",
+      "0100-017F"
+    ],
+    "sizeAdjust": 0
+  },
+  "files": {
+    "ui": "ui.json",
+    "help": "help.json",
+    "campaigns": [
+      "campaign-tutorial.json",
+      "campaign-celtic-kings-adventure.json"
+    ]
+  }
+}

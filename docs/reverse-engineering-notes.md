@@ -836,3 +836,574 @@ have settled immediately.
    problem needs solving (or the switch needs to happen only via a full process relaunch) before this path
    can offer anything better than "set the Windows desktop resolution yourself before launching."
 
+
+## The high-unit-count crash, root-caused (2026-08-19)
+
+First fault captured by `ckperf.dll`'s vectored exception handler. pid 35668, alive
+117 seconds (78 s user + 38 s kernel), died at 20:53:18.
+
+```
+eip 0x0068FDA6   mov dword ptr [ecx], eax     ecx = 0
+ACCESS_VIOLATION writing 0x00000000
+working set 137 MB, largest free block 2046 MB   <- NOT memory exhaustion
+```
+
+### The function
+
+`0x0068F9E0` is a script-VM command implementation (cdecl, `sub esp,0x64`, plain `ret`).
+It pops three operands off the VM operand stack -- the stack pointer lives at `[esi]`
+and each pop is `[esi] -= n; value = *[esi]` -- and resolves each to a real object via
+`0x00481A20(dword id, word type)`.
+
+**Each resolution is null-checked, and a failed resolution is deliberately recorded as a
+null pointer:**
+
+```
+0068FA0D  call 0x481a20          ; resolve reference #1
+0068FA17  cmp  eax, ebp          ; ebp == 0 here
+0068FA19  je   0x68fa27
+0068FA21  mov  [esp+0x20], eax   ; resolved   -> real pointer
+0068FA27  mov  [esp+0x20], ebp   ; unresolved -> NULL, execution continues
+```
+
+The identical shape repeats for reference #2 into `[esp+0x1C]` (`0068FA4E` / `0068FA56` /
+`0068FA5C`) and #3 into `[esp+0x18]` (`0068FA83` / `0068FA8B` / `0068FA91`).
+
+### The bug
+
+Both exit paths then dereference all three pointers **without checking**:
+
+| Range | Length | What it does |
+|---|---|---|
+| `0068FACB`–`0068FAE6` | 28 bytes | early exit: writes 0 through all three |
+| `0068FD9E`–`0068FDC5` | 40 bytes | normal exit: writes the computed results through all three |
+
+The captured fault is the first store of the normal exit, on the `[esp+0x18]` slot,
+i.e. **reference #3 failed to resolve**.
+
+So: a script that writes back into a reference which has become invalid since it was
+read takes the whole process down. The most obvious way for that to happen is a unit
+dying between the script reading it and the script writing to it. That is exactly why
+the crash gets likelier the more units are alive -- more units means more deaths per
+tick, so more chances for a captured reference to go stale mid-script.
+
+### Corroborating stack
+
+The raw stack scan puts `0x005DF460` on the stack **three times**
+(`0x005DF5EE` at +0x0074, +0x0140, +0x0258). That is the function that references
+`"WARNING: Atomic section instruction limit exceeded!"` at `.data:0x0073FC4C` -- the
+script VM's execution loop, re-entered recursively. `0x00690640` also appears twice
+(return addresses `0x00690A89` and `0x00690D1F`, its two call sites into `0x0068F9E0`).
+`0x00690A50` is visibly a VM opcode handler: it pops four operands off `[esi]` and
+forwards them as arguments.
+
+### What this rules out
+
+- **Not** memory or address-space exhaustion: 137 MB working set, 2046 MB largest free
+  block, LAA active.
+- **Not** the `FSPtrPool` fixed-capacity pool (`.data:0x00725C80`). That remains a
+  plausible cause for *other* crashes but it is not this one.
+- **Not** caused by the toolkit's tweaks directly. `hero_max_army = 2000` and
+  `pop_growth_rate = 100` raise the unit count and therefore the *probability* of
+  hitting this race, but the missing null check is the engine's.
+
+### The fix (runtime, `src/CKPerf/guard.cpp`)
+
+Both exit sequences are re-implemented in a `VirtualAlloc`'d code cave with each store
+guarded by `test reg,reg / jnz`, and every suppressed store increments a counter that is
+reported in the log and in every subsequent crash report. Original bytes are verified
+before patching; a mismatch refuses the patch outright.
+
+Skipping a store means one script variable does not receive its update. That is a much
+smaller problem than terminating the process, but it *is* a behaviour change, hence the
+counter and the `guard=0` switch.
+
+**Nothing is written to disk.** The patch exists only in the injected process, so "off"
+is simply "do not inject" -- there is no reversal path to maintain and no interaction
+with the `AGENTS.md` §2 file-patch discipline.
+
+### Second crash: same bug class, different site (2026-08-19 21:11:07)
+
+pid 31380, alive 114 seconds. `guard: 0` -- the site-specific cave from the first crash
+never fired, so that hypothesis is still unconfirmed.
+
+```
+eip 0x005D99A4   mov dword ptr [eax], esi     eax = 0
+```
+
+`0x005D9960` is a two-operand script store command. It pops a value and a reference off
+the VM stack, resolves the reference, and writes the value into the object's field:
+
+```
+005D9960  sub  esp, 8
+005D9963  mov  eax, [esp+0xC]      ; the VM stack-pointer holder
+005D9967  mov  edx, [eax]
+005D9969  add  edx, -4
+005D996C  mov  [eax], edx          ; pop the value
+005D9971  mov  esi, [ecx]          ; esi = value to store
+005D9973  add  ecx, -6
+005D9976  mov  [eax], ecx          ; pop the 6-byte reference (dword id + word type)
+005D9988  call 0x481a20            ; resolve it
+005D9990  test eax, eax
+005D9992  je   0x5D99A2            ; resolution FAILED
+005D9994  mov  edx, [esp+6]        ; field offset
+005D9998  mov  [eax+edx], esi      ; success: store into the field
+005D999B  xor  eax, eax
+005D999D  pop  esi
+005D999E  add  esp, 8
+005D99A1  ret
+005D99A2  xor  eax, eax            ; failure: destination pointer = NULL
+005D99A4  mov  [eax], esi          ; ...and store through it anyway   <-- always faults
+005D99A6  pop  esi
+005D99A7  add  esp, 8
+005D99AA  ret
+```
+
+This is `dst = ok ? &obj->field : NULL; *dst = value;` compiled literally, with the
+compiler constant-folding the null case into `xor eax,eax` + a store through it. Unlike
+the first site there is no race: **every failed resolution here kills the process.**
+
+Stack top is `0x005DF5EE` again -- the script VM loop. Memory was flat at 127 MB.
+
+### Consequence: stop patching sites, repair the fault class
+
+Two crashes, two different addresses, one shape: the engine computes a write-back
+destination that can be NULL and stores through it unchecked. Site-by-site code caves do
+not scale against that, so `src/CKPerf/nullstore.cpp` repairs the *fault* instead --
+a store into the null page from game code is decoded, skipped, and execution resumes at
+the next instruction.
+
+Deliberately narrow: writes only (a skipped read would leave a register holding garbage,
+which corrupts quietly instead of crashing loudly), null page only, game code only, and
+only plain MOV forms the length decoder is certain about. Everything else still crashes
+and still gets a full report.
+
+The mechanism is verified at startup by executing a real null store from a scratch page
+and checking that it was skipped; if that cannot be proven the repair disables itself
+rather than resuming execution at an address it may have computed wrongly.
+
+Every distinct site is recorded with a hit count and reported in the log and in every
+crash report. **That table is the actual deliverable** -- it maps every place the engine
+does this, which is what a proper per-site fix would need.
+
+### Performance observation from the same session
+
+Framerate in a real battle was 37-61 fps (frame 17-28 ms), so the average is fine -- but
+**every single second contained 3-5 frames over 50 ms, with the worst between 200 ms and
+500 ms**. The blit stayed at 0.1-0.4 ms, i.e. under 1% of the frame. Whatever causes the
+stutter is neither the framerate nor the presentation path; it is a periodic spike in the
+simulation. That is where the performance track should start.
+
+### Third session: the repair works, and the bug is much wider than two sites (2026-08-19 21:26)
+
+pid 40200, alive 97 seconds. The null-store repair fired on **eight distinct sites,
+40 stores in 1.5 seconds**, and the process kept running through all of them:
+
+| Site | Hits | Shape |
+|---|---|---|
+| `0x005D99A4` | 7 | `mov [eax], esi` |
+| `0x005D9BF2` | 15 | store |
+| `0x0068F91A` | 5 | `mov [edx], ecx` |
+| `0x0068F925` | 5 | `mov [ecx], eax` |
+| `0x0068F931` | 5 | store |
+| `0x006907E6` | 1 | `mov dword [edx], 0xFFFFFFFF` |
+| `0x006907F0` | 1 | `mov dword [ecx], 0xFFFFFFFF` |
+| `0x006907F6` | 1 | `mov dword [edx], 0xFFFFFFFF` |
+
+Four separate clusters, all reached from the script VM, all within one and a half
+seconds. This is not two unlucky functions; the engine does this everywhere it writes a
+script result back.
+
+Then it died anyway, at a **ninth** site the repair refused:
+
+```
+006908DB  mov  eax, [esp+0x14]
+006908DF  mov  ecx, [eax]        ; eax = 0  -- a READ, not a write
+006908E1  cmp  ecx, -1
+006908E4  je   0x6908EA
+006908E6  cmp  ebx, ecx
+006908E8  jge  0x6908EC
+006908EA  mov  [eax], ebx        ; and then a write through the same null pointer
+```
+
+`if (*p != -1 && value < *p) *p = value;` -- a clamp, through a pointer that is null.
+
+The repair handled writes only, on the reasoning that stepping over a load would leave
+the destination register holding garbage. That reasoning was right about *stepping over*
+and wrong about the conclusion: the correct repair for a null read is to **deliver zero**
+into the destination, which is precisely what a zero-filled page mapped at address 0
+would produce. Reads are now repaired that way, and the startup self-test proves it by
+loading through a null pointer into a register preloaded with `0xDEADBEEF` and checking
+the result is zero rather than the sentinel.
+
+Also learned: writing a half-megabyte minidump per repaired site cost more than the
+faults did. Nine of them in 1.5 seconds took the game to 9 fps. Repaired faults now get
+a text report only.
+
+### The handle table, and why every one of these crashes has the same shape
+
+`0x00481A20` is four instructions:
+
+```
+00481A20  mov eax, [esp+4]              ; handle
+00481A24  and eax, 0xFFFF               ; low 16 bits are the slot index
+00481A29  mov eax, [eax*4 + 0x798CB8]   ; return table[index]
+00481A30  ret
+```
+
+A flat **65,536-entry object pointer table at `0x00798CB8`** (256 KB, in `.data`).
+`0x00481A40` is its counterpart: it writes 0 into a slot when the object dies, and has
+56 callers. `0x00481A20` has **1,690**.
+
+So "resolution failed" simply means the slot is empty -- the object was destroyed. Every
+crash so far is a script command dereferencing a handle whose object died first.
+
+That also makes the live object count free: **count the non-empty slots**. The telemetry
+thread now does exactly that once a second, along with births and deaths computed by
+diffing against the previous sample. Deaths are the number that actually drives this bug
+class, since each death is a chance for some script to still be holding that handle.
+
+### Fourth session: the repair works, and then it hangs (2026-08-19 21:38)
+
+Sixteen sites repaired, the game survived all of them -- and then died anyway, this time
+because of the tool rather than the engine.
+
+Sites `0x005D98BF` and `0x005D98C3` are one statement, `*p += n`:
+
+```
+005D98BD  xor  eax, eax
+005D98BF  mov  ecx, [eax]     ; load  *p     -> repaired: ecx = 0
+005D98C1  add  ecx, edi       ; ecx = 0 + n
+005D98C3  mov  [eax], ecx     ; store *p     -> repaired: skipped
+```
+
+With reads answering zero and writes going nowhere, the value never advances. The script
+loop waiting for it never finishes: **no frames were rendered for five seconds** while
+those two sites took 200,000 faults each, hit the per-site cap, and became fatal.
+
+A crash had been converted into a hang and then back into a crash. Two lessons:
+
+1. **"Reads return zero" is not a safe universal answer.** It is safe for a value nobody
+   depends on, and unsafe the moment a loop's exit condition depends on it.
+2. The 200,000 cap was the proximate cause of death. A cap is still needed so a runaway
+   cannot spin forever, but it must be far above anything healthy, and crossing a warning
+   threshold has to be loud.
+
+**The fix: redirect, do not skip.** When the null pointer is in a base register, that
+register is pointed at a per-site scratch region and the instruction is *re-executed*.
+The load then reads real memory, the store lands in real memory, `*p += n` advances, and
+the loop terminates. It also removes the need to know what the instruction does -- only
+the addressing mode matters -- so read-modify-write, string and floating-point forms are
+covered without decoding any of them.
+
+Scratch is **per site**, not shared. A single shared page aliases unrelated dead objects
+so that one site's write becomes another site's read; the startup self-test caught this
+immediately when its store stub polluted what its load stub read.
+
+Also tried and rejected: asking the OS for a real zero page at address 0, which would
+make all of this unnecessary. `NtAllocateVirtualMemory` refuses with
+`STATUS_CONFLICTING_ADDRESSES` (0xC0000018). The attempt is kept in the code because it
+costs nothing and would be strictly better if a future Windows ever allowed it.
+
+### Fifth session: watcher worked, and it caught a SECOND, unrelated bug (2026-08-20)
+
+The persistent watcher attached automatically to a Steam-launched process at
+`06:35:01`, no user action beyond leaving the watch running. Trainer was **disabled**
+this session (`ckrun-config.txt`: `啟用 否`) -- no tweaks, vanilla cheat/tweak values --
+so whatever happened here happens in unmodified gameplay parameters, given enough units.
+
+**Object count climbed monotonically for the whole session and never turned around:**
+
+| Time | Live objects | Frame time |
+|---|---|---|
+| 06:35:12 | 5,352 | ~30 ms |
+| 06:35:42 | 12,767 | ~35 ms |
+| 06:36:12 | 24,054 | ~45 ms |
+| 06:36:32 | 29,279 | ~50 ms |
+| 06:36:37 | 30,645 | 105 ms |
+| 06:36:38 | 31,030 | 155 ms |
+| 06:36:40 | 31,341 (peak) | 216 ms, **2 fps** |
+
+Frame time is flat until roughly 25,000 objects, then rises sharply -- this is the first
+hard evidence for the "LAG" complaint independent of any crash, and it points at
+something whose cost scales worse than linearly with live object count (O(n log n) at
+best, plausibly O(n^2)) rather than at rendering, which stayed at 1.2-1.5 ms throughout.
+
+The null-handle repair fired 11 times across 9 sites and the game kept running through
+all of them -- the mechanism from the fourth session held up under real load, with no
+hangs and no repeat crashes at the same site (kMaxPerSite change confirmed working).
+
+**Fault #11 killed the process, and it is a different bug:**
+
+```
+faulting eip  : 0x0069305D   mov edx, [ecx+4]
+fault address : 0x61FA0004   (read from)
+region        : base 0x61FA0000  size 0x5C0000  state FREE
+```
+
+Not the null page -- a real address, correctly outside the repair's scope (it only
+touches `target < 0x10000`), so it produced a full report and killed the process exactly
+as it would have with no diagnostic layer installed. The surrounding code:
+
+```
+00693044  xor  eax, eax
+00693046  mov  ax, [esi]        ; a handle from a list node
+0069304A  call 0x481a20         ; resolve it
+00693052  test eax, eax
+00693054  jne  0x69305A         ; resolution SUCCEEDED here -- eax is a real object
+0069305A  mov  ecx, [eax+4]     ; ecx = some pointer field of the resolved object
+0069305D  mov  edx, [ecx+4]     ; FAULT: dereferencing that field
+```
+
+The handle resolved fine. The crash is in a **field of the resolved object** --
+`[eax+4]` -- holding `0x61FA0000`, a base address that was a real allocation (0x5C0000 =
+~5.75 MB, 64 KB-aligned like a `VirtualAlloc` block) and is now `FREE`. The registers at
+the fault (`ebx=080C0C0C`, `edx=0E0D0F0F`, `esi=0A0A0CB0`, `edi=05040808`) are full of
+small, uniform nibbles -- not the pattern of an uninitialised pointer, more consistent
+with the memory having been freed and its bytes since overwritten by something unrelated
+(tile data, a small-integer array) that got allocated into the same address range.
+
+This reads as a **use-after-free**, not a null-handle bug: something walks a list off a
+resolved object, and one node's secondary pointer refers to a block that has since been
+freed and reused. It is a plausible second, independent cause of "crashes when the map
+is busy" -- distinct from the null-handle class, and NOT something the current repair
+can or should touch, since the address is real and the block genuinely no longer exists.
+
+### What this session settles and what it reopens
+
+- The crash is **not** caused by extreme trainer tweaks. This session had none active.
+- The live-object census is doing its job: the crash-report line
+  `live objects : 31134 (peak this session 31134)` is the first hard number tying a
+  fault to battle scale, and the growth curve above is the first hard number tying
+  frame-time collapse to battle scale independently of any crash.
+- There are now confirmed to be (at least) two independent crash causes: the null-handle
+  class this file already repairs, and a use-after-free class this session found for the
+  first time. The next fault report needs to be read for WHICH class it is before
+  assuming the existing repair is expected to cover it.
+
+## 「拉遠視角看更大範圍地圖」的可行性 — 已結案 (2026-08-21)
+
+問題：能不能改攝影機高度／縮放主視角，讓一般遊戲畫面看到更大範圍的地圖。
+
+### 主視角無法縮放，這是引擎架構層級的限制（已確證，不是推測）
+
+三項獨立證據互相印證：
+
+1. **整支執行檔只匯入一個 GDI 輸出函式：`SetDIBitsToDevice`**（IAT `0x00706038`，
+   呼叫點 `0x0044F536`）。它的簽章沒有「目的地寬高」參數，本質是 1:1 像素搬移。
+   沒有 `StretchDIBits`、沒有 `StretchBlt`、沒有任何 DirectDraw／D3D 匯入。
+2. **字串表裡找不到任何 `Scale`**（`izz~Scale` 零命中）。
+3. **引擎預先存了五套降採樣美術**：`minimap.pak` / `outlines.pak` 內的
+   `zoom2` / `zoom4` / `zoom8` / `zoom16` / `zoom32`。產生這些路徑的程式碼在
+   `0x0045B308`：
+
+       0x0045B308  mov ecx, [eax]      ; ecx = 縮放階數
+       0x0045B30A  mov edx, 1
+       0x0045B30F  shl edx, cl         ; 1 << 階數
+       0x0045B315  shl edx, 1          ; edx = 2 << 階數 -> 2,4,8,16,32
+       0x0045B318  push str."assets/minimap/zoom%d/terrain/%s"
+
+   會預先烘焙五套降採樣圖，正是因為執行期沒有縮放器。這是反證裡最強的一項。
+
+結論：主視角要縮放＝要重寫整條 sprite 光柵化路徑，不是補丁等級的工作。
+**一般遊戲畫面想看到更多地圖，唯一的手段就是提高解析度**（見本檔 HiRes 各節；
+目前 2048x1152 已驗證乾淨，2560x1440 仍有 x≈2048 起的捲動塗抹）。
+
+### 引擎的「全圖俯瞰」模式：ZoomMap（原版就能用，不需要修改）
+
+- 官方腳本文件 `data/subai/scdoc.xml` 對 `ToggleZoomMap` 的說明就是
+  **"Zooms the main map."**
+- 註冊點 `0x00456FE0`，與 `BuildMiniMap` / `ShowZoomMap` / `HideZoomMap` 同一批，
+  走的是跟 `SetSpeed` 完全相同的腳本註冊路徑（`call 0x005DD770`），
+  所以 scdebug.xml 綁得到。
+- 實作 `0x00456420`：透過全域 ZoomMap 物件指標 `0x00776394` 的 vtable 派送
+  （`+0x10` Show／`+0x14` Hide／`+0x18` Toggle）。
+  註：`0x00776394` 就是 ZoomTables 那一節裡被稱為「row_table 後面的無關引擎資料」
+  的那個位址——現在知道它是什麼了。
+- 切換門檻是 `vxConst.ini` `[zoommap] ToggleTreshold`（原版 1200），
+  讀取點 `0x00452C86`；同一節的 `MinimapEmptyColor` 讀取點 `0x00452E64`。
+  兩者都是「必要參數」，缺了會噴 `Can't load required param : ToggleTresshold`。
+- 版面設定在 `data/interface/common/zoommap.ini`（`MinSize = 200, 220`）。
+  ZoomMap 的掃描線表 `col_table` 是**依螢幕寬度索引**（1600 欄對應 1600x1200），
+  所以它是鋪滿整個畫面寬度的模式，不是那個 200x220 的最小尺寸。
+- 縮放倍率（2/4/8/16/32）由引擎自行決定，**沒有 ZoomIn／ZoomOut 函式**，
+  字串表裡只有 Show／Hide／Toggle，所以這是二元切換，不是連續縮放。
+
+### 不需要、也不應該做成作弊項目
+
+一度在 `Cheats.cs` 加過一項 `toggle_zoomout`（一行 `ToggleZoomMap();`）想把這個模式
+綁到熱鍵上，**已移除**：使用者實測確認原版本來就能叫出這個俯瞰視角，不需要任何修改。
+上面那串位址是為了回答「主視角能不能縮放」而查的，結論（不能，只能提高解析度）
+仍然成立，位址本身留著當參考；但本工具不該重複提供遊戲已經給的功能。
+
+## 2560x1440 捲動塗抹 — 根因已定位 (2026-08-21)
+
+**結論先講：CVXVisible 的 dirty-rect 網格，每一列只有 16 bytes = 128 bits，
+一個 bit 代表 16 像素，128 x 16 = 2048。視埠內 x >= 2048 的區域沒有對應的 bit，
+永遠無法被標記為「需要重畫」，所以永遠不會被重畫。這就是塗抹。**
+
+方法：以 capstone 對磁碟上的 `Celtic kings.exe` 做線性反組譯（1,112,279 條指令），
+從 `SetDIBitsToDevice` 反推、再正向讀完 `0x00479400` / `0x0047A020` / `0x0047ABF0`
+三個函式的完整控制流。所有數字都是從指令讀出來的，不是推測。
+
+### 結構：CVXVisible+0x10 是一張 75 列 x 128 行的位元網格
+
+| 欄位 | 內容 | 證據 |
+|---|---|---|
+| `+0x10 .. +0x4BF` | 75 個 16-byte 槽位，每個槽位 = **一列的 128-bit dirty 遮罩** | 建構子 `0x00478AD0`：`mov edx,0x4B` + 每圈寫 4 個 dword、`add ecx,0x10` |
+| `+0x4C0` | dirty 旗標 | `0x0047A026` 讀、`0x004796FE` 寫 |
+| `+0x4C8 .. +0x4D7` | **目前視埠矩形（世界座標 l, t, r, b）** | `0x00479400` 拿參數逐一比對、`0x004796D3` 寫回 |
+| `+0x4D8 .. +0x4E7` | 地圖邊界（視埠的夾限值） | `0x004794EE` 起四段 clamp |
+| `+0x4E8 / +0x4F4 / +0x500` | 三個真正的 STL 容器 | 建構子 `0x00478B00`/`0x00478B1D`/`0x00478B39` 各呼叫 `0x006873E0` 初始化 |
+
+這同時修正了先前兩份文件的說法：`+0x4C8` **既不是矩形容器、也不是「普通座標數值」，
+它就是視埠矩形本身**。傍晚那次除錯器讀到的 `1692 / 17151 / 4251 / 18456`
+正是 (left, top, right, bottom)：寬 = 4251-1692 = **2559**，就是 2560 視埠；
+高 = 18456-17151 = **1305**，就是 1440 減去約 135px 的介面列。
+
+### 像素 <-> 格子的換算全部寫死為 16 像素
+
+生產端 `0x0047ABF0`（15 個呼叫點全部走這裡，是唯一的寫入者）：
+
+    0047AC53  mov edi, [ebp+0x4C8]      ; viewLeft
+    0047AC62  sub eax, edi              ; rect.left - viewLeft
+    0047AC64  sar eax, 4                ; >>4  -> startCol      <-- 格寬 16px
+    0047AC6F  mov esi, 0x7F             ; endCol 飽和值 = 127    <-- 上限
+    0047AC76  sub ecx, edi
+    0047AC78  sar ecx, 4                ; >>4  -> endCol
+    ...
+    0047AEE4  sub edx, eax              ; rect.top - viewTop
+    0047AEE6  sar edx, 4                ; >>4  -> firstRow      <-- 格高 16px
+    0047AF00  sub edx, [ebp+0x4CC]
+    0047AF07  sar edx, 4                ; >>4  -> lastRow
+
+消費端 `0x0047A020` 把 bit run 還原回像素（`0x0047A7E9` 起）：
+
+    left   = viewLeft + startCol*16
+    right  = viewLeft + endCol  *16 + 15
+    top    = viewTop  + startRow*16
+    bottom = viewTop  + (endRow+1)*16 - 1
+
+兩端一致，**格子就是 16x16 像素**。掃描端 `0x0047A0A8` 對每個槽位以
+`cmp eax,4` 掃 4 個 dword（= 128 bits），`0x0047A122 cmp esi,0x7F` 是行號上限；
+合併函式 `0x0047CA80` 是純粹的 4-dword OR。四處獨立互證：一列就是 128 bits。
+
+### 為什麼剛好是 2048、為什麼剛好是那些解析度
+
+- 行數需求 = 視埠寬 / 16，上限 **128**（4 個 dword）-> 最大寬度 **2048 px**
+- 列數需求 = 視埠高 / 16，上限 **75**（內嵌陣列格數）-> 最大視埠高 **1200 px**
+
+| 解析度 | 需要行數 | 需要列數 | 行 <=128 | 列 <=75 | 實測 |
+|---|---|---|---|---|---|
+| 1600x1200（原版上限） | 100 | 67 | 是 | 是 | 正常 |
+| 1920x1080 | 120 | 60 | 是 | 是 | 正常 |
+| 2048x1152 | **128（剛好用滿）** | 64 | 是 | 是 | 正常 |
+| 2560x1440 | 160 | 82 | **否** | **否** | 閃退（列）+ x>=2048 塗抹（行） |
+| 3840x2160 | 240 | 127 | **否** | **否** | 閃退 + 右半整片壞掉 |
+
+「2048x1152 是目前唯一驗證乾淨的高解析度」不是巧合，**它正好是這個結構的極限**。
+
+三條完全獨立的觀察在此收斂：
+1. 塗抹起點 x≈2048 == 128 x 16。
+2. sidecar 擴充的是**槽位數（列）**，所以修好了垂直方向的溢位（閃退），
+   而水平方向的塗抹原封不動 —— 症狀只剩右側，正好對應「只有一個軸被修好」。
+3. `kLimitSiteF`（把 `cmp esi,0x7F` 提高到 `g_columnCap`）確實有觸發卻毫無效果：
+   **16-byte 的槽位裡根本沒有第 128 個 bit**，把上限調高沒有東西可掃。
+
+### 溢位是「靜默丟棄」，不是記憶體損毀
+
+行號 >= 128 時，`0x0047AD69` 起那串展開四層的 cascade 會在第四層
+（`0x0047AE7A`）把四個 dword 全部寫 0 後結束，不會越過槽位邊界。
+所以水平溢位只會**讓那塊區域從此不再被重畫**，不會像先前垂直溢位那樣寫爆物件。
+這也解釋了為什麼 sidecar 上線後「不再閃退但畫面照壞」。
+
+方向相依的原因：`0x00479400` 的架構是「捲動時搬移已畫好的像素，再把新露出的
+L 形長條標記為 dirty」（搬移在 `0x00469A90`，標記在 `0x004798CC` 等 5 處
+`call 0x47ABF0`）。往右捲時新露出的長條落在 x≈2560 -> 行號 160 -> 被丟棄；
+往左捲時落在 x≈0 -> 行號 0 -> 正常。
+
+### 已排除的、不要再回頭查的東西
+
+- `SetDIBitsToDevice` 輸出路徑（幾何正確，本來就沒問題）
+- `0x00798C5C` 那塊 2048x2048 的 16x16 block 遮罩表面（`0x0047D9E0` 建構，
+  大小 = w*h/2048 bytes，即每個 16x16 block 一個 bit）。它**是**參數化的、
+  已被 `hires.cpp` 放大到 2560，也確實生效 —— 它只是不是瓶頸。
+  附帶記錄：`0x0047DD9C` 還有第三個同型別 2048x2048 建構點（inline 版，
+  在 `0x0047DD20` 內），`hires.cpp` 沒有處理，但與主視埠塗抹無關。
+- `+0x4C8` 是矩形容器的模型（錯的，它是視埠矩形）
+- sidecar 容量、`g_columnCap`、`g_surfaceWidth` 三輪修補（無害但無效）
+
+### 修法評估
+
+**方案 A（已實作於 CKPerf，見本節末）— 把格子從 16px 改成 32px，只動 9 個 byte。**
+
+格數上限（128 行 x 75 列）不變，只把換算的位移量從 4 改成 5：
+128 x 32 = **4096 px 寬**、75 x 32 = **2400 px 高**，連 3840x2160 都涵蓋，
+而且 4K 只需要 240/2 = 120 行、2025/32 = 64 列，**連 CVXVisible sidecar 都不再需要**。
+
+| 位址 | 原始 byte | 改成 | 意義 |
+|---|---|---|---|
+| `0x0047AC64` | `C1 F8 04` | `C1 F8 05` | startCol = dx>>5 |
+| `0x0047AC78` | `C1 F9 04` | `C1 F9 05` | endCol |
+| `0x0047AEE6` | `C1 FA 04` | `C1 FA 05` | firstRow |
+| `0x0047AF07` | `C1 FA 04` | `C1 FA 05` | lastRow |
+| `0x0047A7F1` | `C1 E3 04` | `C1 E3 05` | left = viewLeft + col*32 |
+| `0x0047A802` | `C1 E3 04` | `C1 E3 05` | right |
+| `0x0047A805` | `8D 5C 2B 0F` | `8D 5C 2B 1F` | right 的 +15 改 +31 |
+| `0x0047A814` | `C1 E3 04` | `C1 E3 05` | top |
+| `0x0047A822` | `C1 E1 04` | `C1 E1 05` | bottom |
+
+`0x0047A825` 的 `-1`、`0x0047A122` 的 `cmp esi,0x7F`、`0x0047AC6F` 的
+`mov esi,0x7F`、以及所有 `add reg,0x10`（那些是 16-byte 的槽位/矩形步進，
+不是像素）**都不要動**。上述 9 處以外，`0x00478000..0x0047C600` 範圍內
+所有 `shl/sar ,4` 已逐一分類確認：其餘全部是槽位定址（要保持 x16 bytes），
+且該範圍內沒有其他 `lea [reg*16]` / `imul ,16` / `and ,0xF` 形式的換算。
+
+代價：dirty 區域的粒度變粗（32px 對齊），每幀重畫面積略增；
+下游只把這些矩形當一般矩形用（`0x0047A8C0` 逐個畫，步進 `add ebp,0x10`），
+沒有 16px 對齊的假設，32px 對齊是 16px 對齊的子集，安全。
+
+**方案 B — 把每列遮罩加寬（16 -> 20 或 32 bytes）。** 需要重寫
+`0x0047ACC1` / `0x0047AD69` / `0x0047A17A` 三段完全展開的四層 cascade、
+`0x0047A0A8` 的 `cmp eax,4` 掃描迴圈、`0x0047A724..0x0047A7A4` 的
+`[ebx-8]/[ebx-4]/[ebx]/[ebx+4]` 合併迴圈，以及所有槽位步進。
+等於重寫這三個函式，不值得。
+
+**方案 C — 用 `byte [0x008AF118]` 強制每幀全畫面重繪：無效。**
+`0x0047A041` 那條路徑吐出的是**舊視埠矩形**，接著一樣要經過 `0x0047ABF0`
+重新投影進新網格，一樣在第 127 行被截斷。（該旗標唯一的寫入點是
+`0x005E7D5A`，看起來是主控台開關。）
+
+### 可以拿來否證這份結論的預測
+
+1. **2560x1152** 應該仍然塗抹（寬度才是問題），而 **2048x1440** 應該不塗抹
+   但會踩到列上限（沒有 sidecar 就閃退）。
+2. 塗抹的左邊界應該精準落在視埠左緣 +2048 px，不隨解析度變化 ——
+   3840x2160 下也應該是 x=2048，而不是按比例往右移。
+3. 往左捲不塗抹、往右捲塗抹。
+
+### 方案 A 的實作（`src/CKPerf/hires.cpp`，2026-08-21）
+
+`kCellSites` 九個站點的 runtime 重寫，與既有的 sidecar 並存但**完全獨立**：
+sidecar 修的是列軸（閃退），這個修的是行軸（塗抹），兩者門檻不同、
+驗證與拒絕互不影響、log 也分開報告。
+
+- 啟用條件 `g_capacity > 2048`（也就是 128 x 16 = 2048 蓋不住的寬度才動），
+  上限 `128 * 32 = 4096`，超過就 `RefusedCapacity`。
+  1920x1080 與 2048x1152 一個 byte 都不會被改，已驗證乾淨的基線不受影響。
+- 特意獨立於 sidecar 的 2400 門檻：2240 這種寬度會塗抹卻在 2400 以下，
+  舊架構下 `HighResolutionInstallDeferred()` 會整個提早 return，
+  所以把它改成「兩個修補各自 prepared / 各自安裝」，共用同一個
+  suspend + `VirtualProtect` 視窗；原本的 sidecar 主體抽成
+  `InstallSidecarPatches()`，內容一行未改。
+- 九個站點的原始位元組逐一比對，任一不符就只停用這個修補（不影響 sidecar），
+  不寫入任何 byte。
+- 連帶更正了 `g_columnCap` 與 site F 兩段當時寫錯的註解：
+  提高 `cmp esi,0x7F` 不可能修好行軸，因為 16-byte 槽位裡沒有第 128 個 bit。
+
+交叉驗證工具 `tools/perf/verify_cell_sites.py`（零寫入）：對執行檔套用同一份
+重寫到記憶體副本，確認九處原始位元組正確、每處反組譯成預期指令且長度不變、
+只有 9 個 byte 改動、兩個函式（707 + 279 條指令）的指令邊界完全沒有位移。
+目前對 Steam 版執行檔全部通過。
+
+**已於 2026-08-21 經使用者實機遊玩驗證通過。** 2560x1440（2K）與 3840x2160（4K）下進關卡零閃退、向右向下捲動鏡頭無任何塗抹殘留與破圖，畫面 100% 渲染正確（幀率維持 75~98 FPS）！方案 A（9-byte 32px cell 換算）徹底解決了原版 2048px 寬度上限的捲動塗抹問題，全線高解析度正式驗收通過。

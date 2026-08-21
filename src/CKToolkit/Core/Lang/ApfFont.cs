@@ -414,6 +414,7 @@ public sealed class ApfFont
     public static byte[] RleDecode(byte[] data, int pixelCount)
     {
         var outBuf = new byte[pixelCount];
+        var span = outBuf.AsSpan();
         int p = 0;
         foreach (byte b in data)
         {
@@ -422,8 +423,13 @@ public sealed class ApfFont
             if (b < 0x20) { value = 0; count = (b & 0x1F) + 1; }
             else if (b >= 0xE0) { value = MaxLevel; count = (b & 0x1F) + 1; }
             else { value = (byte)(b >> 4); count = (b & 0x0F) + 1; }
-            for (int i = 0; i < count && p < pixelCount; i++)
-                outBuf[p++] = value;
+
+            int fill = Math.Min(count, pixelCount - p);
+            if (fill > 0)
+            {
+                span.Slice(p, fill).Fill(value);
+                p += fill;
+            }
             if (p >= pixelCount) break;
         }
         return outBuf; // 原檔中極少數字形資料被截斷，其餘補 0
@@ -431,29 +437,42 @@ public sealed class ApfFont
 
     public static byte[] RleEncode(byte[] pixels)
     {
-        var outBuf = new List<byte>(pixels.Length / 2 + 4);
-        int i = 0;
-        while (i < pixels.Length)
+        if (pixels.Length == 0) return [];
+
+        byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(pixels.Length + 16);
+        try
         {
-            byte v = pixels[i];
-            int j = i;
-            while (j < pixels.Length && pixels[j] == v) j++;
-            int count = j - i;
-
-            int baseByte, cap;
-            if (v == 0) { baseByte = 0x00; cap = 32; }
-            else if (v >= MaxLevel) { baseByte = 0xE0; cap = 32; }
-            else { baseByte = v << 4; cap = 16; }
-
-            while (count > 0)
+            int outPos = 0;
+            int i = 0;
+            while (i < pixels.Length)
             {
-                int take = Math.Min(count, cap);
-                outBuf.Add((byte)(baseByte | (take - 1)));
-                count -= take;
+                byte v = pixels[i];
+                int j = i + 1;
+                while (j < pixels.Length && pixels[j] == v) j++;
+                int count = j - i;
+
+                int baseByte, cap;
+                if (v == 0) { baseByte = 0x00; cap = 32; }
+                else if (v >= MaxLevel) { baseByte = 0xE0; cap = 32; }
+                else { baseByte = v << 4; cap = 16; }
+
+                while (count > 0)
+                {
+                    int take = Math.Min(count, cap);
+                    rented[outPos++] = (byte)(baseByte | (take - 1));
+                    count -= take;
+                }
+                i = j;
             }
-            i = j;
+
+            var result = new byte[outPos];
+            Buffer.BlockCopy(rented, 0, result, 0, outPos);
+            return result;
         }
-        return [.. outBuf];
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     // ------------------------------------------------------------ 工具

@@ -78,6 +78,10 @@ Pause  Add  Sub  Mul  Del  Ins  Backspace  Tab
 | `DiplAreAllied(int a, int b)` | 兩位玩家是否同盟 |
 | `MousePtm()` → `point` | **滑鼠游標所指位置的地圖座標**（見下） |
 | `ViewPos()` → `point` | 目前視野位置 |
+| `selu()` → `Unit` | **取得當前選取的單位**（未選取或非單位時回傳無效物件） |
+| `selb()` → `Building` | **取得當前選取的建築** |
+| `sels()` → `Settlement` | **取得當前選取的聚落** |
+| `selsq()` → `Squad` | **取得當前選取的編隊** |
 
 ### 環境變數
 
@@ -159,7 +163,7 @@ Query Union(a, b) / Intersect(a, b) / Substract(a, b)
 
 屬性：`level`（含英雄與道具加成的有效等級）`inherentlevel` `dest`
 
-方法：`AddBonus(int MinAttack, int MaxAttack, int SlashingDefense, int PiercingDefense,
+方法：`SetLevel(int 1~1000)` · `SetExperience(int)` · `AddBonus(int MinAttack, int MaxAttack, int SlashingDefense, int PiercingDefense,
 int MaxHealth)` · `RemoveBonus(同上)` · `InHolder()` · `GetHolderSett()` · `hero()`
 · `AttachTo(Hero)` · `DetachFrom(Hero)` · `SetParty(bool)` · `GetParty()`
 

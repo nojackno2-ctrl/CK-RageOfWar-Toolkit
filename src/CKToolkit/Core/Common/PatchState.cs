@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
@@ -148,6 +148,11 @@ public static class PatchState
         bool ztOrig = ZoomTables.IsOriginal(pe);
         if (!ztApplied && !ztOrig) return FileState.Unrecognised();
 
+        // 3b. CellGrid 檢查 (32px dirty-cell grid)
+        bool cgApplied = CellGridPatch.IsApplied(pe);
+        bool cgOrig = CellGridPatch.IsOriginal(pe);
+        if (!cgApplied && !cgOrig) return FileState.Unrecognised();
+
         // 4. LAA 檢查
         bool laaApplied = LargeAddressAware.IsApplied(bytes);
 
@@ -162,6 +167,7 @@ public static class PatchState
         if (laaApplied) patches.Add("laa");
         if (vmApplied) patches.Add("video_fix");
         if (ztApplied) patches.Add("hires_zoom");
+        if (cgApplied) patches.Add("cell_grid");
         if (rwApplied) patches.Add("res_writeback");
         if (keyMapApplied) patches.Add("key_map");
 
@@ -192,6 +198,9 @@ public static class PatchState
 
             // 2. 還原 ZoomTables (.ckhr 節區移除與立即數/指令還原)
             ZoomTables.Apply(pe, false);
+
+            // 2b. 還原 CellGrid (32px -> 16px 原版指令還原)
+            CellGridPatch.Apply(pe, false);
 
             byte[] exeBytes = pe.ToBytes();
 

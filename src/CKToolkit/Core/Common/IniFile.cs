@@ -67,35 +67,39 @@ public sealed class IniFile
         if (string.IsNullOrEmpty(text)) return;
 
         // 偵測預設換行符
-        _defaultLineEnding = text.Contains("\r\n") ? "\r\n" : "\n";
+        _defaultLineEnding = text.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
 
         string currentSection = string.Empty;
+        var span = text.AsSpan();
         int pos = 0;
-        while (pos < text.Length)
+        while (pos < span.Length)
         {
-            int eol = text.IndexOf('\n', pos);
-            string fullLine;
+            int nextLf = span[pos..].IndexOf('\n');
+            int lineLenWithEnding;
             string lineEnding;
 
-            if (eol == -1)
+            if (nextLf == -1)
             {
-                fullLine = text[pos..];
+                lineLenWithEnding = span.Length - pos;
                 lineEnding = string.Empty;
-                pos = text.Length;
             }
             else
             {
-                fullLine = text[pos..(eol + 1)];
-                lineEnding = fullLine.EndsWith("\r\n") ? "\r\n" : "\n";
-                pos = eol + 1;
+                lineLenWithEnding = nextLf + 1;
+                var lineWithEnding = span.Slice(pos, lineLenWithEnding);
+                lineEnding = lineWithEnding.EndsWith("\r\n") ? "\r\n" : "\n";
             }
 
-            string contentWithoutEnding = fullLine.TrimEnd('\r', '\n');
-            string trimmed = contentWithoutEnding.Trim();
+            var fullLineSpan = span.Slice(pos, lineLenWithEnding);
+            string fullLine = fullLineSpan.ToString();
+            pos += lineLenWithEnding;
 
-            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            var contentWithoutEnding = fullLineSpan.TrimEnd("\r\n");
+            var trimmed = contentWithoutEnding.Trim();
+
+            if (trimmed.Length >= 2 && trimmed[0] == '[' && trimmed[^1] == ']')
             {
-                string secName = trimmed[1..^1].Trim();
+                string secName = trimmed[1..^1].Trim().ToString();
                 currentSection = secName;
                 _lines.Add(new IniLine
                 {
@@ -105,7 +109,7 @@ public sealed class IniFile
                     LineEnding = lineEnding.Length > 0 ? lineEnding : _defaultLineEnding
                 });
             }
-            else if (trimmed.StartsWith(';') || trimmed.StartsWith('#') || string.IsNullOrWhiteSpace(trimmed))
+            else if (trimmed.Length == 0 || trimmed[0] == ';' || trimmed[0] == '#')
             {
                 _lines.Add(new IniLine
                 {
@@ -120,18 +124,18 @@ public sealed class IniFile
                 int eqIndex = contentWithoutEnding.IndexOf('=');
                 if (eqIndex >= 0)
                 {
-                    string rawKey = contentWithoutEnding[..eqIndex];
-                    string rawValue = contentWithoutEnding[(eqIndex + 1)..];
+                    var rawKeySpan = contentWithoutEnding[..eqIndex];
+                    var rawValueSpan = contentWithoutEnding[(eqIndex + 1)..];
 
-                    string key = rawKey.Trim();
-                    string value = rawValue.Trim();
+                    string key = rawKeySpan.Trim().ToString();
+                    string value = rawValueSpan.Trim().ToString();
 
                     // 保留縮排與等號周圍格式
-                    int keyLeadingLen = rawKey.Length - rawKey.TrimStart().Length;
-                    string keyPrefix = rawKey[..keyLeadingLen];
+                    int keyLeadingLen = rawKeySpan.Length - rawKeySpan.TrimStart().Length;
+                    string keyPrefix = rawKeySpan[..keyLeadingLen].ToString();
 
-                    int keyTrailingLen = rawKey.Length - rawKey.TrimEnd().Length;
-                    int valLeadingLen = rawValue.Length - rawValue.TrimStart().Length;
+                    int keyTrailingLen = rawKeySpan.Length - rawKeySpan.TrimEnd().Length;
+                    int valLeadingLen = rawValueSpan.Length - rawValueSpan.TrimStart().Length;
                     string equalsSeparator = new string(' ', keyTrailingLen) + "=" + new string(' ', valLeadingLen);
 
                     _lines.Add(new IniLine

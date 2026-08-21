@@ -204,23 +204,83 @@ public static partial class GamePaths
 
     /// <summary>
     /// 檢查遊戲主程序或啟動器是否正在執行。
+    /// 若指定 gameDir，則僅當執行中程序來自該目錄時回傳 true；若是測試用暫存目錄 (%TEMP%) 則忽略，避免測試誤報。
     /// </summary>
-    public static bool IsGameRunning()
+    public static bool IsGameRunning(string? gameDir = null)
     {
         try
         {
-            foreach (var p in Process.GetProcesses())
+            if (!string.IsNullOrWhiteSpace(gameDir))
             {
-                try
+                string fullTarget = Path.GetFullPath(gameDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string tempPath = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (fullTarget.StartsWith(tempPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (p.ProcessName.Contains("Celtic", StringComparison.OrdinalIgnoreCase))
+                    return false;
+                }
+            }
+
+            var p1 = Process.GetProcessesByName("Celtic kings");
+            var p2 = Process.GetProcessesByName("Celtic kings Launcher");
+            var allProcesses = new List<Process>(p1.Length + p2.Length);
+            allProcesses.AddRange(p1);
+            allProcesses.AddRange(p2);
+
+            try
+            {
+                if (allProcesses.Count == 0)
+                {
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(gameDir))
+                {
+                    return true;
+                }
+
+                string targetDir = Path.GetFullPath(gameDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                foreach (var p in allProcesses)
+                {
+                    try
                     {
-                        return true;
+                        string? procPath = null;
+                        try
+                        {
+                            procPath = p.MainModule?.FileName;
+                        }
+                        catch
+                        {
+                            // 32 位元 / 64 位元跨架構或權限限制
+                        }
+
+                        if (string.IsNullOrEmpty(procPath))
+                        {
+                            // 無法查詢路徑時（例如權限限制），若目標不是 temp 目錄則保守判定為執行中
+                            return true;
+                        }
+
+                        string? procDir = Path.GetDirectoryName(procPath);
+                        if (!string.IsNullOrEmpty(procDir))
+                        {
+                            string fullProc = Path.GetFullPath(procDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                            if (string.Equals(targetDir, fullProc, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // 忽略個別程序查詢錯誤
                     }
                 }
-                catch
+            }
+            finally
+            {
+                foreach (var p in allProcesses)
                 {
-                    // 忽略無權限存取之程序
+                    p.Dispose();
                 }
             }
         }
