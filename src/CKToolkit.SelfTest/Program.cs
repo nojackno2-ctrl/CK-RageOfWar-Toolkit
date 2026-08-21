@@ -2087,20 +2087,37 @@ internal static class Program
             }
 
             // 10. lang import 合法目錄 -> 成功 (exitCode 0)
+            string testPackId = "test-cli-pack-" + Guid.NewGuid().ToString("N")[..6];
             string importSrcDir = Path.Combine(tempDir, "Import_Valid_Pack");
             Directory.CreateDirectory(importSrcDir);
             File.WriteAllText(Path.Combine(importSrcDir, "pack.json"),
-                "{\"id\":\"test-cli-pack\",\"name\":\"Test Pack\",\"nativeName\":\"Test Native\",\"version\":\"1.0.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}");
+                $"{{\"id\":\"{testPackId}\",\"name\":\"Test Pack\",\"nativeName\":\"Test Native\",\"version\":\"1.0.0\",\"gameLangFolder\":\"TEST\",\"gameLangKey\":\"test\",\"templateLang\":\"GERMAN\",\"font\":{{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]}},\"files\":{{\"ui\":\"ui.json\"}}}}");
             File.WriteAllText(Path.Combine(importSrcDir, "ui.json"), "{\"Start Game\":\"開始遊戲\"}");
 
-            using (var stdout = new StringWriter())
-            using (var stderr = new StringWriter())
+            string importedTargetDir = Path.Combine(AppContext.BaseDirectory, "langpacks", testPackId);
+            try
             {
-                int exitCode = CliHost.Execute(["lang", "import", "--src", importSrcDir, "--json"], stdout, stderr);
-                Check("CLI lang import 執行成功 退出碼 0", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={stderr}");
+                using (var stdout = new StringWriter())
+                using (var stderr = new StringWriter())
+                {
+                    int exitCode = CliHost.Execute(["lang", "import", "--src", importSrcDir, "--json"], stdout, stderr);
+                    Check("CLI lang import 執行成功 退出碼 0", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={stderr}, out={stdout}");
 
-                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
-                Check("CLI lang import JSON 封套 ok == true", env is not null && env.Ok && env.Command == "lang import");
+                    var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                    Check("CLI lang import JSON 封套 ok == true", env is not null && env.Ok && env.Command == "lang import");
+                }
+
+                // 11. lang import --overwrite 再次匯入相同目錄
+                using (var stdout = new StringWriter())
+                using (var stderr = new StringWriter())
+                {
+                    int exitCode = CliHost.Execute(["lang", "import", "--src", importSrcDir, "--overwrite", "--json"], stdout, stderr);
+                    Check("CLI lang import --overwrite 執行成功 退出碼 0", exitCode == ExitCodes.Success, $"exitCode={exitCode}, err={stderr}, out={stdout}");
+                }
+            }
+            finally
+            {
+                try { if (Directory.Exists(importedTargetDir)) Directory.Delete(importedTargetDir, true); } catch { }
             }
         }
         finally
