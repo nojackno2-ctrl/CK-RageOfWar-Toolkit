@@ -1,0 +1,24 @@
+# Dependabot：只管 GitHub Actions。
+#
+# 搭配 ckperf.yml 的 SHA 釘選使用——釘死 SHA 的代價是不會自動拿到上游修補，
+# 所以需要有人固定來提醒。Dependabot 會直接改寫 SHA 並在 PR 標題附上新版本號，
+# 人工過目後再合併，安全性與時效性兩邊都顧到。
+#
+# 刻意不納入 NuGet：本專案的 .NET 相依極少且鎖定 net10.0-windows，
+# 讓 Dependabot 在這裡開 PR 只會製造雜訊。
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'CI'
+    labels:
+      - dependencies
+    groups:
+      # 官方 action 常常同時發版，分開開 PR 只是多花時間審一樣的東西。
+      actions:
+        patterns:
+          - '*'
