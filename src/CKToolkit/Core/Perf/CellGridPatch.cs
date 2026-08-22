@@ -18,6 +18,27 @@ namespace CKToolkit.Core.Perf;
 /// </summary>
 public static class CellGridPatch
 {
+    /// <summary>
+    /// 32px 網格能覆蓋的最大畫面寬度：128 個槽位 x 32px = 4096。
+    /// 超過這個寬度，x >= 4096 的欄位無法被標記 dirty，鏡頭捲動就會出現塗抹破圖。
+    /// 這是引擎結構的硬上限，不是保守估計——CVXVisible 的槽位寬度就是固定 128-bit。
+    /// </summary>
+    public const int MaxSurfaceWidth = 4096;
+
+    /// <summary>
+    /// 32px 網格能覆蓋的最大畫面高度：75 列 x 32px = 2400。
+    /// 超過這個高度，列數需求會超出 75，寫壞 CVXVisible 物件尾端 (+0x4C0..+0x50F) 而閃退。
+    /// 這正是 commit 7296c4f 修掉的那一類崩潰，不得讓設定重新走回去。
+    /// </summary>
+    public const int MaxSurfaceHeight = 2400;
+
+    /// <summary>
+    /// 判斷指定畫面尺寸是否落在 32px 網格的覆蓋範圍內。
+    /// 所有會寫入解析度或 ZoomMap 容量的路徑（GUI 存檔、CLI perf set）都必須先問過這裡。
+    /// </summary>
+    public static bool IsSurfaceSupported(int width, int height) =>
+        width > 0 && height > 0 && width <= MaxSurfaceWidth && height <= MaxSurfaceHeight;
+
     public sealed record Site(uint Va, byte[] Orig, byte[] Repl);
 
     public static readonly Site[] Sites =

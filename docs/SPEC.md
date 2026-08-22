@@ -203,7 +203,7 @@ langpacks/<id>/
   "name": "Traditional Chinese",
   "nativeName": "繁體中文",
   "version": "1.0.0",
-  "authors": ["nojackno2-ctrl"],
+  "authors": ["nojackno2-ctrl (AI-translated)"],
   "gameLangFolder": "CHINESE",
   "gameLangKey": "chinese",
   "templateLang": "GERMAN",

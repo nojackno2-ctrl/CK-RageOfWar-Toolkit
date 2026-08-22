@@ -1,4 +1,5 @@
 using CKToolkit.Core.Common;
+using CKToolkit.Core.Perf;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -59,7 +60,7 @@ public sealed class PerformancePage : UserControl
         _capacityLabel.Anchor = AnchorStyles.Left;
         res.Controls.Add(_capacityLabel, 0, 1);
         _capacity.Minimum = 1600;
-        _capacity.Maximum = 16384;
+        _capacity.Maximum = CellGridPatch.MaxSurfaceWidth;
         _capacity.Increment = 160;
         _capacity.Width = 120;
         res.Controls.Add(_capacity, 1, 1);
@@ -143,7 +144,7 @@ public sealed class PerformancePage : UserControl
             _keepResolution.Checked = config.KeepRes;
             _resolution.Text = string.IsNullOrWhiteSpace(config.Resolution) ? "1920x1080" : config.Resolution;
             _hires.Checked = config.Hires >= 1600;
-            _capacity.Value = Math.Clamp(config.Hires <= 0 ? 1920 : config.Hires, 1600, 16384);
+            _capacity.Value = Math.Clamp(config.Hires <= 0 ? 1920 : config.Hires, 1600, CellGridPatch.MaxSurfaceWidth);
             _autoSwitch.Checked = !string.Equals(config.DesktopMode, "suppress", StringComparison.OrdinalIgnoreCase);
             _suppressDisplay.Checked = !_autoSwitch.Checked;
             _noObjectAnimations.Checked = config.NoObjectAnimations;
@@ -159,8 +160,16 @@ public sealed class PerformancePage : UserControl
     public void SaveConfig(PerfConfig config)
     {
         string resolution = _resolution.Text.Trim();
-        if (!TryParseResolution(resolution, out int width, out _))
+        if (!TryParseResolution(resolution, out int width, out int height))
             throw new InvalidOperationException(Strings.Get("Gui_InvalidResolution", resolution));
+
+        // CVXVisible 的 32px 網格只覆蓋 4096x2400。超過就會同時帶回捲動塗抹與
+        // 75 列溢位閃退，寧可擋下存檔也不要寫出一份會讓遊戲壞掉的設定。
+        if (!CellGridPatch.IsSurfaceSupported(width, height))
+        {
+            throw new InvalidOperationException(Strings.Get("Error_ResolutionExceedsGridCeiling",
+                resolution, CellGridPatch.MaxSurfaceWidth, CellGridPatch.MaxSurfaceHeight));
+        }
 
         config.Laa = _laa.Checked;
         config.VideoFix = _videoFix.Checked;
@@ -190,7 +199,7 @@ public sealed class PerformancePage : UserControl
         _autoDetectBtn.Text = Strings.Get("Gui_Perf_AutoDetectScreen");
         _autoSwitch.Text = Strings.Get("Gui_Perf_AutoSwitch");
         _suppressDisplay.Text = Strings.Get("Gui_Perf_SuppressDisplay");
-        _warning.Text = Strings.Get("Perf_HdCeilingWarning");
+        _warning.Text = Strings.Get("Perf_HdCeilingNote");
         _animationGroup.Text = Strings.Get("Gui_Perf_Animations");
         _noObjectAnimations.Text = Strings.Get("Gui_Perf_NoObjectAnimations");
         _noWaterAnimation.Text = Strings.Get("Gui_Perf_NoWaterAnimation");
@@ -211,7 +220,7 @@ public sealed class PerformancePage : UserControl
             if (width > 1600)
             {
                 _hires.Checked = true;
-                _capacity.Value = Math.Clamp(width, 1600, 16384);
+                _capacity.Value = Math.Clamp(width, 1600, CellGridPatch.MaxSurfaceWidth);
             }
             else
             {

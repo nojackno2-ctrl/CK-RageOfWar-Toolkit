@@ -51,17 +51,6 @@ public static partial class Resolutions
         (1600, 1200)
     ];
 
-    /// <summary>
-    /// 現代高解析度清單：保留原版 1024x768，其餘取代為 HD (1920x1080)、2K (2560x1440)、4K (3840x2160)。
-    /// </summary>
-    public static readonly (int Width, int Height)[] ModernResolutions =
-    [
-        (1024, 768),
-        (1920, 1080),
-        (2560, 1440),
-        (3840, 2160)
-    ];
-
     [GeneratedRegex(@"^Res(\d+)_([xy])$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ResKeyRegex();
 
@@ -128,36 +117,9 @@ public static partial class Resolutions
         string text = pak.ReadText(iniPath);
         var ini = IniFile.FromText(text);
 
-        // 移除 [Resolutions] 節區內所有 Index > 4 或非原廠的 Res 條目
-        var entries = ini.GetSectionEntries("Resolutions");
-        foreach (var kv in entries)
-        {
-            var m = ResKeyRegex().Match(kv.Key);
-            if (m.Success)
-            {
-                int idx = int.Parse(m.Groups[1].Value);
-                if (idx > 4)
-                {
-                    ini.RemoveKey("Resolutions", kv.Key);
-                }
-            }
-            else
-            {
-                ini.RemoveKey("Resolutions", kv.Key);
-            }
-        }
+        NormaliseSectionToStock(ini);
 
-        // 確保原廠 4 筆項目正確存在
-        ini.SetValue("Resolutions", "Res1_x", "1024");
-        ini.SetValue("Resolutions", "Res1_y", "768");
-        ini.SetValue("Resolutions", "Res2_x", "1152");
-        ini.SetValue("Resolutions", "Res2_y", "864");
-        ini.SetValue("Resolutions", "Res3_x", "1280");
-        ini.SetValue("Resolutions", "Res3_y", "1024");
-        ini.SetValue("Resolutions", "Res4_x", "1600");
-        ini.SetValue("Resolutions", "Res4_y", "1200");
-
-        int nextIdx = 5;
+        int nextIdx = StockResolutions.Length + 1;
         var stockSet = StockResolutions.ToHashSet();
 
         // 若目標解析度非原廠項目且不超過容量限制，寫入為第 5 筆 Res5
@@ -184,46 +146,6 @@ public static partial class Resolutions
                     nextIdx++;
                 }
             }
-        }
-
-        pak.WriteText(iniPath, ini.ToText());
-        return ParseResolutionsFromText(ini.ToText());
-    }
-
-    /// <summary>
-    /// 向 pak 內之 VXCONST.INI 附加自訂解析度。
-    /// 具備冪等性：已存在的解析度會自動略過；超出 ZoomMap 表格容量者嚴格略過。
-    /// </summary>
-    public static List<ResolutionEntry> AppendResolutions(
-        HmmPak pak,
-        IEnumerable<(int Width, int Height)> wanted,
-        int maxCapacity = int.MaxValue)
-    {
-        var list = wanted.ToList();
-        if (list.Count == 0) return ReadResolutions(pak);
-        var first = list[0];
-        return ApplyTargetResolution(pak, first.Width, first.Height, maxCapacity, list.Skip(1));
-    }
-
-    /// <summary>
-    /// 從 data.pak 之 [Resolutions] 清單中移除超過指定 ZoomMap 表格容量 (maxCapacity) 之解析度項目。
-    /// </summary>
-    public static List<ResolutionEntry> EnforceCapacity(HmmPak pak, int maxCapacity)
-    {
-        string? iniPath = FindConstIniEntryName(pak);
-        if (iniPath is null) return [];
-
-        string text = pak.ReadText(iniPath);
-        var existing = ParseResolutionsFromText(text);
-        var overCapacity = existing.Where(e => e.Width > maxCapacity).ToList();
-
-        if (overCapacity.Count == 0) return existing;
-
-        var ini = IniFile.FromText(text);
-        foreach (var entry in overCapacity)
-        {
-            ini.RemoveKey("Resolutions", $"Res{entry.Index}_x");
-            ini.RemoveKey("Resolutions", $"Res{entry.Index}_y");
         }
 
         pak.WriteText(iniPath, ini.ToText());
@@ -296,36 +218,36 @@ public static partial class Resolutions
         string text = pak.ReadText(iniPath);
         var ini = IniFile.FromText(text);
 
-        // 移除 [Resolutions] 節區內所有 Index > 4 或非原廠的 Res 條目
-        var entries = ini.GetSectionEntries("Resolutions");
-        foreach (var kv in entries)
+        NormaliseSectionToStock(ini);
+
+        pak.WriteText(iniPath, ini.ToText());
+    }
+
+    /// <summary>
+    /// 把 [Resolutions] 節區就地還原成原廠四筆：刪除所有 Res5+ 與任何非 Res 鍵，
+    /// 再確保 Res1..4 的值正確。周圍的空白行、節區終結符號、註解與 CRLF 全數保留。
+    ///
+    /// ApplyTargetResolution（正規化後疊加）與 RestoreStockResolutions（完整反轉）
+    /// 共用這一步，兩條路徑才不會漂移——AGENTS.md §2.2 的「正規化後疊加」
+    /// 之所以能保證冪等與逐位元組可逆，靠的就是兩邊做的是同一件事。
+    /// </summary>
+    private static void NormaliseSectionToStock(IniFile ini)
+    {
+        foreach (var kv in ini.GetSectionEntries("Resolutions"))
         {
             var m = ResKeyRegex().Match(kv.Key);
-            if (m.Success)
-            {
-                int idx = int.Parse(m.Groups[1].Value);
-                if (idx > 4)
-                {
-                    ini.RemoveKey("Resolutions", kv.Key);
-                }
-            }
-            else
+            if (!m.Success || int.Parse(m.Groups[1].Value) > StockResolutions.Length)
             {
                 ini.RemoveKey("Resolutions", kv.Key);
             }
         }
 
-        // 確保原廠 4 筆項目之鍵值正確存在於 [Resolutions] 節區內
-        ini.SetValue("Resolutions", "Res1_x", "1024");
-        ini.SetValue("Resolutions", "Res1_y", "768");
-        ini.SetValue("Resolutions", "Res2_x", "1152");
-        ini.SetValue("Resolutions", "Res2_y", "864");
-        ini.SetValue("Resolutions", "Res3_x", "1280");
-        ini.SetValue("Resolutions", "Res3_y", "1024");
-        ini.SetValue("Resolutions", "Res4_x", "1600");
-        ini.SetValue("Resolutions", "Res4_y", "1200");
-
-        pak.WriteText(iniPath, ini.ToText());
+        for (int i = 0; i < StockResolutions.Length; i++)
+        {
+            var (w, h) = StockResolutions[i];
+            ini.SetValue("Resolutions", $"Res{i + 1}_x", w.ToString());
+            ini.SetValue("Resolutions", $"Res{i + 1}_y", h.ToString());
+        }
     }
 
     public static string? FindConstIniEntryName(HmmPak pak)

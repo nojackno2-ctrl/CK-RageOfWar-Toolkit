@@ -4,10 +4,10 @@
   "nativeName": "Italiano",
   "version": "1.0.0",
   "authors": [
-    "CKToolkit Team"
+    "nojackno2-ctrl (AI-translated)"
   ],
-  "gameLangFolder": "ITALIAN",
-  "gameLangKey": "italian",
+  "gameLangFolder": "ITALIAN_CK",
+  "gameLangKey": "italian_ck",
   "templateLang": "GERMAN",
   "font": {
     "face": "Segoe UI",

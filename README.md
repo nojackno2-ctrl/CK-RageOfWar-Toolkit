@@ -4,6 +4,8 @@
 
 An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: Rage of War* (2004, Steam edition) — combining performance enhancements, 1080p/2K/4K high-resolution support, language pack management, and an in-depth trainer into a single, clean GUI and AI-agent-driven CLI.
 
+![4K 解析度實機全景視野 (3840x2160) / 4K Battlefield Overview](docs/screenshots/gameplay-4k-overview.jpg)
+
 ---
 
 ## 繁體中文
@@ -14,9 +16,26 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 | 模組 | 功能特色 |
 |---|---|
-| **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
-| **多國語言包** | 內建繁體中文化（3,575 條詞彙）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
+| **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動；CVXVisible 32px 網格上限 4096x2400，超過一律拒絕寫入）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
+| **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,458 條詞彙 100% 覆蓋）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
 | **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
+
+#### 實機遊戲畫面（HD 介面 / 2K / 4K 高解析度支援）
+
+| 4K (3840x2160) 高盧要塞與村落細節 | 2K (2560x1440) 羅馬要塞城市細節 |
+|:---:|:---:|
+| ![4K 要塞與村落細節](docs/screenshots/gameplay-4k-settlement.jpg) | ![2K 羅馬要塞城市細節](docs/screenshots/gameplay-2k-settlement.jpg) |
+
+| HD 介面版 要塞建築細節 | HD 介面版 全景戰線視野 |
+|:---:|:---:|
+| ![HD 介面版 要塞建築細節](docs/screenshots/gameplay-hd-ui-settlement.jpg) | ![HD 介面版 全景戰線視野](docs/screenshots/gameplay-hd-ui-overview.jpg) |
+
+| 4K (3840x2160) 戰場全景視野 | 2K (2560x1440) 戰線全域佈局 |
+|:---:|:---:|
+| ![4K 戰場全景視野](docs/screenshots/gameplay-4k-overview.jpg) | ![2K 戰線全域佈局](docs/screenshots/gameplay-2k-overview.jpg) |
+
+> [!NOTE]
+> **高解析度黑邊現象說明**：因 2004 年原廠 UI 素材並未針對 HD 以上超高解析度繪製邊界，在 2K / 4K 解析度下部分介面頂部／外緣會顯露未覆蓋的黑色留白區域（如截圖頂部所示）。此現象為原廠固定尺寸素材之正常現象，完全不影響戰場操作與遊戲運行，本工具秉持不破壞原版原則未做強行拉伸補強。
 
 ---
 
@@ -47,9 +66,16 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 ### 系統需求與使用方法
 
-- **系統需求**：Windows 10 / 11 (x64)、[.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)、Steam 版《Celtic Kings: Rage of War》。
+- **系統需求**：Windows 10 / 11 (x64)、Steam 版《Celtic Kings: Rage of War》。
 - **快速開始**：
-  1. 下載最新 Release 的 `CKToolkit.exe`。
+  1. 到 [Releases](https://github.com/nojackno2-ctrl/CK-RageOfWar-Toolkit/releases/latest) 下載其中一個：
+
+     | 檔案 | 大小 | 需要先安裝什麼 |
+     |---|---|---|
+     | `CKToolkit-<版本>-win-x64-self-contained.exe` | ~50 MB | **不需要**，雙擊即用（推薦） |
+     | `CKToolkit-<版本>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+     兩者功能完全相同，差別只在有沒有把 .NET 執行階段包進去。發布物皆由 GitHub Actions 從原始碼建置並附 build provenance 證明，可用 `gh attestation verify <檔名> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit` 查核。
   2. 放置於任意目錄執行（不必放進遊戲目錄）。
   3. 無參數啟動即開啟 GUI 圖形介面：
      ```cmd
@@ -66,6 +92,32 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 - **帶診斷啟動遊戲**：由工具直接啟動遊戲並注入診斷與防崩潰層。
 - **掛載到執行中的遊戲**：遊戲已由 Steam 開啟時，一鍵手動掛載。
 - **持續監看（Steam 開也會掛上）**：常駐背景監聽，無論何時從 Steam 開啟遊戲均會自動掛載防崩潰與遙測模組。
+
+<details>
+<summary><b>如何驗證這個 DLL —— 它會被注入遊戲行程，不必無條件信任</b></summary>
+
+`assets/ckperf/ckperf.dll` 是簽入儲存庫的預建二進位檔，完整原始碼在 [`src/CKPerf/`](src/CKPerf/)。三條驗證途徑：
+
+**1. 改用 CI 建置的版本（最強）**
+每當 `src/CKPerf/` 有變動，[`.github/workflows/ckperf.yml`](.github/workflows/ckperf.yml) 會在 GitHub 自家 runner 上從原始碼重建，並產生 build provenance 證明。到 Actions 頁面下載 `ckperf-dll-release-win32` 產物即可，證明本身可查核：
+
+```bash
+gh attestation verify ckperf.dll --repo nojackno2-ctrl/CK-RageOfWar-Toolkit
+```
+
+**2. 自行重建**
+需要 Visual Studio 的「使用 C++ 的桌面開發」工作負載：
+
+```powershell
+pwsh tools/perf/build-ckperf.ps1
+```
+
+**3. 比對執行期展開的檔案**
+工具會把內嵌的 DLL 展開到 `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.dll`，它應與儲存庫版本一致。雜湊記錄於 [`assets/ckperf/ckperf.dll.sha256`](assets/ckperf/ckperf.dll.sha256)，可直接餵給 `sha256sum -c`。
+
+> **關於雜湊的誠實說明**：MSVC 的 Release 建置預設**不是**位元級可重現的 —— LTCG、連結器時間戳記、PDB 簽章與 toolset 版本都會改變輸出。因此途徑 2 自行重建的結果**不會**與簽入版本雜湊相同，這是正常的，不代表有問題。雜湊只適用於途徑 3（同一份檔案的搬運驗證）；要證明「這個二進位確實出自這份原始碼」，請用途徑 1 的 provenance 證明。
+
+</details>
 
 ---
 
@@ -102,6 +154,13 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
   }
 }
 ```
+
+> **`gameLangFolder` 不可與遊戲原廠語系撞名**（`ENGLISH`、`GERMAN`、`FRENCH`、
+> `BULGARIAN`、`SPANISH`、`ITALIAN`、`RUSSIAN`）。撞名的話安裝會覆蓋原廠翻譯，
+> 而反安裝會把原廠檔案一併刪除，導致無法還原。若要為遊戲已支援的語言提供
+> 替代翻譯，請加上後綴，例如 `SPANISH_CK` —— 本工具內建的 es-ES / it-IT / ru-RU
+> 就是這樣做的，遊戲原廠的西班牙文／義大利文／俄文因此完整保留，兩種都能選。
+> 工具會在載入 `pack.json` 時直接拒絕撞名的語言包。
 
 #### 3. 匯入語言包
 點擊語言分頁的「📥 匯入語言包…」選取資料夾，或透過 CLI：
@@ -179,8 +238,11 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ### 授權與致謝
 
 - 本專案採用 **MIT License** 開源授權。
-- 繁體中文翻譯資料由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
-- 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關，儲存庫內不包含任何原版遊戲之受版權保護二進位檔案。
+- 本專案由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
+- **本專案為 AI 輔助開發專案**，程式碼、文件與逆向工程分析在開發過程中由 Antigravity CLI（AGY / Gemini）、OpenAI Codex 與 Anthropic Claude 三套 AI 編碼代理協作產出。
+- **本專案所有翻譯內容均由 AI 翻譯產生**，未經母語人士全文校對，用語與語境可能有誤。這包含遊戲語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU 共 6 個語系）以及工具本身的介面字串。歡迎回報問題或提交修正 PR。
+- 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關。
+- 本儲存庫不含任何原版遊戲之二進位檔案。語言包以遊戲原文作為索引鍵、僅供對照查表之用，原文著作權歸 Haemimont Games 所有；使用本工具需自行持有正版遊戲。
 
 ---
 
@@ -192,9 +254,26 @@ An all-in-one modernization and toolkit for *Celtic Kings: Rage of War* (2004, S
 
 | Module | Features |
 |---|---|
-| **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
-| **Language Packs** | Built-in Traditional Chinese translation (3,575 entries), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
+| **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam; the CVXVisible 32px grid tops out at 4096x2400 and anything larger is refused), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
+| **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,458 entries each, 100% coverage), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
 | **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
+
+#### In-Game Screenshots (HD UI / 2K / 4K High-Resolution Support)
+
+| 4K (3840x2160) Celtic Settlement Detail | 2K (2560x1440) Roman Fortress Detail |
+|:---:|:---:|
+| ![4K Celtic Settlement](docs/screenshots/gameplay-4k-settlement.jpg) | ![2K Roman Fortress](docs/screenshots/gameplay-2k-settlement.jpg) |
+
+| HD Interface - Settlement Detail | HD Interface - Panoramic Battlefield |
+|:---:|:---:|
+| ![HD Interface Settlement Detail](docs/screenshots/gameplay-hd-ui-settlement.jpg) | ![HD Interface Panoramic Battlefield](docs/screenshots/gameplay-hd-ui-overview.jpg) |
+
+| 4K (3840x2160) Battlefield Panoramic View | 2K (2560x1440) Tactical Battlefield Layout |
+|:---:|:---:|
+| ![4K Battlefield Panoramic View](docs/screenshots/gameplay-4k-overview.jpg) | ![2K Battlefield Layout](docs/screenshots/gameplay-2k-overview.jpg) |
+
+> [!NOTE]
+> **Note on High-Resolution Black Borders**: Because original 2004 game UI assets were not designed for ultra-high resolutions above standard HD, black uncovered areas may appear along certain top/outer screen edges (as visible in the top headers of the screenshots above). This is purely cosmetic from fixed-dimension legacy UI assets and does not affect tactical battlefield controls or gameplay stability; the toolkit intentionally leaves them unstretched to preserve original asset integrity.
 
 ---
 
@@ -225,9 +304,16 @@ Backups are replaced by **Exact Reversal**:
 
 ### Requirements & Usage
 
-- **Requirements**: Windows 10 / 11 (x64), [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0), Steam edition of *Celtic Kings: Rage of War*.
+- **Requirements**: Windows 10 / 11 (x64), Steam edition of *Celtic Kings: Rage of War*.
 - **Quick Start**:
-  1. Download `CKToolkit.exe` from the latest Release.
+  1. Grab one of these from [Releases](https://github.com/nojackno2-ctrl/CK-RageOfWar-Toolkit/releases/latest):
+
+     | File | Size | Prerequisite |
+     |---|---|---|
+     | `CKToolkit-<version>-win-x64-self-contained.exe` | ~50 MB | **None** — just run it (recommended) |
+     | `CKToolkit-<version>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+     Both are functionally identical; the only difference is whether the .NET runtime is bundled in. Release binaries are built from source by GitHub Actions and carry a build provenance attestation, checkable with `gh attestation verify <file> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit`.
   2. Run from anywhere (does not need to be placed inside the game folder).
   3. Running with no arguments opens the GUI:
      ```cmd
@@ -244,6 +330,32 @@ Includes an embedded 32-bit native runtime helper `ckperf.dll` (embedded in the 
 - **Launch Game with Diagnostics**: Launches the game and injects crash prevention and telemetry hooks before the entry point.
 - **Attach to Running Game**: Attach diagnostic and recovery layers to an already running instance.
 - **Watch & Auto-Attach**: Background watcher that automatically hooks into game instances launched directly from Steam.
+
+<details>
+<summary><b>Verifying this DLL — it gets injected into the game process, so don't trust it blindly</b></summary>
+
+`assets/ckperf/ckperf.dll` is a prebuilt binary checked into the repository; its full source is in [`src/CKPerf/`](src/CKPerf/). Three ways to verify it:
+
+**1. Use the CI-built binary instead (strongest)**
+Whenever `src/CKPerf/` changes, [`.github/workflows/ckperf.yml`](.github/workflows/ckperf.yml) rebuilds it from source on GitHub's own runners and emits a build provenance attestation. Download the `ckperf-dll-release-win32` artifact from the Actions tab; the attestation itself is checkable:
+
+```bash
+gh attestation verify ckperf.dll --repo nojackno2-ctrl/CK-RageOfWar-Toolkit
+```
+
+**2. Rebuild it yourself**
+Requires the Visual Studio "Desktop development with C++" workload:
+
+```powershell
+pwsh tools/perf/build-ckperf.ps1
+```
+
+**3. Check the file extracted at runtime**
+The toolkit unpacks its embedded DLL to `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.dll`, which should match the repository copy. Its hash is recorded in [`assets/ckperf/ckperf.dll.sha256`](assets/ckperf/ckperf.dll.sha256), in a format `sha256sum -c` accepts directly.
+
+> **An honest note about hashes**: MSVC Release builds are **not** bit-for-bit reproducible by default — LTCG, linker timestamps, PDB signatures and toolset versions all change the output. So a DLL you rebuild via route 2 will **not** hash-match the checked-in one, and that is expected rather than a red flag. Hashes only apply to route 3 (verifying a copy of the same file). To prove that a binary really came from this source, use the provenance attestation from route 1.
+
+</details>
 
 ---
 
@@ -279,6 +391,14 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
   }
 }
 ```
+
+> **`gameLangFolder` must not reuse a stock game language folder** (`ENGLISH`, `GERMAN`,
+> `FRENCH`, `BULGARIAN`, `SPANISH`, `ITALIAN`, `RUSSIAN`). Installing into one overwrites
+> the original translation, and uninstalling then deletes the stock files along with ours,
+> making the pack unrevertible. To ship an alternative translation for a language the game
+> already supports, add a suffix — e.g. `SPANISH_CK`, which is exactly what the built-in
+> es-ES / it-IT / ru-RU packs do. The game's own Spanish/Italian/Russian stay intact and
+> both remain selectable. Packs that collide are rejected when `pack.json` is loaded.
 
 #### 3. Import Language Pack
 Click "📥 Import Pack..." in the Language tab, or via CLI:
@@ -355,5 +475,8 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ### Licence & Credits
 
 - Released under the **MIT License**.
-- Traditional Chinese localization created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
-- This is an unofficial community project not affiliated with Haemimont Games or the publisher. No copyrighted game binaries are distributed in this repository.
+- Created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
+- **This is an AI-assisted project.** The code, documentation and reverse-engineering analysis were produced with the help of three AI coding agents: Antigravity CLI (AGY / Gemini), OpenAI Codex and Anthropic Claude.
+- **All translated content in this project is AI-generated** and has not been fully proofread by native speakers, so wording and context may be inaccurate. This covers both the game language packs (six locales: zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU) and the toolkit's own interface strings. Bug reports and correction PRs are welcome.
+- This is an unofficial community project not affiliated with Haemimont Games or the publisher.
+- No game binaries from the original release are distributed in this repository. The language packs use the game's original strings as lookup keys for translation mapping only; copyright in those strings remains with Haemimont Games. A legitimate copy of the game is required to use this tool.

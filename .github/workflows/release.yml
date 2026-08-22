@@ -1,0 +1,118 @@
+# 推 v* 標籤時建置並發布 Release。
+#
+# 與 ckperf.yml 同一套原則：發布物由 GitHub runner 從原始碼建置、附上可查核的
+# build provenance 證明，而不是由某台開發機上傳一包來路只能靠信任的檔案。
+# 這是個會修改遊戲檔案並注入行程的工具，「請相信我」不是可接受的答案。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # 建立 Release
+  id-token: write        # attestation 簽章
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      # action 一律釘 commit SHA，理由同 ckperf.yml。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      # 先跑自我測試再打包。SelfTest 用合成的遊戲檔案，不需要安裝遊戲，
+      # 所以沒有理由讓它只在開發機上跑過。測試不過就不該有 Release。
+      - name: Run self-test
+        run: dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
+
+      # 兩種打包並存，因為使用者分兩種：
+      #   framework-dependent  3 MB，但需要先裝 .NET 10 Desktop Runtime
+      #   self-contained      50 MB，什麼都不用裝，雙擊即用
+      # 這個工具的受眾多半不是開發者，所以自包含版才是預設推薦。
+      - name: Publish (framework-dependent)
+        run: >
+          dotnet publish src/CKToolkit/CKToolkit.csproj -c Release -r win-x64
+          --self-contained false -p:PublishSingleFile=true -p:DebugType=none
+          -o publish/fd
+
+      - name: Publish (self-contained)
+        run: >
+          dotnet publish src/CKToolkit/CKToolkit.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true -p:DebugType=none
+          -o publish/sc
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item publish\fd\CKToolkit.exe dist\CKToolkit-${{ github.ref_name }}-win-x64.exe
+          Copy-Item publish\sc\CKToolkit.exe dist\CKToolkit-${{ github.ref_name }}-win-x64-self-contained.exe
+
+          # 雜湊檔用 sha256sum 的格式，任何平台都能 `sha256sum -c` 直接驗。
+          $lines = Get-ChildItem dist -Filter *.exe | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) *$($_.Name)"
+          }
+          [System.IO.File]::WriteAllText("$PWD\dist\SHA256SUMS.txt", ($lines -join "`n") + "`n")
+
+          Get-ChildItem dist | ForEach-Object { "{0,-56} {1,12:N0} bytes" -f $_.Name, $_.Length }
+
+      # 證明這些 exe 出自本儲存庫的這個 commit。不加 continue-on-error：
+      # 證明產不出來卻照樣發布，等於把「無法驗證」偽裝成「已驗證」。
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*.exe'
+
+      # 用內建的 gh CLI 而非第三方 action：發布這一步握有 contents: write，
+      # 沒必要為了省幾行 YAML 就多引入一個需要信任的相依。
+      # 用內建的 gh CLI 而非第三方 action：這一步握有 contents: write，
+      # 沒必要為了省幾行 YAML 就多引入一個需要信任的相依。
+      #
+      # 發行說明用字串陣列組出來，不用 PowerShell here-string：here-string 的
+      # 結束符必須在第 0 欄，會直接違反 YAML 區塊純量的縮排規則。
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $repo = '${{ github.repository }}'
+          $notes = @(
+            '## 下載哪一個'
+            ''
+            '| 檔案 | 大小 | 需要先安裝什麼 |'
+            '|---|---|---|'
+            "| ``CKToolkit-$tag-win-x64-self-contained.exe`` | ~50 MB | **不需要**，雙擊即用（推薦） |"
+            "| ``CKToolkit-$tag-win-x64.exe`` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |"
+            ''
+            '兩者功能完全相同，差別只在有沒有把 .NET 執行階段包進去。'
+            ''
+            '## 驗證這些檔案'
+            ''
+            '發布物由 GitHub Actions 從原始碼建置並簽署 build provenance 證明，可自行查核：'
+            ''
+            '```bash'
+            "gh attestation verify CKToolkit-$tag-win-x64-self-contained.exe --repo $repo"
+            '```'
+            ''
+            '`SHA256SUMS.txt` 為 sha256sum 格式，可直接 `sha256sum -c SHA256SUMS.txt`。'
+            ''
+            '## 系統需求'
+            ''
+            'Windows 10 / 11 (x64)、Steam 版《Celtic Kings: Rage of War》。'
+            ''
+            '> 本工具為非官方社群專案，與 Haemimont Games 及發行商無關。所有翻譯內容均由 AI 產生。詳見 README。'
+          )
+          [System.IO.File]::WriteAllText("$PWD\release-notes.md", ($notes -join "`n") + "`n")
+
+          $assets = (Get-ChildItem dist | ForEach-Object { $_.FullName })
+          gh release create $tag $assets --title "CK-RageOfWar Toolkit $tag" --notes-file release-notes.md

@@ -269,6 +269,7 @@ public static partial class CliHost
 
         var filesStatus = new Dictionary<string, object>();
         var warnings = new List<string>(config.MigrationsApplied);
+        GameBuildInfo? gameBuild = null;
         if (config.LoadError is not null) warnings.Insert(0, config.LoadError);
 
         foreach (GameFile f in Enum.GetValues<GameFile>())
@@ -310,6 +311,15 @@ public static partial class CliHost
             }
 
             var fileState = PatchState.Inspect(f, liveBytes);
+
+            if (f == GameFile.Exe)
+            {
+                // 用正規化後的位元組偵測，HiRes 的 .ckhr 節區才不會影響 SizeOfImage。
+                var normalised = PatchState.Normalise(f, liveBytes);
+                gameBuild = GameVersion.Detect(normalised.Success ? normalised.Value! : liveBytes);
+                GameVersion.WarnIfUnknown(gameBuild, warnings);
+            }
+
             string stateString = fileState.Kind switch
             {
                 FileStateKind.Vanilla => "vanilla",
@@ -341,6 +351,7 @@ public static partial class CliHost
             gameRunning = GamePaths.IsGameRunning(gameDir),
             configVersion = config.Version,
             uiLanguage = config.UiLanguage,
+            gameBuild,
             files = filesStatus
         };
 
@@ -358,6 +369,12 @@ public static partial class CliHost
         else
         {
             stdout.WriteLine(Strings.Get("Status_GameDir", gameDir));
+            if (gameBuild is not null)
+            {
+                stdout.WriteLine(
+                    $"{Strings.Get("Gui_Status_GameBuild")}: {gameBuild.Build}"
+                    + (gameBuild.IsKnown ? " [OK]" : " [?]"));
+            }
             foreach (var (fn, info) in filesStatus)
             {
                 stdout.WriteLine($"  - {fn}: {JsonSerializer.Serialize(info, JsonEnvelopeOptions)}");
@@ -625,6 +642,12 @@ public static partial class CliHost
                 ? Strings.Get("Verify_AllOk")
                 : Strings.Get("Verify_Mismatch"));
             stdout.WriteLine(Strings.Get("Status_GameDir", gameDir));
+            if (report.GameBuild is not null)
+            {
+                stdout.WriteLine(
+                    $"{Strings.Get("Gui_Status_GameBuild")}: {report.GameBuild.Build}"
+                    + (report.GameBuild.IsKnown ? " [OK]" : " [?]"));
+            }
             foreach (var (fn, fi) in report.Files)
             {
                 stdout.WriteLine($"  - {fn}: state={fi.State}, matchesConfig={fi.MatchesConfig} (applied: [{string.Join(", ", fi.AppliedPatches)}], expected: [{string.Join(", ", fi.ExpectedPatches)}])");
@@ -783,7 +806,9 @@ public static partial class CliHost
                                 return OutputError("perf set", Strings.Get("Error_InvalidArgs", $"--hires 格式必須為 <W>x<H> 或 off，實際為 '{val}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
                             }
 
-                            if (w < 1600 || w > 16384)
+                            // ZoomTables 本身能做到 16384，但 CVXVisible 的 32px 髒矩形網格只覆蓋到
+                            // 4096 寬。容量開得比網格大只會讓使用者選到會塗抹又會閃退的解析度。
+                            if (w < 1600 || w > CellGridPatch.MaxSurfaceWidth)
                             {
                                 return OutputError("perf set", Strings.Get("Error_InvalidTableDimensions"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
                             }
@@ -802,11 +827,6 @@ public static partial class CliHost
                                 int safeIdx = 3;
                                 config.Perf.Resolution = safeRes;
                                 warnings.Add(Strings.Get("Warning_ResolutionExceedsCapacity", oldRes, w, safeRes, safeIdx));
-                            }
-
-                            if (w > 2560)
-                            {
-                                warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
                             }
                         }
                         break;
@@ -844,6 +864,15 @@ public static partial class CliHost
                             return OutputError("perf set", Strings.Get("Error_InvalidArgs", $"--resolution 格式必須為 <寬>x<高>，實際為 '{val}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
                         }
 
+                        if (!CellGridPatch.IsSurfaceSupported(rw, rh))
+                        {
+                            return OutputError(
+                                "perf set",
+                                Strings.Get("Error_ResolutionExceedsGridCeiling", $"{rw}x{rh}",
+                                    CellGridPatch.MaxSurfaceWidth, CellGridPatch.MaxSurfaceHeight),
+                                ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                        }
+
                         string normRes = $"{rw}x{rh}";
                         config.Perf.Resolution = normRes;
                         if (rw > 1600)
@@ -861,10 +890,6 @@ public static partial class CliHost
                                 var (w, _) = PerfModule.ParseDimensions(r, 0, 0);
                                 return w > curCapacity;
                             });
-                        }
-                        if (rw > 2560 || rh > 1440)
-                        {
-                            warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
                         }
                         break;
 

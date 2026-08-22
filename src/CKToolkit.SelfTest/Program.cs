@@ -55,6 +55,11 @@ namespace CKToolkit.SelfTest;
 ///   31. TrainerKeyMapReversal: 小鍵盤按鍵映射與精確反轉
 ///   32. TrainerScriptsAndDataPakReversal: 作弊腳本、Tweak 定義與 data.pak 精確反轉
 ///   33. CliTrainerAndProfileCommands: trainer list-cheats, list-tweaks, set 參數驗證、重複按鍵拒絕、遊戲目錄零寫入與 profile 取樣分析器指令測試
+///
+///   解耦後的迴歸防線:
+///   34. 語系身分單一來源（pack.json gameLangFolder/gameLangKey 為唯一權威，verify 期望值與實際簽章必須對得上）
+///       與 CVXVisible 32px 網格硬上限 (4096x2400) 之強制拒絕
+///   35. 遊戲組建版本偵測：PE 編譯時間戳比對，不符只警告、仍照常套用且仍可逐位元組還原
 /// </summary>
 internal static class Program
 {
@@ -116,6 +121,10 @@ internal static class Program
         RunGroup("31. TrainerKeyMapReversal", TestTrainerKeyMapReversal);
         RunGroup("32. TrainerScriptsAndDataPakReversal", TestTrainerScriptsAndDataPakReversal);
         RunGroup("33. CliTrainerAndProfileCommands", TestCliTrainerAndProfileCommands);
+
+        // 解耦後的迴歸防線：語系身分單一來源、CVXVisible 32px 網格硬上限
+        RunGroup("34. GameLangIdentityAndGridCeiling", TestGameLangIdentityAndGridCeiling);
+        RunGroup("35. GameVersionDetection", TestGameVersionDetection);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -492,7 +501,7 @@ internal static class Program
         Check("原版 data.pak Inspect 回傳 Vanilla", stDataVanilla.IsVanilla);
 
         var modPak = HmmPak.FromBytes(vanillaDataPak);
-        Resolutions.AppendResolutions(modPak, [(1920, 1080)]);
+        Resolutions.ApplyTargetResolution(modPak, 1920, 1080);
         byte[] patchedDataPak = modPak.ToBytes();
         var stDataPatched = PatchState.Inspect(GameFile.DataPak, patchedDataPak);
         Check("附加解析度後 data.pak Inspect 回傳 PatchedByUs (resolutions_append)", stDataPatched.IsPatched && stDataPatched.AppliedPatches.Contains("resolutions_append"));
@@ -1616,6 +1625,18 @@ internal static class Program
         var resNoUi = LanguagePack.ParseMeta(jsonNoUi);
         Check("缺少 'files.ui' 欄位被拒絕", !resNoUi.Success && resNoUi.ErrorMessage!.Contains("'files.ui'"));
 
+        // 語系資料夾撞到原廠語系必須被拒絕：撞名的語言包安裝後無法還原，
+        // 會讓使用者永久失去遊戲的官方翻譯（AGENTS.md §2.3）。
+        string jsonStockFolder = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"SPANISH\",\"gameLangKey\":\"spanish\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        var resStockFolder = LanguagePack.ParseMeta(jsonStockFolder);
+        Check("gameLangFolder 撞到原廠語系 SPANISH 被拒絕",
+            !resStockFolder.Success && resStockFolder.ErrorMessage!.Contains("SPANISH"));
+        Check("拒絕訊息提示改用不撞名的 SPANISH_CK",
+            !resStockFolder.Success && resStockFolder.ErrorMessage!.Contains("SPANISH_CK"));
+
+        string jsonSafeFolder = "{\"id\":\"test\",\"name\":\"Test\",\"nativeName\":\"測試\",\"version\":\"1.0\",\"gameLangFolder\":\"SPANISH_CK\",\"gameLangKey\":\"spanish_ck\",\"templateLang\":\"GERMAN\",\"font\":{\"face\":\"Arial\",\"ranges\":[\"0020-007F\"]},\"files\":{\"ui\":\"ui.json\"}}";
+        Check("改成不撞名的 SPANISH_CK 後通過驗證", LanguagePack.ParseMeta(jsonSafeFolder).Success);
+
         // 2. 測試 6 大內建語言包載入
         string[] allBuiltInIds = ["zh-TW", "zh-CN", "ja-JP", "es-ES", "it-IT", "ru-RU"];
         foreach (string id in allBuiltInIds)
@@ -2423,6 +2444,304 @@ internal static class Program
     }
 
     // --- 33. CLI trainer list-cheats, list-tweaks, set 參數驗證、重複按鍵拒絕、遊戲目錄零寫入與 profile 取樣分析器指令測試
+    // --- 35. 遊戲組建版本偵測測試 -------------------------------------------
+    private static void TestGameVersionDetection()
+    {
+        Console.WriteLine("35. 遊戲組建版本偵測與版本不符仍可套用測試");
+
+        // A. 已驗證組建的常數必須就是實機量到的那一組（2026-08-22 由 status 讀出）。
+        Check("已驗證組建時間戳常數為 0x4034EFB1", GameVersion.KnownTimeDateStamp == 0x4034EFB1);
+        Check("已驗證組建時間戳即 2004-02-19 17:17:37Z",
+            DateTimeOffset.FromUnixTimeSeconds(GameVersion.KnownTimeDateStamp).UtcDateTime
+                == new DateTime(2004, 2, 19, 17, 17, 37, DateTimeKind.Utc));
+        Check("已驗證組建 SizeOfImage 與檔案長度均已記錄",
+            GameVersion.KnownSizeOfImage == 5_025_792 && GameVersion.KnownFileLength == 3_516_344);
+
+        // 合成 exe 的 SizeOfImage 與長度不可能等於真實遊戲，所以它必定被判為未知組建——
+        // 這本身就證明了「三項指紋要全中才算已知」。
+        byte[] knownExe = CreateSyntheticExe32();
+        var knownPe = PeFile.Parse(knownExe);
+        BitConverter.TryWriteBytes(
+            knownExe.AsSpan(knownPe.FileHeaderOffset + 4, 4), GameVersion.KnownTimeDateStamp);
+
+        var knownInfo = GameVersion.Detect(knownExe);
+        Check("時間戳對了但大小不符，仍判定為未知組建", !knownInfo.IsKnown);
+        Check("時間戳仍被正確解析為 2004-02-19 17:17:37Z",
+            knownInfo.BuildTimeUtc == new DateTime(2004, 2, 19, 17, 17, 37, DateTimeKind.Utc));
+
+        // B. 換一個時間戳就必須被認定為未知，並且產生警告。
+        byte[] otherExe = (byte[])knownExe.Clone();
+        BitConverter.TryWriteBytes(
+            otherExe.AsSpan(knownPe.FileHeaderOffset + 4, 4), GameVersion.KnownTimeDateStamp + 86400);
+
+        var otherInfo = GameVersion.Detect(otherExe);
+        Check("不同時間戳被認定為未知組建", !otherInfo.IsKnown);
+
+        var buildWarnings = CollectBuildWarnings(otherInfo);
+        Check("未知組建產生正好一則警告", buildWarnings.Count == 1);
+        Check("警告訊息同時列出偵測到與預期的組建",
+            buildWarnings.Count == 1 &&
+            buildWarnings[0].Contains(otherInfo.Build) &&
+            buildWarnings[0].Contains("0x" + GameVersion.KnownTimeDateStamp.ToString("X8")));
+
+        // C. 關鍵行為：版本不符只是警告，套用流程照常完成、檔案照樣被修改。
+        string tempGameDir = Path.Combine(
+            Path.GetTempPath(), "ckselftest_version_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(tempGameDir);
+        try
+        {
+            string exePath = Path.Combine(tempGameDir, GamePaths.ExeFileName);
+            File.WriteAllBytes(exePath, otherExe);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), CreateSyntheticLauncher64());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), CreateSyntheticDataPak().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), CreateSyntheticLocalPak().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName),
+                Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
+
+            byte[] before = File.ReadAllBytes(exePath);
+
+            var pipeline = PatchPipeline.CreateDefault();
+            var config = ToolkitConfig.CreateDefault();
+            var applyRes = pipeline.ApplyAll(tempGameDir, config);
+
+            Check("組建版本不符時 ApplyAll 仍然成功（是警告不是拒絕）", applyRes.Success);
+            Check("組建版本不符時仍回報偵測到的組建",
+                applyRes.Success && applyRes.Value!.GameBuild is { IsKnown: false });
+            Check("組建版本不符時警告清單含有組建警告",
+                applyRes.Warnings.Any(w => w.Contains(otherInfo.Build)));
+            Check("組建版本不符時 exe 確實被修改（沒有因為警告而略過寫入）",
+                !before.SequenceEqual(File.ReadAllBytes(exePath)));
+
+            // 反轉仍然必須逐位元組精確，版本警告不影響可逆性。
+            var restoreRes = pipeline.RestoreAll(tempGameDir);
+            Check("組建版本不符時仍可完整還原", restoreRes.Success);
+            Check("還原後 exe 與原始位元組完全相同",
+                before.SequenceEqual(File.ReadAllBytes(exePath)));
+
+            // verify 為唯讀，也必須回報組建。
+            var verifyRes = pipeline.Verify(tempGameDir, config);
+            Check("verify 回報偵測到的組建", verifyRes.Success && verifyRes.Value!.GameBuild is not null);
+        }
+        finally
+        {
+            try { Directory.Delete(tempGameDir, true); } catch { /* 清理失敗不影響測試結論 */ }
+        }
+    }
+
+    private static List<string> CollectBuildWarnings(GameBuildInfo info)
+    {
+        var warnings = new List<string>();
+        GameVersion.WarnIfUnknown(info, warnings);
+        return warnings;
+    }
+
+    // --- 34. 語系身分單一來源與 CVXVisible 網格上限測試 ---------------------
+    private static void TestGameLangIdentityAndGridCeiling()
+    {
+        Console.WriteLine("34. 語系身分單一來源與 CVXVisible 32px 網格上限測試");
+
+        // A. ResolveGameLangIdentity 必須完全等同 pack.json 的宣告，不得有任何硬編推導。
+        var packs = PackLoader.DiscoverAll();
+        Check("DiscoverAll 純動態掃描仍找到 6 個內建語言包", packs.Count >= 6);
+
+        foreach (var (id, pack) in packs)
+        {
+            var (folder, key) = PackLoader.ResolveGameLangIdentity(id);
+            Check($"{id} 解析出的語系資料夾等於 pack.json gameLangFolder",
+                folder == pack.Meta.GameLangFolder.ToUpperInvariant());
+            Check($"{id} 解析出的語系代號等於 pack.json gameLangKey",
+                key == pack.Meta.GameLangKey.ToLowerInvariant());
+        }
+
+        Check("空語言包 ID 解析為兩個空字串",
+            PackLoader.ResolveGameLangIdentity(null) == (string.Empty, string.Empty) &&
+            PackLoader.ResolveGameLangIdentity("  ") == (string.Empty, string.Empty));
+
+        // B. 端對端：實際安裝進 local.pak 的語系資料夾，必須等於 ResolveGameLangIdentity 給的答案。
+        //    這正是從前 verify 對不上的地方——zh-CN 實際寫入 SCHINESE 目錄，期望值卻拿 zh-CN 去比。
+        string[] sampleIds = ["zh-TW", "zh-CN", "ja-JP", "ru-RU"];
+        foreach (string id in sampleIds)
+        {
+            var packRes = PackLoader.LoadEmbeddedPack(id);
+            Check($"{id} 內嵌語言包載入成功", packRes.Success);
+            if (!packRes.Success) continue;
+
+            var localPak = CreateSyntheticLocalPak();
+            LangInstaller.Install(localPak, packRes.Value!);
+
+            string expectedFolder = PackLoader.ResolveGameLangIdentity(id).Folder;
+            var installed = LangInstaller.GetInstalledLanguages(localPak);
+            Check($"{id} 安裝後 local.pak 的語系資料夾就是 ResolveGameLangIdentity 給的 {expectedFolder}",
+                installed.Count == 1 && installed[0].Equals(expectedFolder, StringComparison.OrdinalIgnoreCase));
+
+            // PatchState 記錄的簽章格式是 langpack_<資料夾>，PatchPipeline 的期望值必須產生同一個字串。
+            var state = PatchState.Inspect(GameFile.LocalPak, localPak.ToBytes());
+            Check($"{id} PatchState 記錄的簽章為 langpack_{expectedFolder}",
+                state.IsPatched && state.AppliedPatches.Contains($"langpack_{expectedFolder}"));
+        }
+
+        // B2. AGENTS.md §2.3：每一個內建語言包都必須能逐位元組精確反轉。
+        //     沒有備份可用，反轉不了就等於使用者只能靠 Steam 驗證檔案完整性救回來。
+        foreach (var (id, pack) in packs.Where(kv => kv.Value.IsBuiltIn))
+        {
+            byte[] vanilla = CreateSyntheticLocalPak().ToBytes();
+            var pakForRoundTrip = HmmPak.FromBytes(vanilla);
+            LangInstaller.Install(pakForRoundTrip, pack);
+            LangInstaller.Uninstall(pakForRoundTrip);
+            Check($"{id} 安裝後反安裝，local.pak 逐位元組 100% 還原為原版",
+                vanilla.SequenceEqual(pakForRoundTrip.ToBytes()));
+        }
+
+        // B3. 語系資料夾一律不得與原廠語系撞名。
+        //
+        //     真實的 local.pak 本來就有 SPANISH / ITALIAN / RUSSIAN 這些資料夾。若語言包
+        //     直接裝進去，安裝會覆蓋原廠 XML、反安裝會把原廠檔案刪掉——這個語言包就
+        //     不可逆了，違反 AGENTS.md §2.3，而且使用者永久失去遊戲官方翻譯。
+        //     es-ES / it-IT / ru-RU 因此改用 SPANISH_CK / ITALIAN_CK / RUSSIAN_CK，
+        //     安裝變成純新增、反安裝變成純移除，原廠翻譯原封不動。
+        foreach (var (id, pack) in packs)
+        {
+            string folder = PackLoader.ResolveGameLangIdentity(id).Folder;
+            Check($"{id} 的語系資料夾 {folder} 未與原廠語系撞名",
+                !LangInstaller.StockLanguages.Contains(folder));
+        }
+
+        //     並且在「已經有全部原廠語系」的 local.pak 上，每個內建語言包都必須
+        //     裝得上、反安裝後逐位元組還原，且完全不動到原廠語系的內容。
+        foreach (var (id, pack) in packs.Where(kv => kv.Value.IsBuiltIn))
+        {
+            byte[] vanilla = CreateSyntheticLocalPakWithStockLanguages().ToBytes();
+            var pak = HmmPak.FromBytes(vanilla);
+
+            LangInstaller.Install(pak, pack);
+
+            // 原廠語系的每一個項目都必須原封不動。
+            var reference = HmmPak.FromBytes(vanilla);
+            bool stockIntact = true;
+            foreach (string name in reference.Names())
+            {
+                string root = name.Split('\\')[0];
+                if (!LangInstaller.StockLanguages.Contains(root)) continue;
+                if (!pak.Contains(name) || !reference.Read(name).SequenceEqual(pak.Read(name)))
+                {
+                    stockIntact = false;
+                    break;
+                }
+            }
+            Check($"{id} 安裝後原廠語系檔案完全未被更動", stockIntact);
+
+            LangInstaller.Uninstall(pak);
+            Check($"{id} 裝在含全部原廠語系的 local.pak 上，反安裝後逐位元組還原為原版",
+                vanilla.SequenceEqual(pak.ToBytes()));
+        }
+
+        // C. vxSettings [Language] Default 也必須走同一個來源。
+        foreach (string id in sampleIds)
+        {
+            var ini = IniFile.FromText(CreateSyntheticVxSettings());
+            var cfg = new ToolkitConfig { Lang = new LangConfig { Pack = id } };
+            new LangModule().ApplyVxSettings(ini, cfg, null, null);
+
+            string expectedKey = PackLoader.ResolveGameLangIdentity(id).Key;
+            Check($"{id} 寫入 vxSettings 的 [Language] Default 為 {expectedKey}",
+                ini.GetValue("Language", "Default") == expectedKey);
+
+            var vxState = PatchState.Inspect(
+                GameFile.VxSettings, Encoding.GetEncoding(1252).GetBytes(ini.ToText()));
+            Check($"{id} PatchState 記錄的簽章為 lang_default ({expectedKey})",
+                vxState.AppliedPatches.Contains($"lang_default ({expectedKey})"));
+        }
+
+        // D. verify 端對端：套用非 zh-TW 語言包後，每個檔案的實際簽章都必須與設定相符。
+        //    修正前這一項對 zh-CN / ja-JP / es-ES / it-IT / ru-RU 必然失敗：
+        //    local.pak 實際是 langpack_SCHINESE，期望值卻是 langpack_zh-CN。
+        foreach (string id in sampleIds)
+        {
+            string tempGameDir = Path.Combine(
+                Path.GetTempPath(), "ckselftest_langverify_" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(tempGameDir);
+            try
+            {
+                File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
+                File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), CreateSyntheticLauncher64());
+                File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), CreateSyntheticDataPak().ToBytes());
+                File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), CreateSyntheticLocalPak().ToBytes());
+                File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName),
+                    Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
+
+                var config = new ToolkitConfig { Lang = new LangConfig { Pack = id } };
+                var pipeline = PatchPipeline.CreateDefault();
+
+                var applyRes = pipeline.ApplyAll(tempGameDir, config);
+                Check($"{id} 語言包套用成功", applyRes.Success);
+
+                var verifyRes = pipeline.Verify(tempGameDir, config);
+                Check($"{id} 套用後 verify 成功", verifyRes.Success);
+                if (verifyRes.Success)
+                {
+                    var mismatched = verifyRes.Value!.Files.Values.Where(f => !f.MatchesConfig).ToList();
+                    string detail = mismatched.Count == 0
+                        ? string.Empty
+                        : " -> " + string.Join("; ", mismatched.Select(f =>
+                            $"{f.File} 期望[{string.Join(",", f.ExpectedPatches)}] 實際[{string.Join(",", f.AppliedPatches)}]"));
+                    Check($"{id} 套用後所有檔案的實際簽章都與設定相符{detail}", mismatched.Count == 0);
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(tempGameDir, true); } catch { /* 清理失敗不影響測試結論 */ }
+            }
+        }
+
+        // E. CVXVisible 32px 網格硬上限：4096x2400 以內放行，超過一律拒絕。
+        Check("網格上限常數為 4096x2400",
+            CellGridPatch.MaxSurfaceWidth == 4096 && CellGridPatch.MaxSurfaceHeight == 2400);
+        Check("4K (3840x2160) 在網格覆蓋範圍內", CellGridPatch.IsSurfaceSupported(3840, 2160));
+        Check("邊界值 4096x2400 恰好在範圍內", CellGridPatch.IsSurfaceSupported(4096, 2400));
+        Check("寬度超出一格 (4097x2400) 被判定為不支援", !CellGridPatch.IsSurfaceSupported(4097, 2400));
+        Check("高度超出一格 (4096x2401) 被判定為不支援", !CellGridPatch.IsSurfaceSupported(4096, 2401));
+        Check("5K (5120x2880) 被判定為不支援", !CellGridPatch.IsSurfaceSupported(5120, 2880));
+        Check("零與負值被判定為不支援",
+            !CellGridPatch.IsSurfaceSupported(0, 1080) && !CellGridPatch.IsSurfaceSupported(1920, -1));
+
+        // F. CLI 必須真的擋下來，而不是只在文件裡寫上限。
+        string tempConfig = Path.Combine(
+            Path.GetTempPath(), "ckselftest_ceiling_" + Guid.NewGuid().ToString("N")[..8] + ".json");
+        try
+        {
+            (string Arg, string Val, string Label)[] rejected =
+            [
+                ("--resolution", "5120x2880", "5K 解析度"),
+                ("--resolution", "4096x2401", "高度超出一格"),
+                ("--hires", "8192", "ZoomMap 容量超出網格寬度")
+            ];
+
+            foreach (var (arg, val, label) in rejected)
+            {
+                using var swOut = new StringWriter();
+                using var swErr = new StringWriter();
+                int exitCode = CliHost.Execute(
+                    ["perf", "set", arg, val, "--config", tempConfig, "--json"], swOut, swErr);
+                Check($"CLI perf set {arg} {val} 被拒絕 ({label}, exitCode 2)",
+                    exitCode == ExitCodes.InvalidArgs);
+            }
+
+            using (var swOut = new StringWriter())
+            using (var swErr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(
+                    ["perf", "set", "--resolution", "3840x2160", "--config", tempConfig, "--json"],
+                    swOut, swErr);
+                Check("CLI perf set --resolution 3840x2160 仍然放行 (exitCode 0)",
+                    exitCode == ExitCodes.Success);
+            }
+        }
+        finally
+        {
+            try { if (File.Exists(tempConfig)) File.Delete(tempConfig); } catch { /* 清理失敗不影響測試結論 */ }
+        }
+    }
+
     private static void TestCliTrainerAndProfileCommands()
     {
         Console.WriteLine("\n33. CLI trainer list-cheats, list-tweaks, set 參數驗證、零寫入與 profile 取樣分析器測試");
@@ -2921,6 +3240,33 @@ internal static class Program
     /// <summary>
     /// 建立原版結構之合成 local.pak 檔案（包含 FONTS\TAHOMA13.APF、GERMAN\LOCAL.LOC.XML、ENGLISH\HELP.XML 與 CREDITS.TXT）。
     /// </summary>
+    /// <summary>
+    /// 建立更貼近真實 local.pak 的合成檔：除了 GERMAN/ENGLISH，還帶有原廠的
+    /// RUSSIAN / SPANISH / ITALIAN 三個語系資料夾——這正是 es-ES / it-IT / ru-RU
+    /// 三個語言包會覆蓋到的目標。
+    /// </summary>
+    private static HmmPak CreateSyntheticLocalPakWithStockLanguages()
+    {
+        var pak = CreateSyntheticLocalPak();
+
+        foreach (var (folder, native) in new[]
+        {
+            ("RUSSIAN", "Начать игру"),
+            ("SPANISH", "Iniciar partida"),
+            ("ITALIAN", "Inizia partita")
+        })
+        {
+            pak.WriteText($@"{folder}\LOCAL.LOC.XML",
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+                "<translationtable>\r\n" +
+                $"  <translationtableentry text=\"Start Game\" result=\"{native}\" />\r\n" +
+                "</translationtable>\r\n");
+            pak.WriteText($@"{folder}\CREDITS.TXT", $"{folder} stock credits\r\n");
+        }
+
+        return pak;
+    }
+
     private static HmmPak CreateSyntheticLocalPak()
     {
         var pak = HmmPak.CreateEmpty();

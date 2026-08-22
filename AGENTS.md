@@ -13,8 +13,9 @@
 - **單一 GUI**：使用者面對的只有一個視窗、一個執行檔。不得再拆出第二個工具。
 - **CLI 不是給人用的**：CLI 存在的唯一目的是讓 AI 代理程式驅動。無參數啟動一律開 GUI。
   CLI 永不互動、永不詢問、永遠可用 `--json` 取得穩定結構化輸出。
-- **雙語 UI**：繁體中文 / English，依 OS 語系自動選擇，使用者可手動切換。
-  所有使用者可見字串都必須走 `I18n`，不得硬編在 UI 程式碼裡。
+- **三語 UI**：繁體中文 / 简体中文 / English，依 OS 語系自動選擇（auto 模式會分辨簡繁），
+  使用者可手動切換。所有使用者可見字串都必須走 `I18n`，不得硬編在 UI 程式碼裡。
+  三個 `strings.*.json` 的鍵集必須 100% 一致，且 `{0}` 佔位符數量必須相同。
 - **語言包可擴充**：中文化不是寫死的「中文」功能，而是「安裝一個語言包」。
   新增語言 = 放一個語言包資料夾，不需要改任何一行程式碼。
 - **遊戲版本**：所有位址與位移都是 Steam 版 `Celtic kings.exe` 專屬。套用前必須驗證，
@@ -74,7 +75,38 @@ Tweaks 的原廠預設值、語言包安裝前的字型範圍）全部寫在程�
 清單內容會因為修改器重建 `data.pak`、或 Steam 更新而變動，索引會失效。
 因此設定檔一律存 `<寬>x<高>`，並在 `data.pak` 重建**之後**才重新查表寫入索引。
 
-### 2.5 啟動器的兩種桌面解析度處理方式互斥
+### 2.5 解析度上限是 4096x2400，超過一律拒絕（實機驗證，2026-08-22）
+`CellGridPatch` 把 CVXVisible 的 dirty-rect 網格從 16px 改成 32px，覆蓋範圍因此是
+**128 槽位 x 32px = 4096 寬、75 列 x 32px = 2400 高**。這是引擎結構的硬上限：
+
+- 寬度超過 4096：`x >= 4096` 的欄位永遠無法被標記 dirty，鏡頭捲動就出現塗抹破圖。
+- 高度超過 2400：列數需求超出 75，寫壞 CVXVisible 物件尾端 (`+0x4C0..+0x50F`) 而閃退。
+
+1080p / 2K (2560x1440) / 4K (3840x2160) 都在範圍內，且已實機驗證乾淨。
+**上限只有 `CellGridPatch.MaxSurfaceWidth` / `MaxSurfaceHeight` 兩個常數，
+任何會寫入解析度或 ZoomMap 容量的路徑都必須先問過 `CellGridPatch.IsSurfaceSupported`。**
+ZoomTables 本身理論上做得到 16384，但容量開得比網格大只會讓使用者選到會壞的解析度，
+所以 CLI (`perf set --resolution` / `--hires`) 與 GUI 存檔都硬性拒絕，不降級、不猜測。
+
+### 2.6 語系身分只有一個來源
+語言包 ID（`zh-CN`）與遊戲端語系名稱（資料夾 `SCHINESE`、`[Language] Default=schinese`）
+是兩回事，換算只能透過 `PackLoader.ResolveGameLangIdentity`，它讀的是 `pack.json` 的
+`gameLangFolder` / `gameLangKey`。任何地方都不得再自行硬編 `zh-TW -> CHINESE` 這類對應——
+從前 `PatchPipeline` 與 `LangModule` 各編一份，結果 5 個非繁中語言包裝完之後
+`verify` 永遠回報「設定不符」。
+
+**`gameLangFolder` 不得與原廠語系撞名**（`ENGLISH`/`GERMAN`/`FRENCH`/`BULGARIAN`/
+`SPANISH`/`ITALIAN`/`RUSSIAN`）。撞名的話安裝會覆蓋原廠 XML，而反安裝依清冊移除時
+會把原廠檔案一併刪掉——該語言包就不可逆了（違反 §2.3），使用者也永久失去官方翻譯。
+內建的 es-ES / it-IT / ru-RU 因此使用 `SPANISH_CK` / `ITALIAN_CK` / `RUSSIAN_CK`，
+安裝是純新增、反安裝是純移除，原廠翻譯原封不動且兩種都能選。
+`LanguagePack.ParseMeta` 會直接拒絕撞名的語言包，第三方包也套用同一條規則。
+
+同理，`PatchState` 記錄的每一個簽章都必須在 `PatchPipeline.GetExpectedPatchesForFile`
+有對應的期望值。漏一個就是全面性的假警報（`cell_grid` 就漏過一次，導致所有開了
+高解析度的設定 verify 都說 exe 不符）。
+
+### 2.7 啟動器的兩種桌面解析度處理方式互斥
 「完全不碰顯示設定」把 `ChangeDisplaySettingsA` 呼叫 NOP 掉；
 「開遊戲自動切換桌面」改寫 `0x1400043B0` 模式表第 0 筆。
 前者套用後模式表就是死碼，所以**啟用其一必須停用另一**。

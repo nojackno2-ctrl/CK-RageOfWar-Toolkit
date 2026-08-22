@@ -131,6 +131,19 @@ public sealed class LanguagePack
         if (string.IsNullOrWhiteSpace(meta.GameLangKey))
             return Result.Fail("缺少必要欄位 'gameLangKey' (Missing required field 'gameLangKey' in pack.json)", ExitCodes.InvalidArgs);
 
+        // 語系資料夾不得與遊戲原廠語系撞名。撞名的話安裝會覆蓋原廠 XML，
+        // 而反安裝依清冊移除時會把原廠檔案一併刪掉——這個語言包就不可逆了，
+        // 違反 AGENTS.md §2.3，使用者也永久失去遊戲的官方翻譯。
+        // 正確做法是取一個不撞名的資料夾（例如 SPANISH_CK），原廠翻譯就能原封保留。
+        if (LangInstaller.StockLanguages.Contains(meta.GameLangFolder.Trim()))
+        {
+            return Result.Fail(
+                $"'gameLangFolder' 不得使用遊戲原廠語系名稱 '{meta.GameLangFolder.Trim().ToUpperInvariant()}'，"
+                + $"否則安裝會覆蓋原廠翻譯且無法還原。請改用不撞名的名稱，例如 '{meta.GameLangFolder.Trim().ToUpperInvariant()}_CK'。"
+                + $" ('gameLangFolder' must not reuse a stock game language folder; use e.g. '{meta.GameLangFolder.Trim().ToUpperInvariant()}_CK')",
+                ExitCodes.InvalidArgs);
+        }
+
         if (string.IsNullOrWhiteSpace(meta.TemplateLang))
             return Result.Fail("缺少必要欄位 'templateLang' (Missing required field 'templateLang' in pack.json)", ExitCodes.InvalidArgs);
 

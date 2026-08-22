@@ -1,13 +1,13 @@
-﻿{
+{
   "id": "es-ES",
   "name": "Spanish",
   "nativeName": "Español",
   "version": "1.0.0",
   "authors": [
-    "CKToolkit Team"
+    "nojackno2-ctrl (AI-translated)"
   ],
-  "gameLangFolder": "SPANISH",
-  "gameLangKey": "spanish",
+  "gameLangFolder": "SPANISH_CK",
+  "gameLangKey": "spanish_ck",
   "templateLang": "GERMAN",
   "font": {
     "face": "Segoe UI",

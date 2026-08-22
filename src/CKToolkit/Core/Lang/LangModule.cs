@@ -40,19 +40,22 @@ public sealed class LangModule : IPatchModule
         }
 
         string packId = config.Lang.Pack.Trim();
-        var packs = PackLoader.DiscoverAll();
 
+        // 舊版設定檔把繁體中文寫成遊戲端的語系名 "chinese"，而不是語言包 ID。
+        if (packId.Equals("chinese", StringComparison.OrdinalIgnoreCase))
+        {
+            packId = "zh-TW";
+        }
+
+        var packs = PackLoader.DiscoverAll();
         if (!packs.TryGetValue(packId, out var pack))
         {
-            // 若為 zh-TW 但 DiscoverAll 未命中，強制載入內建 zh-TW
-            if (packId.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ||
-                packId.Equals("chinese", StringComparison.OrdinalIgnoreCase))
+            // DiscoverAll 未命中就直接問內嵌資源。這裡刻意不寫死任何語言 ID：
+            // 任何被嵌入的語言包都該走同一條退路。
+            var builtInRes = PackLoader.LoadEmbeddedPack(packId);
+            if (builtInRes.Success)
             {
-                var builtInRes = PackLoader.LoadEmbeddedPack("zh-TW");
-                if (builtInRes.Success)
-                {
-                    pack = builtInRes.Value;
-                }
+                pack = builtInRes.Value;
             }
         }
 
@@ -76,17 +79,13 @@ public sealed class LangModule : IPatchModule
             return;
         }
 
-        string packId = config.Lang.Pack.Trim();
-        var packs = PackLoader.DiscoverAll();
-
-        string langKey = "chinese";
-        if (packs.TryGetValue(packId, out var pack) && !string.IsNullOrWhiteSpace(pack.Meta.GameLangKey))
+        // 語系代號只有 PackLoader.ResolveGameLangIdentity 一個來源；PatchPipeline 的
+        // 期望值也走同一個函式，兩邊才不會對不上。從前這裡在查不到語言包時預設寫
+        // "chinese"，等於把任何未知語言包都當成繁體中文送進遊戲。
+        string langKey = PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Key;
+        if (string.IsNullOrWhiteSpace(langKey))
         {
-            langKey = pack.Meta.GameLangKey;
-        }
-        else if (!packId.Equals("zh-TW", StringComparison.OrdinalIgnoreCase))
-        {
-            langKey = packId.ToLowerInvariant();
+            return;
         }
 
         ini.SetValue("Language", "Default", langKey);
