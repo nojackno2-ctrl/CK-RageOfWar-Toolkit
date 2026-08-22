@@ -6,8 +6,8 @@
   "authors": [
     "CKToolkit Team"
   ],
-  "gameLangFolder": "RUSSIAN",
-  "gameLangKey": "russian",
+  "gameLangFolder": "RUSSIAN_CK",
+  "gameLangKey": "russian_ck",
   "templateLang": "GERMAN",
   "font": {
     "face": "Segoe UI",

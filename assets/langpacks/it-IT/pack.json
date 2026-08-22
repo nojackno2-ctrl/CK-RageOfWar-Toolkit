@@ -6,8 +6,8 @@
   "authors": [
     "CKToolkit Team"
   ],
-  "gameLangFolder": "ITALIAN",
-  "gameLangKey": "italian",
+  "gameLangFolder": "ITALIAN_CK",
+  "gameLangKey": "italian_ck",
   "templateLang": "GERMAN",
   "font": {
     "face": "Segoe UI",

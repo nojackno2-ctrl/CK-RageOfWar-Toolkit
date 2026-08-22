@@ -186,50 +186,89 @@ public static class PackLoader
     }
 
     /// <summary>
-    /// 探索並載入所有可用語言包（包含內嵌繁中 zh-TW 與外部 langpacks/ 目錄）。
+    /// 內嵌語言包快取。組件的內嵌資源在執行期是不可變的，因此只在第一次存取時掃描解析；
+    /// 外部 langpacks/ 目錄則每次重新掃描，以便匯入的語言包立即生效。
+    /// </summary>
+    private static readonly Lazy<Dictionary<string, LanguagePack>> EmbeddedPacks =
+        new(LoadAllEmbeddedPacks, isThreadSafe: true);
+
+    private const string EmbeddedPackPrefix = "CKToolkit.LangPacks.";
+    private const string EmbeddedPackManifest = "/pack.json";
+
+    /// <summary>
+    /// 純動態掃描組件內嵌資源，找出所有內建語言包。
+    /// 這裡刻意不保留任何語言 ID 白名單：新增語言只要把資料夾放進 assets/langpacks/，
+    /// csproj 的萬用字元就會嵌入它、這裡就會自動發現它，一行程式碼都不必改（AGENTS.md §1）。
+    /// </summary>
+    private static Dictionary<string, LanguagePack> LoadAllEmbeddedPacks()
+    {
+        var packs = new Dictionary<string, LanguagePack>(StringComparer.OrdinalIgnoreCase);
+        var targetAsm = typeof(PackLoader).Assembly;
+
+        foreach (string res in targetAsm.GetManifestResourceNames())
+        {
+            string clean = res.Replace('\\', '/');
+            if (!clean.StartsWith(EmbeddedPackPrefix, StringComparison.OrdinalIgnoreCase) ||
+                !clean.EndsWith(EmbeddedPackManifest, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string packId = clean.Substring(
+                EmbeddedPackPrefix.Length,
+                clean.Length - EmbeddedPackPrefix.Length - EmbeddedPackManifest.Length);
+            if (string.IsNullOrWhiteSpace(packId)) continue;
+
+            var loaded = LoadEmbeddedPack(packId, targetAsm);
+            if (loaded.Success && loaded.Value is not null)
+            {
+                packs[loaded.Value.Meta.Id] = loaded.Value;
+            }
+        }
+
+        return packs;
+    }
+
+    /// <summary>
+    /// 語言包 ID -> 遊戲端語系身分（local.pak 的語系資料夾、vxSettings.ini 的 [Language] Default）。
+    ///
+    /// 這是整個專案唯一一處把「工具箱的語言包 ID」翻成「遊戲看得懂的語系名稱」的地方。
+    /// 從前 PatchPipeline 與 LangModule 各自硬編 zh-TW -> CHINESE/chinese，於是 zh-CN、ja-JP、
+    /// es-ES、it-IT、ru-RU 安裝後 verify 永遠回報「設定不符」——實際寫入的是 pack.json 的
+    /// gameLangFolder（例如 SCHINESE），期望值卻拿語言包 ID（zh-CN）去比。
+    /// 任何需要這組名稱的程式碼一律走這個函式，不得再自行推導。
+    /// </summary>
+    /// <returns>Folder 為大寫語系資料夾名，Key 為小寫 vxSettings 語系代號；packId 為空時回傳兩個空字串。</returns>
+    public static (string Folder, string Key) ResolveGameLangIdentity(string? packId)
+    {
+        if (string.IsNullOrWhiteSpace(packId)) return (string.Empty, string.Empty);
+
+        string id = packId.Trim();
+        if (DiscoverAll().TryGetValue(id, out var pack) &&
+            !string.IsNullOrWhiteSpace(pack.Meta.GameLangFolder) &&
+            !string.IsNullOrWhiteSpace(pack.Meta.GameLangKey))
+        {
+            return (pack.Meta.GameLangFolder.ToUpperInvariant(), pack.Meta.GameLangKey.ToLowerInvariant());
+        }
+
+        // 語言包不在清單中（外部包被刪掉，或設定檔指向不存在的 ID）。此時沒有權威來源可查，
+        // 只能退回以 ID 本身推導——重點是「期望」與「實際」兩邊都走同一條退路，
+        // 才不會又製造出假的不符警告。
+        return (id.ToUpperInvariant(), id.ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// 探索並載入所有可用語言包（所有內嵌語言包 + 外部 langpacks/ 目錄）。
     /// 同 ID 之外部語言包會覆寫內嵌語言包。
     /// </summary>
     public static Dictionary<string, LanguagePack> DiscoverAll(string? customBaseDir = null)
     {
-        var packs = new Dictionary<string, LanguagePack>(StringComparer.OrdinalIgnoreCase);
+        // 1. 內嵌語言包：組件內容在執行期不會變，解析一次就夠。
+        //    每個內嵌包要反序列化約 3,458 條翻譯，而一次 apply 就會呼叫 DiscoverAll 兩次
+        //    (ApplyLocalPak + ApplyVxSettings)，不快取等於重複做數萬次 JSON 解析。
+        var packs = new Dictionary<string, LanguagePack>(EmbeddedPacks.Value, StringComparer.OrdinalIgnoreCase);
 
-        // 1. 載入所有內嵌語言包
-        var targetAsm = typeof(PackLoader).Assembly;
-        var resourceNames = targetAsm.GetManifestResourceNames();
-        var embeddedPackIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string res in resourceNames)
-        {
-            string clean = res.Replace('\\', '/');
-            if (clean.StartsWith("CKToolkit.LangPacks.", StringComparison.OrdinalIgnoreCase) &&
-                clean.EndsWith("/pack.json", StringComparison.OrdinalIgnoreCase))
-            {
-                string packId = clean.Substring("CKToolkit.LangPacks.".Length, clean.Length - "CKToolkit.LangPacks.".Length - "/pack.json".Length);
-                if (!string.IsNullOrWhiteSpace(packId))
-                {
-                    embeddedPackIds.Add(packId);
-                }
-            }
-        }
-
-        // 保障預設內嵌語言包清單
-        embeddedPackIds.Add("zh-TW");
-        embeddedPackIds.Add("zh-CN");
-        embeddedPackIds.Add("ja-JP");
-        embeddedPackIds.Add("es-ES");
-        embeddedPackIds.Add("it-IT");
-        embeddedPackIds.Add("ru-RU");
-
-        foreach (string packId in embeddedPackIds)
-        {
-            var builtInRes = LoadEmbeddedPack(packId, targetAsm);
-            if (builtInRes.Success && builtInRes.Value is not null)
-            {
-                packs[builtInRes.Value.Meta.Id] = builtInRes.Value;
-            }
-        }
-
-        // 2. 掃描外部 langpacks 目錄
+        // 2. 掃描外部 langpacks 目錄（每次重新掃描，讓匯入的語言包立即生效）
         string baseDir = customBaseDir ?? AppContext.BaseDirectory;
         string langpacksDir = Path.Combine(baseDir, "langpacks");
 

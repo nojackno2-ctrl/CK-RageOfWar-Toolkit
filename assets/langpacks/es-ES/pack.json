@@ -1,4 +1,4 @@
-﻿{
+{
   "id": "es-ES",
   "name": "Spanish",
   "nativeName": "Español",
@@ -6,8 +6,8 @@
   "authors": [
     "CKToolkit Team"
   ],
-  "gameLangFolder": "SPANISH",
-  "gameLangKey": "spanish",
+  "gameLangFolder": "SPANISH_CK",
+  "gameLangKey": "spanish_ck",
   "templateLang": "GERMAN",
   "font": {
     "face": "Segoe UI",

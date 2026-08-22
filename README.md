@@ -4,6 +4,8 @@
 
 An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: Rage of War* (2004, Steam edition) — combining performance enhancements, 1080p/2K/4K high-resolution support, language pack management, and an in-depth trainer into a single, clean GUI and AI-agent-driven CLI.
 
+![4K 解析度實機全景視野 (3840x2160) / 4K Battlefield Overview](docs/screenshots/gameplay-4k-overview.jpg)
+
 ---
 
 ## 繁體中文
@@ -14,9 +16,26 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 | 模組 | 功能特色 |
 |---|---|
-| **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
-| **多國語言包** | 內建繁體中文化（3,575 條詞彙）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
+| **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動；CVXVisible 32px 網格上限 4096x2400，超過一律拒絕寫入）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
+| **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,458 條詞彙 100% 覆蓋）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
 | **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
+
+#### 實機遊戲畫面（HD 介面 / 2K / 4K 高解析度支援）
+
+| 4K (3840x2160) 高盧要塞與村落細節 | 2K (2560x1440) 羅馬要塞城市細節 |
+|:---:|:---:|
+| ![4K 要塞與村落細節](docs/screenshots/gameplay-4k-settlement.jpg) | ![2K 羅馬要塞城市細節](docs/screenshots/gameplay-2k-settlement.jpg) |
+
+| HD 介面版 要塞建築細節 | HD 介面版 全景戰線視野 |
+|:---:|:---:|
+| ![HD 介面版 要塞建築細節](docs/screenshots/gameplay-hd-ui-settlement.jpg) | ![HD 介面版 全景戰線視野](docs/screenshots/gameplay-hd-ui-overview.jpg) |
+
+| 4K (3840x2160) 戰場全景視野 | 2K (2560x1440) 戰線全域佈局 |
+|:---:|:---:|
+| ![4K 戰場全景視野](docs/screenshots/gameplay-4k-overview.jpg) | ![2K 戰線全域佈局](docs/screenshots/gameplay-2k-overview.jpg) |
+
+> [!NOTE]
+> **高解析度黑邊現象說明**：因 2004 年原廠 UI 素材並未針對 HD 以上超高解析度繪製邊界，在 2K / 4K 解析度下部分介面頂部／外緣會顯露未覆蓋的黑色留白區域（如截圖頂部所示）。此現象為原廠固定尺寸素材之正常現象，完全不影響戰場操作與遊戲運行，本工具秉持不破壞原版原則未做強行拉伸補強。
 
 ---
 
@@ -102,6 +121,13 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
   }
 }
 ```
+
+> **`gameLangFolder` 不可與遊戲原廠語系撞名**（`ENGLISH`、`GERMAN`、`FRENCH`、
+> `BULGARIAN`、`SPANISH`、`ITALIAN`、`RUSSIAN`）。撞名的話安裝會覆蓋原廠翻譯，
+> 而反安裝會把原廠檔案一併刪除，導致無法還原。若要為遊戲已支援的語言提供
+> 替代翻譯，請加上後綴，例如 `SPANISH_CK` —— 本工具內建的 es-ES / it-IT / ru-RU
+> 就是這樣做的，遊戲原廠的西班牙文／義大利文／俄文因此完整保留，兩種都能選。
+> 工具會在載入 `pack.json` 時直接拒絕撞名的語言包。
 
 #### 3. 匯入語言包
 點擊語言分頁的「📥 匯入語言包…」選取資料夾，或透過 CLI：
@@ -192,9 +218,26 @@ An all-in-one modernization and toolkit for *Celtic Kings: Rage of War* (2004, S
 
 | Module | Features |
 |---|---|
-| **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
-| **Language Packs** | Built-in Traditional Chinese translation (3,575 entries), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
+| **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam; the CVXVisible 32px grid tops out at 4096x2400 and anything larger is refused), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
+| **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,458 entries each, 100% coverage), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
 | **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
+
+#### In-Game Screenshots (HD UI / 2K / 4K High-Resolution Support)
+
+| 4K (3840x2160) Celtic Settlement Detail | 2K (2560x1440) Roman Fortress Detail |
+|:---:|:---:|
+| ![4K Celtic Settlement](docs/screenshots/gameplay-4k-settlement.jpg) | ![2K Roman Fortress](docs/screenshots/gameplay-2k-settlement.jpg) |
+
+| HD Interface - Settlement Detail | HD Interface - Panoramic Battlefield |
+|:---:|:---:|
+| ![HD Interface Settlement Detail](docs/screenshots/gameplay-hd-ui-settlement.jpg) | ![HD Interface Panoramic Battlefield](docs/screenshots/gameplay-hd-ui-overview.jpg) |
+
+| 4K (3840x2160) Battlefield Panoramic View | 2K (2560x1440) Tactical Battlefield Layout |
+|:---:|:---:|
+| ![4K Battlefield Panoramic View](docs/screenshots/gameplay-4k-overview.jpg) | ![2K Battlefield Layout](docs/screenshots/gameplay-2k-overview.jpg) |
+
+> [!NOTE]
+> **Note on High-Resolution Black Borders**: Because original 2004 game UI assets were not designed for ultra-high resolutions above standard HD, black uncovered areas may appear along certain top/outer screen edges (as visible in the top headers of the screenshots above). This is purely cosmetic from fixed-dimension legacy UI assets and does not affect tactical battlefield controls or gameplay stability; the toolkit intentionally leaves them unstretched to preserve original asset integrity.
 
 ---
 
@@ -279,6 +322,14 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
   }
 }
 ```
+
+> **`gameLangFolder` must not reuse a stock game language folder** (`ENGLISH`, `GERMAN`,
+> `FRENCH`, `BULGARIAN`, `SPANISH`, `ITALIAN`, `RUSSIAN`). Installing into one overwrites
+> the original translation, and uninstalling then deletes the stock files along with ours,
+> making the pack unrevertible. To ship an alternative translation for a language the game
+> already supports, add a suffix — e.g. `SPANISH_CK`, which is exactly what the built-in
+> es-ES / it-IT / ru-RU packs do. The game's own Spanish/Italian/Russian stay intact and
+> both remain selectable. Packs that collide are rejected when `pack.json` is loaded.
 
 #### 3. Import Language Pack
 Click "📥 Import Pack..." in the Language tab, or via CLI:

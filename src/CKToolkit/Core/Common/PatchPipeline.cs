@@ -42,6 +42,10 @@ public sealed class FileApplyResult
 /// </summary>
 public sealed class ApplyReport
 {
+    /// <summary>偵測到的遊戲組建指紋；null 表示尚未偵測（例如提前失敗）。</summary>
+    [JsonPropertyName("gameBuild")]
+    public GameBuildInfo? GameBuild { get; set; }
+
     [JsonPropertyName("gameDir")]
     public string GameDir { get; set; } = string.Empty;
 
@@ -120,6 +124,10 @@ public sealed class FileVerificationInfo
 /// </summary>
 public sealed class VerificationReport
 {
+    /// <summary>偵測到的遊戲組建指紋；null 表示尚未偵測。</summary>
+    [JsonPropertyName("gameBuild")]
+    public GameBuildInfo? GameBuild { get; set; }
+
     [JsonPropertyName("gameFound")]
     public bool GameFound { get; set; }
 
@@ -246,6 +254,15 @@ public sealed class PatchPipeline
             if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
 
             byte[] exeBytes = normRes.Value!;
+
+            // 組建版本檢查：本工具所有位址都是特定 Steam 組建專屬的。對不上就警告，
+            // 但不阻止套用——真正的安全網是每個修補站點寫入前的原始位元組比對，
+            // 那一關過不了本來就會在上面的 Unrecognised 檢查被擋下來。
+            // 用正規化後的位元組來測，HiRes 附加的 .ckhr 節區才不會干擾 SizeOfImage。
+            var build = GameVersion.Detect(exeBytes);
+            report.GameBuild = build;
+            GameVersion.WarnIfUnknown(build, warnings);
+
             var exeLayered = new List<string>();
             if (config.Perf.Laa) exeLayered.Add("laa");
             if (config.Perf.VideoFix) exeLayered.Add("video_fix");
@@ -447,7 +464,10 @@ public sealed class PatchPipeline
             if (config.Perf.NoObjectAnimations) vxLayered.Add("no_object_animations");
             if (config.Perf.NoWaterAnimation) vxLayered.Add("no_water_animation");
             if (!string.IsNullOrWhiteSpace(config.Perf.Resolution)) vxLayered.Add($"resolution ({config.Perf.Resolution})");
-            if (!string.IsNullOrWhiteSpace(config.Lang.Pack)) vxLayered.Add($"lang_default ({config.Lang.Pack})");
+            if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+            {
+                vxLayered.Add($"lang_default ({PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Key})");
+            }
 
             foreach (var mod in _modules)
             {
@@ -476,11 +496,6 @@ public sealed class PatchPipeline
         }
 
         report.FilesWritten = writtenFiles;
-
-        if (config.Perf.Hires > 2560)
-        {
-            warnings.Add(Strings.Get("Perf_HdCeilingWarning"));
-        }
 
         return Result<ApplyReport>.Ok(report, warnings);
     }
@@ -671,6 +686,16 @@ public sealed class PatchPipeline
             var appliedPatches = fileState.AppliedPatches.ToList();
             var expectedPatches = GetExpectedPatchesForFile(f, effectiveConfig);
 
+            if (f == GameFile.Exe)
+            {
+                // 用正規化後的位元組偵測，HiRes 附加的 .ckhr 節區才不會影響 SizeOfImage。
+                // 正規化失敗就退回用現行位元組，至少時間戳仍然讀得到。
+                var normalised = PatchState.Normalise(f, liveBytes);
+                var build = GameVersion.Detect(normalised.Success ? normalised.Value! : liveBytes);
+                report.GameBuild = build;
+                GameVersion.WarnIfUnknown(build, warnings);
+            }
+
             foreach (var p in appliedPatches)
             {
                 if (!report.AppliedPatches.Contains(p))
@@ -723,7 +748,14 @@ public sealed class PatchPipeline
             case GameFile.Exe:
                 if (config.Perf.Laa) list.Add("laa");
                 if (config.Perf.VideoFix) list.Add("video_fix");
-                if (config.Perf.Hires >= 1600) list.Add("hires_zoom");
+                if (config.Perf.Hires >= 1600)
+                {
+                    // PerfModule.ApplyExe 在同一個條件下會連 CellGridPatch 一起套用，
+                    // 期望清單必須跟著列出來，否則 verify 會對每一份高解析度設定
+                    // 都回報「exe 與設定不符」。
+                    list.Add("hires_zoom");
+                    list.Add("cell_grid");
+                }
                 if (config.Perf.KeepRes) list.Add("res_writeback");
                 if (config.Trainer.Enabled && config.Trainer.NumpadKeys) list.Add("key_map");
                 break;
@@ -751,8 +783,9 @@ public sealed class PatchPipeline
             case GameFile.LocalPak:
                 if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
                 {
-                    string packFolder = config.Lang.Pack.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ? "CHINESE" : config.Lang.Pack;
-                    list.Add($"langpack_{packFolder}");
+                    // PatchState 記錄的是 local.pak 裡真正存在的語系資料夾名，
+                    // 所以期望值也必須用同一個來源，不能拿語言包 ID 湊。
+                    list.Add($"langpack_{PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Folder}");
                 }
                 break;
 
@@ -772,8 +805,7 @@ public sealed class PatchPipeline
                 }
                 if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
                 {
-                    string langKey = config.Lang.Pack.Equals("zh-TW", StringComparison.OrdinalIgnoreCase) ? "chinese" : config.Lang.Pack.ToLowerInvariant();
-                    list.Add($"lang_default ({langKey})");
+                    list.Add($"lang_default ({PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Key})");
                 }
                 break;
         }
