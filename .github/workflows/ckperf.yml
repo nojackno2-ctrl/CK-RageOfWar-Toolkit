@@ -31,9 +31,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: microsoft/setup-msbuild@v2
+      - uses: microsoft/setup-msbuild@v3
 
       # Win32 不可協商：目標行程是 2004 年的 32 位元組建。
       - name: Build ckperf.dll (Release|Win32)
@@ -79,7 +79,7 @@ jobs:
 
           $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ckperf-dll-release-win32
           path: dist/ckperf/Release/ckperf.dll
@@ -87,9 +87,12 @@ jobs:
 
       # 產生可用 `gh attestation verify` 驗證的來源證明，把「這個 DLL 由這個
       # 儲存庫的這個 commit 建出」變成可查核的事實而非口頭宣稱。
-      # 私有儲存庫的 attestation 可能因方案限制失敗，故不讓它擋住整個 job。
+      #
+      # 這一步刻意「不」加 continue-on-error：整個 workflow 存在的理由就是這份
+      # 證明，證明產不出來卻讓 job 顯示綠燈，等於把「無法驗證」偽裝成「已驗證」，
+      # 比沒有這一步更糟。（儲存庫還是私有時這裡必定失敗——個人帳號的私有
+      # 儲存庫不支援 attestation——但本儲存庫已公開，該限制不再適用。）
       - name: Attest build provenance
-        continue-on-error: true
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/ckperf/Release/ckperf.dll
