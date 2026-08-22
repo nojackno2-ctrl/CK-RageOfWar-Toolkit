@@ -66,9 +66,16 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 ### 系統需求與使用方法
 
-- **系統需求**：Windows 10 / 11 (x64)、[.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)、Steam 版《Celtic Kings: Rage of War》。
+- **系統需求**：Windows 10 / 11 (x64)、Steam 版《Celtic Kings: Rage of War》。
 - **快速開始**：
-  1. 下載最新 Release 的 `CKToolkit.exe`。
+  1. 到 [Releases](https://github.com/nojackno2-ctrl/CK-RageOfWar-Toolkit/releases/latest) 下載其中一個：
+
+     | 檔案 | 大小 | 需要先安裝什麼 |
+     |---|---|---|
+     | `CKToolkit-<版本>-win-x64-self-contained.exe` | ~50 MB | **不需要**，雙擊即用（推薦） |
+     | `CKToolkit-<版本>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+     兩者功能完全相同，差別只在有沒有把 .NET 執行階段包進去。發布物皆由 GitHub Actions 從原始碼建置並附 build provenance 證明，可用 `gh attestation verify <檔名> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit` 查核。
   2. 放置於任意目錄執行（不必放進遊戲目錄）。
   3. 無參數啟動即開啟 GUI 圖形介面：
      ```cmd
@@ -297,9 +304,16 @@ Backups are replaced by **Exact Reversal**:
 
 ### Requirements & Usage
 
-- **Requirements**: Windows 10 / 11 (x64), [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0), Steam edition of *Celtic Kings: Rage of War*.
+- **Requirements**: Windows 10 / 11 (x64), Steam edition of *Celtic Kings: Rage of War*.
 - **Quick Start**:
-  1. Download `CKToolkit.exe` from the latest Release.
+  1. Grab one of these from [Releases](https://github.com/nojackno2-ctrl/CK-RageOfWar-Toolkit/releases/latest):
+
+     | File | Size | Prerequisite |
+     |---|---|---|
+     | `CKToolkit-<version>-win-x64-self-contained.exe` | ~50 MB | **None** — just run it (recommended) |
+     | `CKToolkit-<version>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+
+     Both are functionally identical; the only difference is whether the .NET runtime is bundled in. Release binaries are built from source by GitHub Actions and carry a build provenance attestation, checkable with `gh attestation verify <file> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit`.
   2. Run from anywhere (does not need to be placed inside the game folder).
   3. Running with no arguments opens the GUI:
      ```cmd
