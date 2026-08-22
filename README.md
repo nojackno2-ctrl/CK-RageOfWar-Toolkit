@@ -206,7 +206,8 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 
 - 本專案採用 **MIT License** 開源授權。
 - 繁體中文翻譯資料由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
-- 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關，儲存庫內不包含任何原版遊戲之受版權保護二進位檔案。
+- 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關。
+- 本儲存庫不含任何原版遊戲之二進位檔案。語言包以遊戲原文作為索引鍵、僅供對照查表之用，原文著作權歸 Haemimont Games 所有；使用本工具需自行持有正版遊戲。
 
 ---
 
@@ -407,4 +408,5 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 
 - Released under the **MIT License**.
 - Traditional Chinese localization created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
-- This is an unofficial community project not affiliated with Haemimont Games or the publisher. No copyrighted game binaries are distributed in this repository.
+- This is an unofficial community project not affiliated with Haemimont Games or the publisher.
+- No game binaries from the original release are distributed in this repository. The language packs use the game's original strings as lookup keys for translation mapping only; copyright in those strings remains with Haemimont Games. A legitimate copy of the game is required to use this tool.
