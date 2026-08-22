@@ -205,7 +205,8 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ### 授權與致謝
 
 - 本專案採用 **MIT License** 開源授權。
-- 繁體中文翻譯資料由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
+- 本專案由 [nojackno2-ctrl](https://github.com/nojackno2-ctrl) 製作維護。
+- **本專案所有翻譯內容均由 AI 翻譯產生**，未經母語人士全文校對，用語與語境可能有誤。這包含遊戲語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU 共 6 個語系）以及工具本身的介面字串。歡迎回報問題或提交修正 PR。
 - 本工具為社群獨立開發之非官方工具，與 Haemimont Games 及遊戲發行商無關。
 - 本儲存庫不含任何原版遊戲之二進位檔案。語言包以遊戲原文作為索引鍵、僅供對照查表之用，原文著作權歸 Haemimont Games 所有；使用本工具需自行持有正版遊戲。
 
@@ -407,6 +408,7 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 ### Licence & Credits
 
 - Released under the **MIT License**.
-- Traditional Chinese localization created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
+- Created and maintained by [nojackno2-ctrl](https://github.com/nojackno2-ctrl).
+- **All translated content in this project is AI-generated** and has not been fully proofread by native speakers, so wording and context may be inaccurate. This covers both the game language packs (six locales: zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU) and the toolkit's own interface strings. Bug reports and correction PRs are welcome.
 - This is an unofficial community project not affiliated with Haemimont Games or the publisher.
 - No game binaries from the original release are distributed in this repository. The language packs use the game's original strings as lookup keys for translation mapping only; copyright in those strings remains with Haemimont Games. A legitimate copy of the game is required to use this tool.
