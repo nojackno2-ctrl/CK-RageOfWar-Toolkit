@@ -1,0 +1,95 @@
+# 從原始碼重建注入用的 ckperf.dll，並公開建置產物與來源證明。
+#
+# 存在理由：assets/ckperf/ckperf.dll 是簽入儲存庫的預建二進位檔，而它會被注入
+# 遊戲行程。使用者沒有理由信任一個來路不明的 DLL，所以這裡在 GitHub 的公開
+# runner 上從 src/CKPerf/ 重新建置一份，附上 build provenance 證明，任何人都能
+# 下載、比對、或乾脆改用 CI 產出的那一份。
+name: ckperf
+
+on:
+  push:
+    paths:
+      - 'src/CKPerf/**'
+      - 'assets/ckperf/**'
+      - 'tools/perf/build-ckperf.ps1'
+      - '.github/workflows/ckperf.yml'
+  pull_request:
+    paths:
+      - 'src/CKPerf/**'
+      - 'assets/ckperf/**'
+      - 'tools/perf/build-ckperf.ps1'
+      - '.github/workflows/ckperf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      # Win32 不可協商：目標行程是 2004 年的 32 位元組建。
+      - name: Build ckperf.dll (Release|Win32)
+        run: msbuild src\CKPerf\CKPerf.vcxproj /p:Configuration=Release /p:Platform=Win32 /v:minimal /nologo
+
+      - name: Compare against the checked-in binary
+        shell: pwsh
+        run: |
+          $built = 'dist\ckperf\Release\ckperf.dll'
+          $asset = 'assets\ckperf\ckperf.dll'
+          if (-not (Test-Path $built)) { throw "建置成功但找不到輸出：$built" }
+
+          $b = Get-FileHash $built -Algorithm SHA256
+          $bSize = (Get-Item $built).Length
+
+          $lines = @(
+            '## ckperf.dll',
+            '',
+            '| | SHA256 | bytes |',
+            '|---|---|---|',
+            "| CI 建置 | ``$($b.Hash)`` | $bSize |"
+          )
+
+          if (Test-Path $asset) {
+            $a = Get-FileHash $asset -Algorithm SHA256
+            $aSize = (Get-Item $asset).Length
+            $lines += "| 簽入儲存庫 | ``$($a.Hash)`` | $aSize |"
+            $lines += ''
+            if ($a.Hash -eq $b.Hash) {
+              $lines += '雜湊一致。'
+            } else {
+              # 這不是失敗。MSVC 的 Release 建置預設不是位元級可重現的（LTCG、
+              # 連結器時間戳記、PDB 簽章都會變動），不同 toolset 版本更是必然不同。
+              # 雜湊不同只代表「無法用雜湊證明相同」，不代表內容有問題 —— 判斷依據
+              # 是大小是否接近、以及這份 CI 產物本身可否通過你的測試。
+              $lines += '雜湊不同。MSVC Release 建置預設不可位元重現（LTCG / 連結器時間戳記 / PDB 簽章 / toolset 版本差異），故此處僅作提示，不視為失敗。'
+              $lines += "大小差 $([Math]::Abs($aSize - $bSize)) bytes。若差距顯著，代表簽入的那一份可能沒跟上 src/CKPerf/ 的變更。"
+              Write-Host "::warning::簽入的 ckperf.dll 與 CI 建置結果雜湊不同（見 job summary）"
+            }
+          } else {
+            $lines += '| 簽入儲存庫 | (不存在) | - |'
+          }
+
+          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ckperf-dll-release-win32
+          path: dist/ckperf/Release/ckperf.dll
+          if-no-files-found: error
+
+      # 產生可用 `gh attestation verify` 驗證的來源證明，把「這個 DLL 由這個
+      # 儲存庫的這個 commit 建出」變成可查核的事實而非口頭宣稱。
+      # 私有儲存庫的 attestation 可能因方案限制失敗，故不讓它擋住整個 job。
+      - name: Attest build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/ckperf/Release/ckperf.dll

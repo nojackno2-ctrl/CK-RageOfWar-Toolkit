@@ -59,6 +59,12 @@ Copy-Item $built $asset -Force
 $hash = (Get-FileHash $asset -Algorithm SHA256).Hash
 $size = (Get-Item $asset).Length
 
+# 雜湊側錄檔必須跟著 DLL 一起變動。使用者拿它比對執行期展開到
+# %LOCALAPPDATA%\CKToolkit\runtime\ 的那一份，側錄檔一旦過期就會產生假警報，
+# 比沒有還糟。格式刻意對齊 sha256sum，讓 `sha256sum -c` 可以直接吃。
+$sidecar = "$asset.sha256"
+[System.IO.File]::WriteAllText($sidecar, "$($hash.ToLowerInvariant()) *ckperf.dll`n")
+
 Write-Host ""
 Write-Host "已更新 $asset"
 Write-Host "  大小   $size bytes"

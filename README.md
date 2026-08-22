@@ -86,6 +86,32 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 - **掛載到執行中的遊戲**：遊戲已由 Steam 開啟時，一鍵手動掛載。
 - **持續監看（Steam 開也會掛上）**：常駐背景監聽，無論何時從 Steam 開啟遊戲均會自動掛載防崩潰與遙測模組。
 
+<details>
+<summary><b>如何驗證這個 DLL —— 它會被注入遊戲行程，不必無條件信任</b></summary>
+
+`assets/ckperf/ckperf.dll` 是簽入儲存庫的預建二進位檔，完整原始碼在 [`src/CKPerf/`](src/CKPerf/)。三條驗證途徑：
+
+**1. 改用 CI 建置的版本（最強）**
+每當 `src/CKPerf/` 有變動，[`.github/workflows/ckperf.yml`](.github/workflows/ckperf.yml) 會在 GitHub 自家 runner 上從原始碼重建，並產生 build provenance 證明。到 Actions 頁面下載 `ckperf-dll-release-win32` 產物即可，證明本身可查核：
+
+```bash
+gh attestation verify ckperf.dll --repo nojackno2-ctrl/CK-RageOfWar-Toolkit
+```
+
+**2. 自行重建**
+需要 Visual Studio 的「使用 C++ 的桌面開發」工作負載：
+
+```powershell
+pwsh tools/perf/build-ckperf.ps1
+```
+
+**3. 比對執行期展開的檔案**
+工具會把內嵌的 DLL 展開到 `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.dll`，它應與儲存庫版本一致。雜湊記錄於 [`assets/ckperf/ckperf.dll.sha256`](assets/ckperf/ckperf.dll.sha256)，可直接餵給 `sha256sum -c`。
+
+> **關於雜湊的誠實說明**：MSVC 的 Release 建置預設**不是**位元級可重現的 —— LTCG、連結器時間戳記、PDB 簽章與 toolset 版本都會改變輸出。因此途徑 2 自行重建的結果**不會**與簽入版本雜湊相同，這是正常的，不代表有問題。雜湊只適用於途徑 3（同一份檔案的搬運驗證）；要證明「這個二進位確實出自這份原始碼」，請用途徑 1 的 provenance 證明。
+
+</details>
+
 ---
 
 ### 語言包擴充與匯出／匯入
@@ -290,6 +316,32 @@ Includes an embedded 32-bit native runtime helper `ckperf.dll` (embedded in the 
 - **Launch Game with Diagnostics**: Launches the game and injects crash prevention and telemetry hooks before the entry point.
 - **Attach to Running Game**: Attach diagnostic and recovery layers to an already running instance.
 - **Watch & Auto-Attach**: Background watcher that automatically hooks into game instances launched directly from Steam.
+
+<details>
+<summary><b>Verifying this DLL — it gets injected into the game process, so don't trust it blindly</b></summary>
+
+`assets/ckperf/ckperf.dll` is a prebuilt binary checked into the repository; its full source is in [`src/CKPerf/`](src/CKPerf/). Three ways to verify it:
+
+**1. Use the CI-built binary instead (strongest)**
+Whenever `src/CKPerf/` changes, [`.github/workflows/ckperf.yml`](.github/workflows/ckperf.yml) rebuilds it from source on GitHub's own runners and emits a build provenance attestation. Download the `ckperf-dll-release-win32` artifact from the Actions tab; the attestation itself is checkable:
+
+```bash
+gh attestation verify ckperf.dll --repo nojackno2-ctrl/CK-RageOfWar-Toolkit
+```
+
+**2. Rebuild it yourself**
+Requires the Visual Studio "Desktop development with C++" workload:
+
+```powershell
+pwsh tools/perf/build-ckperf.ps1
+```
+
+**3. Check the file extracted at runtime**
+The toolkit unpacks its embedded DLL to `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.dll`, which should match the repository copy. Its hash is recorded in [`assets/ckperf/ckperf.dll.sha256`](assets/ckperf/ckperf.dll.sha256), in a format `sha256sum -c` accepts directly.
+
+> **An honest note about hashes**: MSVC Release builds are **not** bit-for-bit reproducible by default — LTCG, linker timestamps, PDB signatures and toolset versions all change the output. So a DLL you rebuild via route 2 will **not** hash-match the checked-in one, and that is expected rather than a red flag. Hashes only apply to route 3 (verifying a copy of the same file). To prove that a binary really came from this source, use the provenance attestation from route 1.
+
+</details>
 
 ---
 
