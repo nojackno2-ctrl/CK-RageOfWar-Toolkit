@@ -85,6 +85,7 @@ void LoadConfig(HMODULE selfModule) {
     g_cfg.frameTiming  = OptFlag(opts, L"frames",     true);
     g_cfg.nullGuard    = OptFlag(opts, L"guard",      true);
     g_cfg.nullStoreRepair = OptFlag(opts, L"repair",  true);
+    g_cfg.arrayGuard   = OptFlag(opts, L"arrayguard", true);
     g_cfg.maxReports   = OptInt (opts, L"maxreports",   20);
     g_cfg.telemetryMs  = OptInt (opts, L"telemetryms", 1000);
 
@@ -265,7 +266,13 @@ void DescribeAddress(uintptr_t addr, char* buf, size_t cch) {
 // ----------------------------------------------------------------------- helpers
 
 bool SafeRead(uintptr_t addr, void* dst, size_t len) {
-    if (!addr || !len) return false;
+    if (!addr || !dst || !len) return false;
+
+    // The 2026-08-23 field crash reached this helper with addr=0xFFFFFFF8 and len=32
+    // after WriteReport computed eip-8 for EIP 0. Without an overflow check `end`
+    // wrapped to 0x18, the validation loop ran zero times, and memcpy faulted inside
+    // ckperf.dll while the crash handler was already active.
+    if (len > UINTPTR_MAX - addr) return false;
 
     // VirtualQuery rather than a SEH probe: the crash handler must not raise a nested
     // exception, and a nested exception inside a VEH is exactly how a diagnostic tool
@@ -278,9 +285,27 @@ bool SafeRead(uintptr_t addr, void* dst, size_t len) {
         if (mbi.State != MEM_COMMIT) return false;
         DWORD prot = mbi.Protect & 0xFF;
         if (prot == PAGE_NOACCESS || (mbi.Protect & PAGE_GUARD)) return false;
-        p = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        uintptr_t regionBase = (uintptr_t)mbi.BaseAddress;
+        if (mbi.RegionSize > UINTPTR_MAX - regionBase) return false;
+        uintptr_t next = regionBase + mbi.RegionSize;
+        if (next <= p) return false;  // overflow or a malformed/non-progressing region
+        p = next;
     }
     memcpy(dst, (const void*)addr, len);
+    return true;
+}
+
+bool SafeReadSelfTest() {
+    unsigned char src[32];
+    unsigned char dst[32] = {};
+    for (unsigned i = 0; i < sizeof(src); ++i) src[i] = (unsigned char)(i ^ 0xA5u);
+
+    if (!SafeRead((uintptr_t)src, dst, sizeof(src))) return false;
+    if (memcmp(src, dst, sizeof(src)) != 0) return false;
+
+    // Exact shape from the field failure: (EIP 0 - 8) + 32 wraps to 0x18.
+    if (SafeRead(UINTPTR_MAX - 7u, dst, sizeof(dst))) return false;
+    if (SafeRead((uintptr_t)src, nullptr, sizeof(src))) return false;
     return true;
 }
 
@@ -290,7 +315,42 @@ int Append(char* buf, int cap, int pos, const char* fmt, ...) {
     va_start(ap, fmt);
     int n = _vsnprintf_s(buf + pos, cap - pos, _TRUNCATE, fmt, ap);
     va_end(ap);
-    return n < 0 ? cap - 1 : pos + n;
+
+    // _vsnprintf_s returns -1 for two very different reasons, and conflating them
+    // cost a whole fault report. The old code mapped -1 to `cap - 1`, which is right
+    // for truncation (the buffer really is full) but catastrophic for a formatting
+    // failure: on 2026-08-22 the diagnostics directory was C:\...\Desktop\紀錄, the
+    // "%S" conversion of that path failed in the "C" locale, this returned 65535, and
+    // every later Append in the report saw pos >= cap - 1 and wrote nothing. What
+    // landed on disk was three lines followed by 64 KB of NULs from the static buffer.
+    //
+    // Both cases leave the buffer null-terminated (a failed conversion leaves it
+    // empty), so measure what actually got written instead of guessing. Truncation
+    // still walks pos to the end of what fit; a failed append now leaves pos alone and
+    // the rest of the report still gets written.
+    if (n < 0) {
+        buf[cap - 1] = 0;
+        return pos + (int)strlen(buf + pos);
+    }
+    return pos + n;
+}
+
+// The narrow "%S" conversion goes through the C locale, which is "C" unless someone
+// calls setlocale -- so it handles ASCII and nothing else. Every path in this DLL comes
+// from the user's own directory names, so treating non-ASCII as an error case is not a
+// theoretical concern; it is the normal case for this user. Convert explicitly instead,
+// to UTF-8: the rest of a report is ASCII, so the file stays valid UTF-8 throughout.
+const char* WideToUtf8(const wchar_t* src, char* dst, int cap) {
+    if (!dst || cap <= 0) return "";
+    dst[0] = 0;
+    if (src) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, src, -1, dst, cap, nullptr, nullptr);
+        if (n > 0) return dst;
+    }
+    // Never return an empty string: a blank line in a fault report reads as "there was
+    // nothing to say", which is exactly the wrong thing to believe about a lost path.
+    strncpy_s(dst, (size_t)cap, "(path could not be converted)", _TRUNCATE);
+    return dst;
 }
 
 } // namespace ckperf

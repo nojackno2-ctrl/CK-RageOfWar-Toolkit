@@ -23,6 +23,11 @@ public sealed class PerformancePage : UserControl
     private readonly GroupBox _animationGroup = new();
     private readonly CheckBox _noObjectAnimations = new();
     private readonly CheckBox _noWaterAnimation = new();
+    private readonly GroupBox _stabilityGroup = new();
+    private readonly CheckBox _stabilityProtection = new();
+    private readonly Label _stabilityDescription = new();
+    private readonly CheckBox _experimentalStability = new();
+    private readonly Label _experimentalDescription = new();
 
     private bool _isLoading;
 
@@ -36,7 +41,7 @@ public sealed class PerformancePage : UserControl
 
     private void BuildUi()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 2 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 3 };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
 
@@ -46,6 +51,26 @@ public sealed class PerformancePage : UserControl
 
         ConfigureGroup(_animationGroup);
         _animationGroup.Controls.Add(Stack(_noObjectAnimations, _noWaterAnimation));
+
+        ConfigureGroup(_stabilityGroup);
+        _stabilityGroup.MinimumSize = new Size(0, 185);
+        var stability = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(10)
+        };
+        _stabilityProtection.AutoSize = true;
+        _stabilityProtection.Font = new Font(Font, FontStyle.Bold);
+        _stabilityProtection.CheckedChanged += (_, _) => RefreshEnabledState();
+        ConfigureDescription(_stabilityDescription, Color.FromArgb(71, 85, 105));
+        _experimentalStability.AutoSize = true;
+        _experimentalStability.Font = new Font(Font, FontStyle.Bold);
+        _experimentalStability.Margin = new Padding(3, 12, 3, 2);
+        ConfigureDescription(_experimentalDescription, Color.FromArgb(180, 83, 9));
+        stability.Controls.Add(_stabilityProtection, 0, 0);
+        stability.Controls.Add(_stabilityDescription, 0, 1);
+        stability.Controls.Add(_experimentalStability, 0, 2);
+        stability.Controls.Add(_experimentalDescription, 0, 3);
+        _stabilityGroup.Controls.Add(stability);
 
         ConfigureGroup(_resolutionGroup);
         _resolutionGroup.MinimumSize = new Size(0, 245);
@@ -105,9 +130,19 @@ public sealed class PerformancePage : UserControl
 
         root.Controls.Add(_compatGroup, 0, 0);
         root.Controls.Add(_animationGroup, 1, 0);
-        root.Controls.Add(_resolutionGroup, 0, 1);
+        root.Controls.Add(_stabilityGroup, 0, 1);
+        root.SetColumnSpan(_stabilityGroup, 2);
+        root.Controls.Add(_resolutionGroup, 0, 2);
         root.SetColumnSpan(_resolutionGroup, 2);
         Controls.Add(root);
+    }
+
+    private static void ConfigureDescription(Label label, Color color)
+    {
+        label.AutoSize = true;
+        label.MaximumSize = new Size(900, 0);
+        label.ForeColor = color;
+        label.Margin = new Padding(22, 0, 3, 4);
     }
 
     private static FlowLayoutPanel Stack(params Control[] controls)
@@ -149,6 +184,8 @@ public sealed class PerformancePage : UserControl
             _suppressDisplay.Checked = !_autoSwitch.Checked;
             _noObjectAnimations.Checked = config.NoObjectAnimations;
             _noWaterAnimation.Checked = config.NoWaterAnimation;
+            _stabilityProtection.Checked = config.StabilityProtection;
+            _experimentalStability.Checked = config.ExperimentalStability;
             RefreshEnabledState();
         }
         finally
@@ -179,6 +216,8 @@ public sealed class PerformancePage : UserControl
         config.DesktopMode = _suppressDisplay.Checked ? "suppress" : "autoSwitch";
         config.NoObjectAnimations = _noObjectAnimations.Checked;
         config.NoWaterAnimation = _noWaterAnimation.Checked;
+        config.StabilityProtection = _stabilityProtection.Checked;
+        config.ExperimentalStability = _stabilityProtection.Checked && _experimentalStability.Checked;
 
         string[] stock = ["1024x768", "1152x864", "1280x1024", "1600x1200"];
         config.AddRes = stock.Contains(resolution, StringComparer.OrdinalIgnoreCase) ? [] : [resolution];
@@ -203,11 +242,18 @@ public sealed class PerformancePage : UserControl
         _animationGroup.Text = Strings.Get("Gui_Perf_Animations");
         _noObjectAnimations.Text = Strings.Get("Gui_Perf_NoObjectAnimations");
         _noWaterAnimation.Text = Strings.Get("Gui_Perf_NoWaterAnimation");
+        _stabilityGroup.Text = Strings.Get("Gui_Perf_StabilityGroup");
+        _stabilityProtection.Text = Strings.Get("Gui_Perf_StabilityProtection");
+        _stabilityDescription.Text = Strings.Get("Gui_Perf_StabilityProtectionDesc");
+        _experimentalStability.Text = Strings.Get("Gui_Perf_ExperimentalStability");
+        _experimentalDescription.Text = Strings.Get("Gui_Perf_ExperimentalStabilityDesc");
     }
 
     private void RefreshEnabledState()
     {
         _capacity.Enabled = _hires.Checked;
+        _experimentalStability.Enabled = _stabilityProtection.Checked;
+        _experimentalDescription.Enabled = _stabilityProtection.Checked;
     }
 
     private void OnResolutionChanged()

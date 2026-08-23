@@ -26,6 +26,7 @@ public sealed class LanguagePage : UserControl
 
     public LanguagePage()
     {
+        AutoScroll = true;
         BackColor = Color.White;
         Padding = new Padding(24);
         BuildUi();

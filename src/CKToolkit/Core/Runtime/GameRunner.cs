@@ -21,15 +21,35 @@ public sealed class DiagnosticsOptions
     /// <summary>量測每幀時間與 GDI 全螢幕搬移成本。純觀測，不改變任何行為。</summary>
     public bool FrameTiming { get; set; } = true;
 
+    /// <summary>已驗證的腳本 out-parameter 窄 guard。</summary>
+    public bool NullGuard { get; set; } = true;
+
+    /// <summary>通用 Null/VM 例外修復；可能改變壞腳本語意，產品日常模式預設關閉。</summary>
+    public bool NullStoreRepair { get; set; } = true;
+
+    /// <summary>已驗證的 132x132 編組網格邊界 guard。</summary>
+    public bool ArrayGuard { get; set; } = true;
+
     /// <summary>單次執行最多寫出幾份故障報告，避免連續錯誤把磁碟塞爆。</summary>
     public int MaxReports { get; set; } = 20;
 
     /// <summary>背景取樣週期（毫秒）。</summary>
     public int TelemetryMs { get; set; } = 1000;
 
+    /// <summary>
+    /// 診斷輸出資料夾。<c>null</c> 代表沿用 <see cref="GameRunner.DiagnosticsDirectory"/>。
+    ///
+    /// 存在的理由是整合：注入層以前一律寫 LocalAppData 底下的 diag 資料夾，
+    /// 而取樣器寫桌面，同一場閃退的證據被拆在兩個地方，事後拼不回來。
+    /// 現在由 <see cref="DiagnosticSession"/> 把兩層指到同一個資料夾。
+    /// </summary>
+    public string? OutputDirectory { get; set; }
+
     internal string ToOptionString() =>
         $"crash={(CrashReports ? 1 : 0)},dump={(MiniDumps ? 1 : 0)}," +
         $"telemetry={(Telemetry ? 1 : 0)},frames={(FrameTiming ? 1 : 0)}," +
+        $"guard={(NullGuard ? 1 : 0)},repair={(NullStoreRepair ? 1 : 0)}," +
+        $"arrayguard={(ArrayGuard ? 1 : 0)}," +
         $"maxreports={MaxReports},telemetryms={TelemetryMs}";
 }
 
@@ -54,6 +74,65 @@ public static class GameRunner
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                      "CKToolkit", "diag");
 
+    /// <summary>日常穩定模式的小型記錄；不跟完整分析器的證據資料夾混在一起。</summary>
+    public static string StabilityDirectory =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                     "CKToolkit", "stability");
+
+    /// <summary>
+    /// 把產品頁面的兩層選擇轉成 ckperf 的底層開關。日常模式不做效能取樣、不寫 dump；
+    /// 只有實驗性層才需要 VEH crash handler，因為通用修復是由它承接例外。
+    /// </summary>
+    public static DiagnosticsOptions CreateStabilityOptions(PerfConfig perf)
+    {
+        bool enabled = perf.StabilityProtection;
+        bool experimental = enabled && perf.ExperimentalStability;
+        return new DiagnosticsOptions
+        {
+            CrashReports = experimental,
+            MiniDumps = false,
+            Telemetry = false,
+            FrameTiming = false,
+            NullGuard = enabled,
+            ArrayGuard = enabled,
+            NullStoreRepair = experimental,
+            MaxReports = 5,
+            TelemetryMs = 5000,
+            OutputDirectory = StabilityDirectory,
+        };
+    }
+
+    /// <summary>完全不注入的普通啟動，供使用者明確關閉所有執行期保護時使用。</summary>
+    public static Result<RunOutcome> LaunchPlain(string gameDir)
+    {
+        if (!GamePaths.IsGameDir(gameDir))
+            return Result<RunOutcome>.Fail($"不是有效的遊戲目錄：{gameDir}", ExitCodes.GameNotFound);
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.Combine(gameDir, GamePaths.ExeFileName),
+                WorkingDirectory = gameDir,
+                UseShellExecute = true,
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            uint pid = (uint)(process?.Id ?? 0);
+            return pid == 0
+                ? Result<RunOutcome>.Fail("遊戲行程沒有成功建立。")
+                : Result<RunOutcome>.Ok(new RunOutcome(pid, string.Empty, "未注入執行期穩定保護。", false));
+        }
+        catch (Exception ex)
+        {
+            return Result<RunOutcome>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>把 <see cref="DiagnosticsOptions.OutputDirectory"/> 解析成實際可用的路徑。</summary>
+    internal static string ResolveOutputDirectory(DiagnosticsOptions options) =>
+        string.IsNullOrWhiteSpace(options.OutputDirectory)
+            ? DiagnosticsDirectory
+            : options.OutputDirectory!;
+
     private static string RuntimeDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                      "CKToolkit", "runtime");
@@ -73,10 +152,12 @@ public static class GameRunner
         Result<string> dll = ExtractRuntimeDll();
         if (dll.IsError) return Result<RunOutcome>.Fail(dll.ErrorMessage!, dll.ExitCode);
 
-        string outDir = DiagnosticsDirectory;
+        string outDir = ResolveOutputDirectory(options);
         Directory.CreateDirectory(outDir);
 
-        WriteSettingsFile(options, outDir);
+        Result settings = WriteSettingsFile(options, outDir);
+        if (settings.IsError)
+            log?.Invoke($"診斷設定檔寫入失敗，但自行啟動模式仍會透過子行程環境傳遞相同輸出路徑：{settings.ErrorMessage}");
 
         var env = new Dictionary<string, string>
         {
@@ -158,7 +239,8 @@ public static class GameRunner
         // no trace when it fails to attach is a collector that cannot be debugged. This
         // file records every decision it makes, so an empty diag folder is never again
         // the whole story.
-        string watchLog = Path.Combine(DiagnosticsDirectory,
+        string outDir = ResolveOutputDirectory(options);
+        string watchLog = Path.Combine(outDir,
             $"ckwatch-{DateTime.Now:yyyyMMdd-HHmmss}.log");
         void Trace(string m)
         {
@@ -173,7 +255,7 @@ public static class GameRunner
             }
         }
 
-        try { Directory.CreateDirectory(DiagnosticsDirectory); } catch { /* reported below */ }
+        try { Directory.CreateDirectory(outDir); } catch { /* reported below */ }
 
         Trace($"常駐監看已啟動（本工具 pid {Environment.ProcessId}，"
             + $"{(Environment.IsPrivilegedProcess ? "以系統管理員身分執行" : "一般權限")}）。");
@@ -197,7 +279,7 @@ public static class GameRunner
                     Trace($"偵測到遊戲行程 pid {pid}，正在掛載……");
                     Result<RunOutcome> r = AttachToProcess((uint)pid, options, Trace);
                     Trace(r.IsOk
-                        ? $"pid {pid} 已就位。診斷輸出：{DiagnosticsDirectory}"
+                        ? $"pid {pid} 已就位。診斷輸出：{outDir}"
                         : $"pid {pid} 掛載失敗：{r.ErrorMessage}");
                 }
             }
@@ -221,7 +303,13 @@ public static class GameRunner
         Trace("常駐監看已停止。");
     }
 
-    private static Result<RunOutcome> AttachToProcess(uint pid, DiagnosticsOptions options, Action<string>? log)
+    /// <summary>
+    /// 把診斷層掛到指定 pid。
+    ///
+    /// 公開出來是給 <see cref="DiagnosticSession"/> 用的：整合流程需要「先確定 pid、
+    /// 再注入、再讓取樣器接同一個 pid」，不能讓找行程這一步藏在注入裡面。
+    /// </summary>
+    public static Result<RunOutcome> AttachToProcess(uint pid, DiagnosticsOptions options, Action<string>? log = null)
     {
         if (ProcessInjector.IsAlreadyInjected(pid))
         {
@@ -233,12 +321,18 @@ public static class GameRunner
         Result<string> dll = ExtractRuntimeDll();
         if (dll.IsError) return Result<RunOutcome>.Fail(dll.ErrorMessage!, dll.ExitCode);
 
-        string outDir = DiagnosticsDirectory;
+        string outDir = ResolveOutputDirectory(options);
         Directory.CreateDirectory(outDir);
 
         // 掛載模式沒有機會設定子程序環境（行程是別人開的），設定只能經由
         // DLL 旁邊的 ckperf.ini 傳遞。所以這一步一定要在注入之前完成。
-        WriteSettingsFile(options, outDir);
+        Result settings = WriteSettingsFile(options, outDir);
+        if (settings.IsError)
+        {
+            return Result<RunOutcome>.Fail(
+                $"無法寫入掛載模式的診斷設定：{settings.ErrorMessage}。" +
+                "為避免產物退回其他資料夾，這次不會注入。");
+        }
 
         var r = ProcessInjector.AttachAndInject(pid, dll.Value!, log);
         if (r.ProcessId == 0)
@@ -280,7 +374,7 @@ public static class GameRunner
     /// UTF-16LE 加 BOM：<c>GetPrivateProfileStringW</c> 只在看到 BOM 時才會用 UTF-16
     /// 解讀，而使用者名稱可能含非 ASCII 字元，輸出路徑就會跟著含非 ASCII 字元。
     /// </summary>
-    private static void WriteSettingsFile(DiagnosticsOptions options, string outDir)
+    private static Result WriteSettingsFile(DiagnosticsOptions options, string outDir)
     {
         try
         {
@@ -291,11 +385,11 @@ public static class GameRunner
                 $"opts={options.ToOptionString()}\r\n";
             File.WriteAllText(Path.Combine(RuntimeDirectory, "ckperf.ini"), ini,
                               new System.Text.UnicodeEncoding(bigEndian: false, byteOrderMark: true));
+            return Result.Ok();
         }
-        catch
+        catch (Exception ex)
         {
-            // 寫不出來就讓 DLL 走內建預設值（全開、輸出到 LocalAppData），
-            // 那已經是我們想要的行為，不值得為此讓啟動失敗。
+            return Result.Fail(ex.Message);
         }
     }
 

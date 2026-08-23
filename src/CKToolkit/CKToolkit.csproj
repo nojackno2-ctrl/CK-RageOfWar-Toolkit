@@ -18,7 +18,7 @@
 
     <AssemblyTitle>CK-RageOfWar Toolkit</AssemblyTitle>
     <Product>CK-RageOfWar Toolkit</Product>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
 
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
@@ -26,6 +26,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CKToolkit.SelfTest" />
     <EmbeddedResource Include="I18n\strings.zh-TW.json" WithCulture="false" LogicalName="CKToolkit.I18n.strings.zh-TW.json" />
     <EmbeddedResource Include="I18n\strings.zh-CN.json" WithCulture="false" LogicalName="CKToolkit.I18n.strings.zh-CN.json" />
     <EmbeddedResource Include="I18n\strings.en.json" WithCulture="false" LogicalName="CKToolkit.I18n.strings.en.json" />

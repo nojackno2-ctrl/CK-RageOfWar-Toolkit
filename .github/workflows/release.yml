@@ -74,8 +74,6 @@ jobs:
 
       # 用內建的 gh CLI 而非第三方 action：發布這一步握有 contents: write，
       # 沒必要為了省幾行 YAML 就多引入一個需要信任的相依。
-      # 用內建的 gh CLI 而非第三方 action：這一步握有 contents: write，
-      # 沒必要為了省幾行 YAML 就多引入一個需要信任的相依。
       #
       # 發行說明用字串陣列組出來，不用 PowerShell here-string：here-string 的
       # 結束符必須在第 0 欄，會直接違反 YAML 區塊純量的縮排規則。

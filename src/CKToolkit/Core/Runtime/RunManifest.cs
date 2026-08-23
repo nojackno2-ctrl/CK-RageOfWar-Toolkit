@@ -84,6 +84,8 @@ internal static class RunManifest
         sb.AppendLine($"  遊戲結束保留解析度    {(p.KeepRes ? "開" : "關")}");
         sb.AppendLine($"  關閉物件動畫          {(p.NoObjectAnimations ? "開" : "關")}");
         sb.AppendLine($"  關閉水面動畫          {(p.NoWaterAnimation ? "開" : "關")}");
+        sb.AppendLine($"  已驗證穩定保護        {(p.StabilityProtection ? "開" : "關")}");
+        sb.AppendLine($"  實驗性腳本保護        {(p.StabilityProtection && p.ExperimentalStability ? "開" : "關")}");
         sb.AppendLine();
         // 解析度直接決定軟體光柵化器每幀要填多少像素，是效能數字唯一最重要的前提。
         sb.AppendLine("  註：本引擎是純軟體光柵化，解析度是每幀像素量的直接乘數。");
@@ -161,6 +163,9 @@ internal static class RunManifest
         sb.AppendLine($"  minidump      {(diag.MiniDumps ? "開" : "關")}");
         sb.AppendLine($"  記憶體取樣    {(diag.Telemetry ? $"開（每 {diag.TelemetryMs} ms）" : "關")}");
         sb.AppendLine($"  幀時間量測    {(diag.FrameTiming ? "開" : "關")}");
+        sb.AppendLine($"  腳本寫回 guard {(diag.NullGuard ? "開" : "關")}");
+        sb.AppendLine($"  編組網格 guard {(diag.ArrayGuard ? "開" : "關")}");
+        sb.AppendLine($"  通用 VM 修復   {(diag.NullStoreRepair ? "開（實驗性）" : "關")}");
         sb.AppendLine();
         sb.AppendLine("  診斷層對遊戲檔案零寫入，且例外處理常式一律回傳 EXCEPTION_CONTINUE_SEARCH，");
         sb.AppendLine("  引擎行為與未插樁時完全相同。");

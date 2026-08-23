@@ -14,10 +14,12 @@
 // Every diagnostic hook is measure-only and every exception is re-thrown with
 // EXCEPTION_CONTINUE_SEARCH, so observation alone never alters engine behaviour.
 //
-// The ONE exception is guard.cpp, which does change behaviour on purpose: it null-guards
-// the script write-back stores that produced the first captured crash. It verifies the
-// original bytes before patching, refuses anything it does not recognise, counts every
-// store it suppresses, and can be switched off with the guard=0 option.
+// The exceptions are guard.cpp and arrayguard.cpp, which change behaviour on purpose:
+// guard.cpp null-guards the script write-back stores that produced the first captured
+// crash; arrayguard.cpp page-validity-guards the grid-slot read that an oversized attack
+// order was found to hit (0x004AA5C9). Both verify the original bytes before patching,
+// refuse anything they do not recognise, count every access they suppress, and can be
+// switched off individually (guard=0, arrayguard=0).
 
 #pragma once
 
@@ -39,6 +41,7 @@ struct Config {
     bool    frameTiming;        // IAT hook on SetDIBitsToDevice for frame + blit cost
     bool    nullGuard;          // site-specific code cave on the first crash found
     bool    nullStoreRepair;    // generic: skip engine stores that target the null page
+    bool    arrayGuard;         // site-specific code cave for the 0x004AA5C9 grid-slot read
     int     maxReports;         // stop writing after this many, so a repeating fault cannot fill the disk
     int     telemetryMs;        // telemetry sample period
 };
@@ -98,6 +101,9 @@ void CrashInstall();
 // Loads dbghelp for MiniDumpWriteDump. Split out of CrashInstall because it calls
 // LoadLibrary, which must not run while DllMain still holds the loader lock.
 void CrashLoadSymbolHelper();
+// Exercises the bounded EIP code-window reader used by WriteReport. In particular,
+// EIP 0..7 must be rejected rather than underflowing to the top of the address space.
+bool CrashSelfTest();
 void CrashUninstall();
 
 // High-resolution runtime safety. Installed from DllMain while CKToolkit still
@@ -122,6 +128,12 @@ void TelemetryStop();
 void GuardInstall();
 long GuardSuppressedCount();
 
+// Installs the runtime grid-slot-read guard described in arrayguard.cpp (the
+// 0x004AA5C9 out-of-range read hit by an oversized attack order). Same verify-first,
+// refuse-if-unrecognised discipline as GuardInstall.
+void ArrayGuardInstall();
+long ArrayGuardSuppressedCount();
+
 // Generic null-store repair; see nullstore.cpp for why this is narrow on purpose.
 void NullStoreInit();
 // Asks the OS for a zero-filled page at address 0. If granted, the whole fault-repair
@@ -134,6 +146,14 @@ bool NullStoreTryRepair(EXCEPTION_POINTERS* ep, bool& firstTimeAtThisSite, unsig
 long NullStoreCount();
 void NullStoreLogSites();
 int  NullStoreDescribeSites(char* buf, int cap, int pos);
+
+// Narrow repair for script-VM assignment stores whose packed lvalue contains a valid
+// objectId but a corrupted byteOffset. It acts only after an exact verified store AVs.
+void VmLvalueInit();
+bool VmLvalueTryRepair(EXCEPTION_POINTERS* ep, bool& firstTimeAtThisSite, unsigned& resumeEip);
+long VmLvalueRepairCount();
+void VmLvalueLogSites();
+int  VmLvalueDescribeSites(char* buf, int cap, int pos);
 
 void FrameTimingInstall();
 void FrameTimingUninstall();
@@ -148,8 +168,15 @@ void BlitGeometryLog();
 // Reads sizeof(T) bytes at addr, but only if the page is committed and readable.
 // Never faults, never installs a SEH frame in the caller.
 bool SafeRead(uintptr_t addr, void* dst, size_t len);
+// Proves SafeRead accepts an ordinary committed buffer and rejects a wrapping range.
+bool SafeReadSelfTest();
 
 // Appends to a fixed buffer without ever overflowing it. Returns chars written.
 int  Append(char* buf, int cap, int pos, const char* fmt, ...);
+
+// Converts a wide string to UTF-8 for use with the narrow %s. Never fails silently:
+// an unconvertible path yields a visible placeholder rather than an empty line.
+// Do not reach for %S instead -- see the comment on the implementation.
+const char* WideToUtf8(const wchar_t* src, char* dst, int cap);
 
 } // namespace ckperf

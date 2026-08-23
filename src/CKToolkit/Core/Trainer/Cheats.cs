@@ -575,7 +575,7 @@ public static class Cheats
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
                             options: UnitOptions, multi: true, englishLabel: "Switchable Units"),
              new CheatParam("count", "數量", 5, 1, 50, englishLabel: "Spawn Count"),
-             new CheatParam("level", "初始等級", 1, 1, 100, englishLabel: "Spawn Level"),
+             new CheatParam("level", "初始等級", 1, 1, 1000, englishLabel: "Spawn Level"),
              new CheatParam("items", "攜帶物品", string.Empty, options: ItemOptions, multi: true, englishLabel: "Carried Items")],
             experimental: true, defaultKey: "Pause", numpadKey: "Sub"),
 

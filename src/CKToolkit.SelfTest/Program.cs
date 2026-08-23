@@ -4,6 +4,7 @@ using CKToolkit.Cli;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
+using CKToolkit.Core.Runtime;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
@@ -125,6 +126,9 @@ internal static class Program
         // 解耦後的迴歸防線：語系身分單一來源、CVXVisible 32px 網格硬上限
         RunGroup("34. GameLangIdentityAndGridCeiling", TestGameLangIdentityAndGridCeiling);
         RunGroup("35. GameVersionDetection", TestGameVersionDetection);
+        RunGroup("36. CrashCandidateTracking", TestCrashCandidateTracking);
+        RunGroup("37. AddressSpaceUnavailable", TestAddressSpaceUnavailable);
+        RunGroup("38. StabilityProductOptions", TestStabilityProductOptions);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -2526,6 +2530,82 @@ internal static class Program
         {
             try { Directory.Delete(tempGameDir, true); } catch { /* 清理失敗不影響測試結論 */ }
         }
+    }
+
+    // --- 36. 崩潰候選摘要必須跟著最後一筆，而不是凍結在第一筆 -----------
+    private static void TestCrashCandidateTracking()
+    {
+        Console.WriteLine("36. 崩潰候選摘要順序測試");
+
+        var tracker = new CrashCandidateTracker();
+        Check("尚未記錄例外時摘要為 null", tracker.LatestSummary is null && tracker.Count == 0);
+
+        tracker.Record("STATUS_ACCESS_VIOLATION", "，寫入位址 0x00000000", 0x005D99A4, 24480);
+        Check("第一筆例外被記錄", tracker.Count == 1 &&
+            tracker.LatestSummary?.Contains("0x005D99A4", StringComparison.Ordinal) == true);
+
+        tracker.Record("STATUS_ACCESS_VIOLATION", "，執行 (DEP)位址 0x00000000", 0x00000000, 24480);
+        Check("第二筆會取代第一筆成為退出前最後候選", tracker.Count == 2 &&
+            tracker.LatestSummary?.Contains("@ 0x00000000", StringComparison.Ordinal) == true &&
+            !tracker.LatestSummary.Contains("0x005D99A4", StringComparison.Ordinal));
+    }
+
+    // --- 37. 死行程／無效 handle 的位址空間掃描不得冒充 100% 用滿 --------
+    private static void TestAddressSpaceUnavailable()
+    {
+        Console.WriteLine("37. 位址空間取樣失敗的防假警報測試");
+
+        var space = Profiler.QueryAddressSpace(IntPtr.Zero, largeAddressAware: true);
+        Check("無效程序 handle 的位址空間掃描標記為不完整", !space.Complete);
+        Check("不完整掃描不回報 100% 使用率", space.UsedPercent == 0.0);
+        Check("不完整掃描不捏造已用位址空間", space.Used == 0);
+    }
+
+    // --- 38. 產品化穩定層與修改器風險分級 -------------------------------
+    private static void TestStabilityProductOptions()
+    {
+        Console.WriteLine("38. 日常穩定保護與修改器風險分級測試");
+
+        var perf = new PerfConfig();
+        Check("已驗證穩定保護預設開啟", perf.StabilityProtection);
+        Check("實驗性穩定保護預設關閉", !perf.ExperimentalStability);
+
+        DiagnosticsOptions verified = GameRunner.CreateStabilityOptions(perf);
+        Check("日常已驗證模式只開兩個窄 guard",
+            verified.NullGuard && verified.ArrayGuard && !verified.NullStoreRepair);
+        Check("日常已驗證模式不開 dump/telemetry/frame profiler",
+            !verified.CrashReports && !verified.MiniDumps && !verified.Telemetry && !verified.FrameTiming);
+        Check("底層 option string 明確傳遞 guard/repair/arrayguard",
+            verified.ToOptionString().Contains("guard=1", StringComparison.Ordinal) &&
+            verified.ToOptionString().Contains("repair=0", StringComparison.Ordinal) &&
+            verified.ToOptionString().Contains("arrayguard=1", StringComparison.Ordinal));
+
+        perf.ExperimentalStability = true;
+        DiagnosticsOptions experimental = GameRunner.CreateStabilityOptions(perf);
+        Check("實驗性模式開啟 VEH 與通用 VM 修復",
+            experimental.CrashReports && experimental.NullStoreRepair && !experimental.MiniDumps);
+
+        perf.StabilityProtection = false;
+        DiagnosticsOptions disabled = GameRunner.CreateStabilityOptions(perf);
+        Check("關閉穩定保護會關閉所有執行期 guard",
+            !disabled.NullGuard && !disabled.ArrayGuard && !disabled.NullStoreRepair && !disabled.CrashReports);
+
+        var normalTrainer = new TrainerConfig { Enabled = true };
+        Check("原廠修改器數值評為正常負載", TrainerRisk.Assess(normalTrainer) == TrainerRiskLevel.Normal);
+
+        var extremeTrainer = new TrainerConfig { Enabled = true };
+        extremeTrainer.Tweaks["hero_max_army"] = 2000;
+        extremeTrainer.Tweaks["pop_growth_rate"] = 100;
+        extremeTrainer.Tweaks["pop_growth_interval"] = 1000;
+        extremeTrainer.Tweaks["train_speed"] = 20;
+        Check("本次實測的極端數值評為極端負載",
+            TrainerRisk.Assess(extremeTrainer) == TrainerRiskLevel.Extreme);
+
+        ToolkitConfig roundTrip = ToolkitConfig.FromJson(new ToolkitConfig
+        {
+            Perf = new PerfConfig { StabilityProtection = false, ExperimentalStability = true }
+        }.ToJson());
+        Check("穩定性選項 JSON 往返保留", !roundTrip.Perf.StabilityProtection && roundTrip.Perf.ExperimentalStability);
     }
 
     private static List<string> CollectBuildWarnings(GameBuildInfo info)

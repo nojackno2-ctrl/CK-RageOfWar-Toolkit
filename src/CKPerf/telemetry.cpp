@@ -127,6 +127,8 @@ static AddressSpace ScanAddressSpace() {
 static DWORD WINAPI TelemetryThread(LPVOID) {
     int tick = 0;
     long lastSuppressed = 0;
+    long lastArraySuppressed = 0;
+    long lastVmLvalueRepairs = 0;
     CensusInit();
     const double period = g_cfg.telemetryMs / 1000.0;
 
@@ -185,6 +187,20 @@ static DWORD WINAPI TelemetryThread(LPVOID) {
             Logf("guard: suppressed %ld null write-backs so far (+%ld since the last sample)",
                  suppressed, suppressed - lastSuppressed);
             lastSuppressed = suppressed;
+        }
+
+        long arraySuppressed = ArrayGuardSuppressedCount();
+        if (arraySuppressed != lastArraySuppressed) {
+            Logf("arrayguard: rejected %ld out-of-range grid cells so far (+%ld since the last sample)",
+                 arraySuppressed, arraySuppressed - lastArraySuppressed);
+            lastArraySuppressed = arraySuppressed;
+        }
+
+        long vmLvalueRepairs = VmLvalueRepairCount();
+        if (vmLvalueRepairs != lastVmLvalueRepairs) {
+            Logf("vm lvalue: repaired %ld invalid assignment stores so far (+%ld since the last sample)",
+                 vmLvalueRepairs, vmLvalueRepairs - lastVmLvalueRepairs);
+            lastVmLvalueRepairs = vmLvalueRepairs;
         }
 
         // Same only-when-it-moves discipline as the guard counter above: the sidecar own

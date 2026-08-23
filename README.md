@@ -82,16 +82,22 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
      CKToolkit.exe
      ```
   4. 五大分頁：**效能 / 語言 / 修改器 / 分析器 / 關於**，右上角可自由切換繁體中文／English。
-  5. 勾選欲啟用的項目（如 2K 2560x1440 或 4K 3840x2160、繁體中文語言包、修改器功能）後點擊「一鍵套用」。
-  6. **套用後可直接從 Steam 或桌面捷徑啟動遊戲**，2K / 4K 高解析度與所有修補均直接靜態生效，無需常駐工具！
+  5. 勾選欲啟用的項目（如 2K 2560x1440 或 4K 3840x2160、繁體中文語言包、修改器功能）後點擊「一鍵套用」。底部只保留「一鍵套用／還原原版」兩個全域動作，避免重複按鈕混淆。
+  6. **套用後可直接從 Steam或桌面捷徑啟動遊戲**；若要使用修改器或效能頁所選的執行期穩定性保護，請從「修改器」頁啟動遊戲。
   7. 若需還原原版，於工具中點擊「還原原版」即可逐位元組恢復原版檔案。
 
-#### 帶診斷啟動與背景監看（選用）
+#### 遊戲內診斷層（選用）
 
-工具內建 32 位元原生輔助模組 `ckperf.dll`（自動內嵌於 exe 中，磁碟零寫入）：
-- **帶診斷啟動遊戲**：由工具直接啟動遊戲並注入診斷與防崩潰層。
-- **掛載到執行中的遊戲**：遊戲已由 Steam 開啟時，一鍵手動掛載。
-- **持續監看（Steam 開也會掛上）**：常駐背景監聽，無論何時從 Steam 開啟遊戲均會自動掛載防崩潰與遙測模組。
+工具內建 32 位元原生輔助模組 `ckperf.dll`（自動內嵌於 exe 中，磁碟零寫入），
+負責只有在行程內部才拿得到的資料：每幀計時、記憶體與位址空間碎片化遙測、
+以及不需要偵錯器就能寫出的故障報告。
+
+效能頁把執行期保護分成兩級：預設的「已驗證穩定性保護」只啟用範圍明確的 guard；
+「實驗性極端負載腳本保護」才會啟用可能改變壞腳本結果的 VEH 修復。修改器頁的啟動按鈕會依這兩個選項載入保護，並依目前人口、訓練速度、英雄帶兵與生成設定顯示風險。極端修改仍可能讓 2004 年的引擎卡死或閃退，工具不承諾突破其物件生命週期與模擬容量。
+
+需要完整取樣、例外、dump 與 JSON 證據時，改用**分析器分頁的「帶分析器啟動遊戲」**。
+該頁仍可選擇由工具啟動遊戲、掛到已經在跑的遊戲，或等待使用者從 Steam 開遊戲；
+外部分析器與行程內診斷層的輸出會寫在同一個場次資料夾。
 
 <details>
 <summary><b>如何驗證這個 DLL —— 它會被注入遊戲行程，不必無條件信任</b></summary>
@@ -189,6 +195,69 @@ CKToolkit.exe lang import --src .\my-language [--overwrite]
 
 ---
 
+
+### 分析器：抓閃退
+
+遊戲閃退時什麼都不會留下——引擎自己呼叫 `SetErrorMode` 又裝了
+`SetUnhandledExceptionFilter`，崩潰永遠走不到 WER，所以沒有對話框、沒有 dump、
+沒有事件記錄，畫面就這樣消失。分析器分頁就是為了這件事：
+
+**一顆按鈕，兩層記錄，一個資料夾。** 按下「帶分析器啟動遊戲」（附加／等待模式會顯示對應文字）會同時啟動兩層互補的觀測：
+遊戲內診斷層（`ckperf.dll` 的 VEH，負責每幀計時與記憶體遙測）與外部取樣／偵錯層
+（負責第一手例外、minidump、JSON 狀態快照與 EIP 熱區取樣）。同一個例外會先送到
+偵錯器，放行後行程內的 VEH 才會收到，所以一次閃退會留下兩份可以互相佐證的證據。
+遊戲是誰開的由「怎麼開始」卡片決定（工具啟動 / 掛到執行中 / 等遊戲出現，
+從 Steam 開遊戲選最後一個）。
+
+**一次遊戲執行 = 一個獨立場次資料夾**。選擇桌面時，工具會建立
+`桌面\CKToolkit 分析紀錄\<日期>\<時間_模式>\`，不會把檔案直接灑在桌面。
+該場的 `ckprofile-<日期>-<時間>-pid<PID>.log`、`ckperf-*.log`、`ckrun-config.txt`、
+閃退傾印與報告 `ckcrash-*` 全部留在同一個場次資料夾。
+取樣器每秒寫一段並立刻存檔，所以遊戲下一秒消失也不會少掉東西：
+
+- 每個執行緒的 EIP / ESP / EBP / 通用暫存器、EIP 當下的機器碼位元組；
+- 堆疊掃描（掃 ESP 起 4 KB，只採信前面確實是一條 `call` 的回傳位址，
+  並附上發出 call 的位址，方便直接對靜態反組譯）；
+- 那一秒的熱點位址（每格 16 bytes，附已知熱區名稱）；
+- 記憶體：工作集、私有位元組、分頁錯誤率，以及**完整的位址空間分佈**
+  （已提交／保留／最大連續空閒區塊）——32 位元遊戲最常見的死因就是位址空間耗盡；
+- GDI / USER 物件與控制代碼數量（洩漏偵測）、I/O 速率、主視窗是否還在回應；
+- 模組載入／卸載、執行緒生滅。
+
+**崩潰攔截（偵錯器模式，預設開啟）** 會在例外發生的那一瞬間把現場凍住，除了記錄檔
+另外產生兩個檔案：
+
+| 檔案 | 內容 |
+|---|---|
+| `*-crash.dmp` | 標準 minidump，WinDbg / Visual Studio 直接開得起來；勾「完整記憶體」就是可完整還原的行程快照 |
+| `*-crash.json` | 結構化狀態快照：例外、暫存器、堆疊框架、模組表、記憶體分佈，另附 EIP 周邊機器碼與堆疊原始位元組（Base64），離線也能重建現場 |
+
+抓完現場會以 `DBG_EXCEPTION_NOT_HANDLED` 原封不動放行，引擎後續行為完全不變；
+偵錯器也一律 `DebugSetProcessKillOnExit(FALSE)`，關掉分析器不會連帶關掉遊戲。
+
+> **結束代碼會騙人。** 引擎的 unhandled-exception filter 可以把存取違規吞掉之後
+> 乾乾淨淨地結束，結束代碼看起來完全正常。偵錯器攔到的例外才是真相，
+> 所以記錄檔的「判定」以它為準。
+
+**遊戲加速器**：問題要跑很久才會出現時，可以用引擎自己就有的
+`SetSpeed()` 加速重現。兩種方式都不改遊戲一個位元組：
+「原版按鍵綁定」送出原版 scdebug 的加速／極速鍵（10 倍速是原廠功能），
+「內建主控台」則直接下 `SetSpeed(n)`，倍率任意。分析結束時會自動把速度設回正常。
+
+送鍵走 `SendInput`，也就是系統的真實輸入佇列，和你自己按下去完全同一條路徑。
+因此**加速器會把遊戲視窗搶到前景**（這是 SendInput 的必要條件）；
+若搶不到前景就會直接放棄並回報，不會把按鍵誤送到別的視窗。
+
+CLI 對應參數：
+
+```cmd
+:: 由工具啟動遊戲，兩層全開（GUI 上的預設路徑）
+CKToolkit.exe profile --mode launch --hz 250 --log-dir "%USERPROFILE%\Desktop" --speed 10
+:: 先執行，再照常從 Steam 開遊戲；出現就自動接上
+CKToolkit.exe profile --mode wait --full-dump --speed 20 --speed-method console
+:: 只要外部取樣器，不碰遊戲行程（對照組）
+CKToolkit.exe profile --no-inject --catch-crash off --detail off
+```
 ### 給 AI 代理與自動化腳本的 CLI
 
 CLI 專為 AI 代理程式與自動化管線設計，所有指令永不互動、永不彈窗，並支援結構化 JSON 輸出：
@@ -201,7 +270,7 @@ CKToolkit.exe verify  [--json]              唯讀驗證現行檔案（零寫入
 CKToolkit.exe perf get|set ...              效能與 HD 解析度設定
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
-CKToolkit.exe profile --seconds <n> --hz <n> --out <file>
+CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] [--log-dir <dir>] 完整診斷記錄
 CKToolkit.exe run [--plain|--watch|--attach] 帶診斷執行或掛載遊戲
 CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
 ```
@@ -324,12 +393,18 @@ Backups are replaced by **Exact Reversal**:
   6. **Launch directly from Steam or standard shortcut** — 2K/4K and all patches are statically applied to game files, no background utility needed!
   7. Click "Restore" at any time to return all files to byte-exact vanilla.
 
-#### Diagnostics & Background Watcher (Optional)
+#### In-Game Diagnostics Layer (Optional)
 
-Includes an embedded 32-bit native runtime helper `ckperf.dll` (embedded in the exe, zero disk footprint):
-- **Launch Game with Diagnostics**: Launches the game and injects crash prevention and telemetry hooks before the entry point.
-- **Attach to Running Game**: Attach diagnostic and recovery layers to an already running instance.
-- **Watch & Auto-Attach**: Background watcher that automatically hooks into game instances launched directly from Steam.
+Includes an embedded 32-bit native runtime helper `ckperf.dll` (embedded in the exe,
+zero disk footprint). It covers what can only be measured from inside the process:
+per-frame timing, memory and address-space fragmentation telemetry, and crash reports
+that do not need a debugger.
+
+**It is not a button of its own.** The layer always starts together with the external
+sampler/debugger, from a single entry point — **Start recording on the Profiler tab**.
+Who launches the game is a choice on that tab's "How to Start" card: let the toolkit
+start it, attach to the running game, or press Start and then launch from Steam as
+usual. Both layers write to the same folder.
 
 <details>
 <summary><b>Verifying this DLL — it gets injected into the game process, so don't trust it blindly</b></summary>
@@ -426,6 +501,78 @@ Supports 17 cheats and dozens of gameplay balance tweaks:
 
 ---
 
+
+### Profiler: Catching the Silent Crash
+
+When this game crashes it leaves nothing behind. The engine calls `SetErrorMode` and
+installs its own `SetUnhandledExceptionFilter`, so the fault never reaches WER: no
+dialog, no dump, no event log entry — the window simply disappears. The Profiler tab
+exists to fix exactly that.
+
+**One button, two layers, one folder.** Start recording brings up two complementary
+observers at once: the in-game diagnostics layer (`ckperf.dll`'s VEH, covering
+per-frame timing and memory telemetry) and the external sampler/debugger (first-chance
+exceptions, minidumps, JSON state snapshots, and EIP hot-spot sampling). An exception
+reaches the debugger first and the in-process VEH only after it is passed through, so a
+single crash leaves two mutually corroborating artefacts. Who launches the game is
+decided by the "How to Start" card — toolkit-launched, attach to running, or wait for
+the game (pick the last one if you start from Steam).
+
+**One game run = one dedicated session folder.** If the Desktop is selected, the toolkit
+creates `Desktop\CKToolkit 分析紀錄\<date>\<time_mode>\`; it never spills files
+directly across the Desktop. That session's `ckprofile-*.log`, `ckperf-*.log`,
+`ckrun-config.txt`, crash dumps, and `ckcrash-*` reports remain together. The sampler
+writes and flushes a block every second, so nothing is lost when the process vanishes a
+moment later:
+
+- per-thread EIP / ESP / EBP / general registers, plus the machine-code bytes at EIP;
+- a stack scan (4 KB from ESP, keeping only return addresses actually preceded by a
+  `call`, and printing the call site so it can be looked up in a static disassembly);
+- that second's hot addresses (16-byte buckets, annotated with known hot regions);
+- memory: working set, private bytes, page-fault rate, and the **full address-space
+  breakdown** (committed / reserved / largest free block) — address-space exhaustion
+  is the single most common way a 32-bit game dies;
+- GDI / USER object and handle counts (leak detection), I/O rates, and whether the
+  main window is still responding;
+- module load/unload and thread creation/exit events.
+
+**Crash interception (debugger mode, on by default)** freezes the scene at the instant
+the exception is raised and writes two more files next to the log:
+
+| File | Contents |
+|---|---|
+| `*-crash.dmp` | Standard minidump, opens directly in WinDbg / Visual Studio; with "full memory" it is a completely reconstructable snapshot of the process |
+| `*-crash.json` | Structured state snapshot: exception, registers, stack frames, module table, memory map, plus raw bytes around EIP and the raw stack (Base64) so the scene can be rebuilt offline |
+
+After capturing, the exception is passed through untouched with
+`DBG_EXCEPTION_NOT_HANDLED`, so engine behaviour is unchanged, and the debugger always
+sets `DebugSetProcessKillOnExit(FALSE)` — closing the toolkit never kills the game.
+
+> **Exit codes lie.** The engine's unhandled-exception filter can swallow an access
+> violation and then exit cleanly, leaving a perfectly innocent-looking exit code. The
+> exception the debugger caught is the truth, so that is what the log's verdict uses.
+
+**Game accelerator**: when a problem only shows up after a long session, the engine's
+own `SetSpeed()` can compress the reproduction time. Neither method modifies a single
+byte of the game: "vanilla key bindings" sends the stock scdebug speed-up / turbo keys
+(10x is a factory feature), and "built-in console" issues `SetSpeed(n)` directly for an
+arbitrary multiplier. Speed is restored to normal when profiling stops.
+
+Keys are delivered through `SendInput`, i.e. the real system input queue — the same path
+as pressing them yourself. That means **the accelerator brings the game window to the
+foreground** (a hard requirement of SendInput); if it cannot, it gives up and says so
+rather than risk sending keystrokes to the wrong window.
+
+Matching CLI flags:
+
+```cmd
+:: toolkit launches the game, both layers on (the GUI default)
+CKToolkit.exe profile --mode launch --hz 250 --log-dir "%USERPROFILE%\Desktop" --speed 10
+:: run this first, then launch from Steam as usual; it attaches on sight
+CKToolkit.exe profile --mode wait --full-dump --speed 20 --speed-method console
+:: external sampler only, nothing injected into the process (control group)
+CKToolkit.exe profile --no-inject --catch-crash off --detail off
+```
 ### CLI for AI Agents & Automation
 
 Designed specifically for AI coding agents and automated pipelines. Non-interactive, no prompts, stable `--json` envelope:
@@ -438,7 +585,7 @@ CKToolkit.exe verify  [--json]              Read-only verification (zero writes)
 CKToolkit.exe perf get|set ...              Performance & resolution settings
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
-CKToolkit.exe profile --seconds <n> --hz <n> --out <file>
+CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] Full diagnostics run
 CKToolkit.exe run [--plain|--watch|--attach] Launch or attach with diagnostics
 CKToolkit.exe --game <dir>                  Override game directory (global flag)
 ```

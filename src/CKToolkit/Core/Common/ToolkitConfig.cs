@@ -35,6 +35,20 @@ public sealed class PerfConfig
 
     [JsonPropertyName("noWaterAnimation")]
     public bool NoWaterAnimation { get; set; } = false;
+
+    /// <summary>
+    /// 日常啟動時注入已實機驗收的窄穩定性 guard（腳本寫回與編組網格邊界）。
+    /// 預設開啟：這兩項會先驗證原始指令，只承接已知站點，風險可控。
+    /// </summary>
+    [JsonPropertyName("stabilityProtection")]
+    public bool StabilityProtection { get; set; } = true;
+
+    /// <summary>
+    /// 通用 Null/VM 例外修復。會改變壞腳本的控制流程，只適合願意承擔風險的極端玩法。
+    /// 預設關閉，且只有 StabilityProtection 開啟時才會生效。
+    /// </summary>
+    [JsonPropertyName("experimentalStability")]
+    public bool ExperimentalStability { get; set; } = false;
 }
 
 /// <summary>

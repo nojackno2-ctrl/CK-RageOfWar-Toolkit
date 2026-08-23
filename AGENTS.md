@@ -121,10 +121,14 @@ ZoomTables 本身理論上做得到 16384，但容量開得比網格大只會讓
   不要刪減。
 - `tools/` 下的 Python 腳本保留為 C# 實作的交叉驗證 oracle，不參與建置。
 
-## 4. 協作流程
+## 4. 協作流程與問題追蹤
 
-- 動工前先讀 `AGENTS.md` 與 `AI_HANDOFF.md`。
+- 動工前先讀 `AGENTS.md`、`AI_HANDOFF.md` 與 `ISSUES.md`。
 - `AI_HANDOFF.md` 是即時共用記憶，有實質進展就更新。
+- **`ISSUES.md` 是專門記錄問題、修復與實機驗證狀態的清單**。AI 代理人必須嚴格遵守：
+  - 發現問題或 Bug 時，登記至 `ISSUES.md`（標記為 `🔴 未修復／調查中`）。
+  - 程式碼修復完成且 SelfTest 通過後，標記為 `🟡 已修碼 · 待實測`，**絕不能直接聲稱修復或標記為已實測**。
+  - 唯有使用者在真實遊戲實機確認無誤，或取得實機 Log/Dump 佐證後，方可標記為 `🟢 已實機驗收`。
 - 改動前先看 `git status` / `git diff`，不要丟棄使用者未提交的工作。
 - 未經明確指示不要 commit / push / merge / rebase / reset。
 - 宣告完成前必須通過建置與 `dotnet run --project src/CKToolkit.SelfTest`。
