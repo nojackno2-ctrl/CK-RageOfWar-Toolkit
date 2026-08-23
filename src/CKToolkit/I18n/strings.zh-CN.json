@@ -51,7 +51,7 @@
   "Gui_Status_GameBuild": "游戏组建",
   "Warning_ResolutionOverCapacitySkipped": "解析度 {0} 超出当前 ZoomMap 表格容量 ({1})，已略过附加至 data.pak。",
   "Error_ConfigParseFailed": "设定档 {0} 无法解析（{1}）。已改用预设值执行，原档案未被覆写；请修正或删除该档案。",
-  "Gui_WindowTitle": "CK-RageOfWar 工具包 v1.0.0",
+  "Gui_WindowTitle": "CK-RageOfWar 工具包 v1.0.1",
   "Gui_GamePath": "游戏目录",
   "Gui_Browse": "浏览…",
   "Gui_GameFound": "已找到 Steam 游戏",

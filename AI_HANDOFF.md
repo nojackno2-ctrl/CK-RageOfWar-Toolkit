@@ -7,30 +7,27 @@
 
 1. **效能最佳化**（C++17 Win32）— PE 修補、HD 解析度、動畫開關、取樣分析器
 2. **繁體中文化**（C# .NET FW 4.8 + Python）— `local.pak` 語系注入、APF 字型光柵化
-3. **修改器**（C# .NET 10）— 14 項作弊、數值 Tweaks、小鍵盤按鍵重對應
+3. **修改器**（C# .NET 10）— 17 項作弊、數值 Tweaks、小鍵盤按鍵重對應
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 當前目標：分析器輸出改為根資料夾與每場分類 (2026-08-22)
+## 當前狀態：GUI 產品化、穩定性分流與 GitHub 推送前檢查完畢 (2026-08-23)
 
-使用者明確要求：選擇桌面只代表儲存位置，不能把分析產物直接灑在桌面；工具要自建根資料夾，並在內部再分類。目標結構是 `<選擇位置>\CKToolkit 分析紀錄\yyyy-MM-dd\HH-mm-ss_<mode>\`；同一場的 `ckprofile-*`、`ckperf-*`、`ckrun-config.txt`、`ckcrash-*`、dump 與 JSON 仍必須放在同一場資料夾，不以副檔名拆散證據鏈。
-
-已實作 `Core/Runtime/DiagnosticOutputLayout.cs`，並接到 GUI/`DiagnosticSession`、CLI `profile`與舊 `run` 路徑：
-- 同一秒重複開場自動加 `_02` / `_03`，不再覆寫固定檔名 `ckrun-config.txt`。
-- CLI `profile --out` 仍保留自訂 log 檔名，但完整路徑會被收進當場資料夾，不再跟注入層分居兩處。
-- CLI `run` 新增 `--log-dir`，並在呼叫 `GameRunner` 前先建好唯一場次資料夾。
-- Steam/掛載模式若寫不出 `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.ini`，現在會拒絕注入，不再讓 native DLL 靜默退回舊 `diag` 路徑。
-- GUI 離開儲存位置欄位時就會建立固定根資料夾；「開啟資料夾」在開跑前開根資料夾，開跑後開最新場次資料夾。
-- SelfTest Group 36 已新增並通過 10 項輸出配置檢查；`dotnet build CKToolkit.sln --no-restore` 為 0 警告、0 錯誤，完整 SelfTest 全綠。`ISSUE-022` 已標記為「🟡 已修碼 · 待實測」；尚未用 GUI 連續跑兩場真實遊戲取得實機證據。
-
-## 修改器生成單位初始等級上限調整 (2026-08-23)
-
-- 使用者要求：生成單位的初始等級最高應可到 1000 等。
-- `CheatParamsDialog.cs` 中 `BuildSpawnUnitContent()` 的 `levelNum.Maximum` 與 `Math.Clamp` 數值由 100 修正為 1000（與 `Cheats.cs` 之 `CheatParam` 定義 1~1000 一致），並將控制項寬度微調至 70px 確保 4 位數顯示完整無遮擋。
-- `dotnet build CKToolkit.sln` 與 `dotnet run --project src/CKToolkit.SelfTest` 全綠通過。
+1. **穩定性防護與產品化分流**：
+   - 效能頁提供「已驗證的穩定性保護（建議，窄 guard）」與「實驗性極端負載腳本保護（VEH / 腳本修復）」。
+   - 修改器頁加入動態正常／偏高／極端風險橫幅，啟動按鈕直接依效能頁設定載入執行期保護。
+   - 分析器分頁作為完整 profiler / minidump / json 證據鏈的專用入口，日誌與 dump 依 `<根目錄>\CKToolkit 分析紀錄\yyyy-MM-dd\HH-mm-ss_<mode>\` 分類儲存。
+   - 生成單位初始等級上限調整至 1000 等，數值輸入框寬度擴展。
+2. **UI 響應式與本地化**：
+   - 主視窗支援最小 `900x650`（預設 `1100x800`），長分頁支援垂直捲動，小螢幕不被裁切。
+   - 繁體中文 (zh-TW)、簡體中文 (zh-CN)、English 三語 310 鍵完全同步一致。
+3. **建置與驗證狀態**：
+   - `dotnet build CKToolkit.sln`：0 警告、0 錯誤。
+   - `CKToolkit.SelfTest`：38 組測試全部綠燈通過。
+   - 工作目錄乾淨，已做好推送與 Release 發布準備。
 
 ## 為什麼要整合（不只是「放在一起比較方便」）
 

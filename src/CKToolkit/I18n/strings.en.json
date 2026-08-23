@@ -51,7 +51,7 @@
   "Gui_Status_GameBuild": "Game build",
   "Warning_ResolutionOverCapacitySkipped": "Resolution {0} exceeds current ZoomMap capacity ({1}) and was skipped when appending to data.pak.",
   "Error_ConfigParseFailed": "Could not parse the configuration file {0} ({1}). Running with defaults; the file was left untouched. Fix or delete it.",
-  "Gui_WindowTitle": "CK-RageOfWar Toolkit v1.0.0",
+  "Gui_WindowTitle": "CK-RageOfWar Toolkit v1.0.1",
   "Gui_GamePath": "Game folder",
   "Gui_Browse": "Browse…",
   "Gui_GameFound": "Steam game found",
