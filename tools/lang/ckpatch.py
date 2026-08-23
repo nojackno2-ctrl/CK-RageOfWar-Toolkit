@@ -410,7 +410,7 @@ def cmd_extract(args):
 def cmd_preview(args):
     game = find_game(args.game)
     pak = source_pak(game)
-    text = args.text or "凱爾特諸王：戰爭之怒"
+    text = args.text or "凱爾特之王：戰爭狂怒"
     ramp = " .:-=+*#@"
     for name in ("FONTS\\TAHOMA13.APF", "FONTS\\TAHOMA16B.APF"):
         font = apf.ApfFont.load(pak.read(pak.find(name)))

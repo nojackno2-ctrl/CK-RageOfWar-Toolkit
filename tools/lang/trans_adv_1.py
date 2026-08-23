@@ -16,7 +16,7 @@ ADV_DATA_1 = {
     "MILRED'S STRONGHOLD": "米爾雷德的要塞",
     "CESARIA": "塞薩里亞",
     "DRUID SANCTUARY": "德魯伊聖所",
-    "Celtic Kings Adventure": "凱爾特諸王冒險戰役",
+    "Celtic Kings Adventure": "凱爾特之王冒險戰役",
     "Haemimont Games": "Haemimont Games",
     "The saga of the young gaul Larax.": "年輕高盧勇士拉拉克斯的英雄傳奇。",
     "autosave": "自動存檔",
