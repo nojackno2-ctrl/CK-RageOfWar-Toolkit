@@ -45,6 +45,223 @@
 
 ## 3. 🔴 未修復／進行中調查清冊 (Open Issues)
 
+### ISSUE-043: 公開發布版本、個資排除與文件狀態不一致
+- **問題編號**: `ISSUE-043`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `master` 已比 `v1.0.2` 多兩個功能提交（存檔／玩家統計、額外戰役翻譯），README 已宣傳新功能且下載連到 `releases/latest`，但程式與三語標題仍報 1.0.2；目前 source build 與已發布 v1.0.2 無法由版本字串區分。
+  - `release.yml` 接受任意 `v*` 與 branch 上的手動執行，沒有驗證 tag 必須等於 csproj／CLI／三語版本，可能發布錯名 EXE。
+  - `.gitignore` 未排除含玩家 `.adv` 的 `*.cksave`；公開文件與預建 DLL／PDB 路徑仍含本機使用者名稱與絕對工作區路徑。
+  - README 同時宣稱 `ckperf.dll`「磁碟零寫入」與會展開到 `%LocalAppData%`，部分入口說明及 6 個整合前 Markdown 連結也已失效。
+- **修復／驗證需求**:
+  - 下一次發布前升版並加入 tag=程式版本硬性檢查；未發布功能需明確標示。
+  - 加入 `*.cksave` 與精確診斷產物排除；以 `%USERPROFILE%`／`<user>` 取代公開路徑，原生 linker 使用可重定位 PDB path；修正 README 矛盾與失效連結。
+
+---
+
+### ISSUE-042: 修改器簡體中文介面退回英文且仍有可見硬編字串
+- **問題編號**: `ISSUE-042`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `TrainerPage` 的作弊／調整名稱、群組與 tooltip 只有 `zh-TW` 走中文；`zh-CN` 與英文一起走 `Humanize(id)` 或英文 ID（`TrainerPage.cs:630-637,725-731`）。
+  - `CheatParamsDialog` 也把 `zh-CN` 視為非中文，並在多個對話框直接硬編中／英文字串；`ProfilerPage`、`LangInstaller`、`PackLoader` 另有可見硬編訊息。
+  - 這違反三語 UI 與「所有使用者可見字串必須走 I18n」硬性規則；SelfTest 只驗 JSON key 集，未驗控制項實際顯示語言。
+- **修復／驗證需求**:
+  - 為作弊、調整、參數欄位、群組與錯誤／進度訊息建立三語 I18n key，移除以 `EffectiveLanguage == "zh-TW"` 決定是否顯示中文的分支。
+  - 新增 zh-CN WinForms 控制項文字測試，並在 GUI 實際切換三語目視驗證。
+
+---
+
+### ISSUE-041: `run --watch --json` 輸出純文字而非穩定 JSON 封套
+- **問題編號**: `ISSUE-041`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `CliHost.cs:2459` 的 watch 常駐分支無條件把進度純文字寫到 stdout，Ctrl+C 後直接成功返回，沒有輸出 `JsonEnvelope`。
+  - 這違反 CLI「所有指令永遠可用 `--json` 取得穩定結構化輸出」硬性規則，AI 代理無法可靠解析。
+- **修復／驗證需求**:
+  - 定義串流 NDJSON 或結束時單一 envelope 的契約，確保 stdout 不混入人類文字；新增 `run --watch --json` 整合測試。
+
+---
+
+### ISSUE-040: 設定指向不存在語言包時 apply 仍成功並解除現有翻譯
+- **問題編號**: `ISSUE-040`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `LangModule.ApplyLocalPak` 找不到 `config.Lang.Pack` 時直接 no-op；但 pipeline 事前已把 `local.pak` 正規化，因此原本安裝的語言包會被移除。
+  - `ResolveGameLangIdentity` 對不存在的 pack 仍可由 ID 推導 key，使 `vxSettings.ini` 指向不存在的語系；整體 `apply` 仍回成功。
+- **修復／驗證需求**:
+  - 所有寫入前先解析並驗證設定要求的 pack，查無時整批失敗且 5 個目標檔案零寫入；新增外部包被移除／改名後的回歸測試。
+
+---
+
+### ISSUE-039: 玩家統計 GUI 會截掉未滿一小時時間，兩個 writer 可互相覆蓋
+- **問題編號**: `ISSUE-039`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `PlayerStatisticsDialog` 只載入整數 `GameTimeHours`，儲存任何欄位時再乘回毫秒；真實 `duration=36000` 顯示 0 小時，僅修改軍事評價也會把精確時間改成 0。
+  - `SaveManager.UpdatePlayerProfile` 與 `PlayerStatistics.Update` 都對整份 `player.ini` 做無鎖 read-modify-replace；GUI＋CLI 或兩個程序同時操作時，最後寫入者會靜默抹掉另一方變更，雙方卻都回成功。
+- **修復／驗證需求**:
+  - GUI 未修改時間時保留原始毫秒；若只提供小時編輯，也需保存未顯示餘數或明確告知取整。
+  - 對同一 profile 使用跨程序鎖或 optimistic concurrency（原始 hash／mtime 比對），並新增競寫與局部修改保留測試。
+
+---
+
+### ISSUE-038: 語言包 marker 可解析但內容不完整時會被錯判為可安全反轉
+- **問題編號**: `ISSUE-038`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `PatchState.InspectLocalPak` 只在 marker JSON 無法反序列化時拒絕；`{}` 會成功解析，並因 marker 存在而被判 `PatchedByUs`。
+  - `LangInstaller.Uninstall` 隨後沒有 `Fonts` 還原記錄，只會刪 marker／推測清理語言條目，留下已改過的 APF；下一次 Inspect 可能把它當 Vanilla，永久失去精確反轉資訊。
+- **修復／驗證需求**:
+  - 驗證 manifest version、packId、AddedEntries、每個已修改字型的完整記錄與現行 PAK 對應關係；任何缺漏一律 `Unrecognised`，不得進入 Uninstall。
+  - 新增 `{}`、缺 Fonts、缺 AddedEntries、部分記錄與竄改記錄測試，驗證零寫入拒絕。
+
+---
+
+### ISSUE-037: 第三方語言包 metadata 可造成 INI 注入與資源耗盡
+- **問題編號**: `ISSUE-037`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `gameLangKey` 只驗非空；如 `evil\r\n[Options]\r\nResolution=999` 會經 `LangModule` 傳給 `IniFile.SetValue`，直接拼成多行 `vxSettings.ini`。
+  - `font.ranges` 未限制 Unicode 上界、區間跨度或總碼位；`0-7FFFFFFF` 會在 `GetDeclaredCodepoints` 進行巨量甚至溢位迴圈，造成 CPU／記憶體耗盡。
+  - `gameLangFolder` 未限制為單層安全識別字，可污染 PAK 命名空間；手動把包放入 `langpacks/`（產品允許的擴充方式）時，`PackLoader.LoadFromDirectory` 也會繞過匯入服務對宣告檔案路徑的 containment／reparse-point 驗證。
+- **AGY 交叉稽核**:
+  - AGY CLI `gemini-3.7-flash-medium` read-only 分析獨立確認 CRLF→INI 注入與 `font.ranges` DoS；AGY 懷疑的 stock-language 大小寫繞過經主代理核對後已排除（集合使用 `OrdinalIgnoreCase`），GUI 匯入路徑也已有 containment 防護。
+- **修復／驗證需求**:
+  - `gameLangKey`／`gameLangFolder` 限制 ASCII 安全識別字與長度；`IniFile.SetValue` 底層也 fail-closed 拒絕 CR/LF。
+  - `font.ranges` 僅允許有效 Unicode scalar 範圍並限制單區間／總碼位；所有外部包探索都必須走同一份安全路徑驗證。
+
+---
+
+### ISSUE-036: 損壞設定檔 fail-open，修改命令仍用預設值寫入
+- **問題編號**: `ISSUE-036`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `ToolkitConfig.Load` 解析失敗時建立完整預設設定並只附 `LoadError`；CLI `apply` 仍先呼叫 `ApplyAll`，寫完後才把解析錯誤列為 warning。
+  - `perf set`、`trainer set`、`lang install/uninstall` 會用預設物件覆寫損壞設定；GUI 也可由預設控制項建立 snapshot、保存後套用。
+- **修復／驗證需求**:
+  - 任何會寫設定或遊戲檔案的命令／GUI 操作在 `LoadError != null` 時 fail-closed；只允許 `status`／`verify` 等唯讀路徑回報錯誤。
+  - 新增 malformed JSON 下所有修改命令零寫入測試。
+
+---
+
+### ISSUE-035: RestoreAll 後段失敗時前段檔案已被部分還原
+- **問題編號**: `ISSUE-035`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `PatchPipeline.RestoreAll` 依序邊 Inspect／Normalise 邊寫入；若 data.pak／local.pak 等後段檔案 missing 或 unrecognised，先前的 EXE／Launcher 已被還原，最後才回失敗。
+  - `Result.Fail` 丟失 report，CLI 也不會告知已改動哪些檔案；這違反無法辨識時嚴格零寫入的安全設計。
+- **修復／驗證需求**:
+  - Restore 與 Apply 一樣先讀取、辨識、正規化所有目標到記憶體，全部成功後才逐檔原子寫入；至少失敗回報 partial state，理想上提供跨檔 rollback。
+  - 新增前段 patched、後段 unrecognised／missing 的零寫入測試。
+
+---
+
+### ISSUE-034: 手改或舊版設定可繞過 4096x2400 解析度硬上限
+- **問題編號**: `ISSUE-034`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `CellGridPatch.IsSurfaceSupported` 只在 GUI 與 `perf set` 入口使用；`PatchPipeline.ApplyAll`／`PerfModule` 沒有核心驗證。
+  - 手改設定為 `hires=5000`、`resolution=5000x3000` 後執行 `apply`，ZoomTables 仍在自身 16384 容量內，data.pak／vxSettings 也會接受，但 32px dirty-grid 只能覆蓋 4096x2400；`addRes=["3840x3000"]` 亦可只繞過高度上限。
+- **修復／驗證需求**:
+  - 在任何寫入前由 pipeline 對 Resolution、AddRes 與 Hires 做單一核心驗證，超限整批拒絕且 5 個檔案零寫入；模組層再做防禦性檢查。
+  - 新增手改設定、舊設定與直接呼叫 ApplyAll 的 4097x2400／4096x2401／5000x3000 回歸測試。
+
+---
+
+### ISSUE-033: 現有 SelfTest 對新資料與安全契約存在關鍵漏測
+- **問題編號**: `ISSUE-033`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - Group 9 未自行檢查三語 exact key set 與格式化 placeholder signature；本次外部掃描確認目前 448 keys／placeholder 都一致，但測試無法防止未來退化。
+  - 額外戰役只驗模板數量與少數存在性，未驗 6 語全部 118 輸出、控制序列與內容語言；西語繁中污染證明全綠可誤報。
+  - 存檔測試未覆蓋遊戲執行中所有寫入拒絕、重複 ZIP entry／大小上限、故障中途回滾、CLI export/import/delete/player set 契約與跨程序競寫。
+- **修復／驗證需求**:
+  - 將本次稽核使用的 placeholder、跨語言相同率、CJK 污染、控制序列與所有輸入安全邊界轉為 SelfTest；唯讀測試以內容 hash 而非僅大小／mtime 證明零寫入。
+
+---
+
+### ISSUE-032: 日文戰役翻譯把遊戲換行控制序列改成 XML 屬性實際換行
+- **問題編號**: `ISSUE-032`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `ja-JP` 的 `campaign-celtic-kings-adventure.json` 有 86 筆、`campaign-tutorial.json` 有 70 筆，把來源鍵中的字面 `\\n`／`\\r\\n` 控制序列寫成 JSON 解碼後的實際換行字元；其他 5 個語言包沒有此差異。
+  - `LocXml.Escape` 只處理 XML 特殊符號，不會把實際 CR/LF 還原成遊戲使用的字面控制序列，重建時會把換行直接放入 XML attribute；XML 屬性正規化可能把它轉成空白，令遊戲內換行遺失。
+- **本次稽核證據**:
+  - 全 6 語言、7 個戰役檔逐筆掃描，只有上述兩個日文檔命中，共 156 筆。
+  - `src/CKToolkit/Core/Lang/LocXml.cs:41-47` 的 `Escape` 沒有 CR/LF 控制序列處理。
+  - 現有 SelfTest 未驗證翻譯值必須保留來源鍵的遊戲控制序列。
+- **修復／驗證需求**:
+  - 將 156 筆日文譯文恢復為與來源相同的字面 `\\n`／`\\r\\n` 語意，並新增全語言包控制序列一致性測試。
+  - 安裝日文包後檢查重建出的 `local.pak` XML 屬性，並在真實遊戲中驗證多行對話／提示換行。
+
+---
+
+### ISSUE-031: Release provenance 未證明正式 EXE 內嵌的 ckperf.dll 出自原始碼
+- **問題編號**: `ISSUE-031`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `CKToolkit.csproj` 直接把簽入的 `assets/ckperf/ckperf.dll` 當 EmbeddedResource；`release.yml` 只跑 .NET SelfTest／publish，沒有從 `src/CKPerf` 重建正式 EXE 所內嵌的 DLL。
+  - 獨立 `ckperf.yml` 雖會重建原生 DLL，但與簽入 DLL 雜湊不同時只發 warning、不讓 workflow 失敗；它 attestation 的是另一份 CI 產物，不是正式 EXE 內嵌的那份 blob。
+  - 因此 Release EXE 的 attestation 只能證明它由「含預建 DLL 的 commit」打包，不能單獨證明內嵌 DLL 由同 commit 的 `src/CKPerf` 建出；README 對來源證明的說法過強。
+- **本次稽核證據**:
+  - 本機同一工具鏈重建目前 DLL 成功，且與簽入資產同為 167,936 bytes、SHA-256 `25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`；目前內容一致，但 CI 沒有把這個一致性設為發布門檻。
+  - `.github/workflows/release.yml:31-73`、`.github/workflows/ckperf.yml:43-85`、`src/CKToolkit/CKToolkit.csproj:33-37` 構成上述供應鏈缺口。
+- **修復／驗證需求**:
+  - Release job 應先以 Win32 MSVC 從來源重建 DLL，再讓 CKToolkit 嵌入該產物；或以可驗證方式讓正式 job 取得同 commit 已 attested 的 ckperf artifact。
+  - 發布前必須讓「內嵌 DLL 與預期來源產物不一致」成為 hard failure，並調整 README，使聲明精確對應被 attestation 的實際檔案。
+
+---
+
+### ISSUE-030: 西班牙語主戰役大量混入繁體中文但測試仍宣稱完整
+- **問題編號**: `ISSUE-030`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `assets/langpacks/es-ES/campaign-celtic-kings-adventure.json` 共 1,199 筆，其中 876 筆值含漢字，877 筆非原文值與 `zh-TW` 完全相同；例如失敗提示與大量戰役對話仍是繁體中文。
+  - README 宣稱每個內建語言包 3,458 條詞彙、100% 覆蓋，但目前西班牙語玩家進入主戰役會看到大量中文。
+  - 現有 SelfTest 只驗語言包 `PhraseCount > 0`、宣告 7 個戰役與鍵集／非空值，沒有做目標語言污染或跨語言大量相同值偵測，因此全綠會誤導。
+- **本次稽核證據**:
+  - 全 6 語言、9 個資料 JSON 逐檔比對；額外 5 套新戰役鍵集一致且無空值，明確污染集中於西班牙語 `campaign-celtic-kings-adventure.json`。
+  - `README.md:20,354` 的 100% 覆蓋聲明與實際內容不符。
+- **修復／驗證需求**:
+  - 重新完成該 1,199 筆主戰役西班牙語翻譯，至少排除 877 筆繁中複製值並人工抽查語意、專有名詞與控制序列。
+  - SelfTest 新增非中日語言的 CJK 污染門檻、跨語言異常相同率與每個資料檔的內容品質檢查；修正 README 前不得再宣稱 100% 西班牙語覆蓋。
+
+---
+
+### ISSUE-029: 未知遊戲組建仍被允許寫入專屬位址修補
+- **問題編號**: `ISSUE-029`
+- **發現日期**: 2026-08-23
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `AGENTS.md` 的硬性約束明定：所有位址與位移皆為已驗證 Steam 組建專屬，組建指紋對不上時必須拒絕修改。
+  - 目前 `GameVersion.WarnIfUnknown` 與 `PatchPipeline.ApplyAll` 卻只加入警告並繼續套用；SelfTest 第 35 組還明確要求未知組建的 EXE 必須真的被修改。
+  - 各修補站點的原始位元組比對能降低亂寫風險，但不能證明未知組建的控制流程、資料結構與跨站點關係仍相容，因此不能取代整體組建拒絕門檻。
+- **本次稽核證據**:
+  - `AGENTS.md:21-22`：組建對不上就拒絕修改。
+  - `src/CKToolkit/Core/Common/GameVersion.cs:33-36,95-106`：未知組建只警告、永不讓流程失敗。
+  - `src/CKToolkit/Core/Common/PatchPipeline.cs:258-264`：偵測後只呼叫警告函式，仍進入各模組套用。
+  - `src/CKToolkit.SelfTest/Program.cs:2509-2535`：測試鎖定未知組建仍成功且 EXE 被修改。
+- **修復／驗證需求**:
+  - 在任何遊戲檔案寫入前，以正規化後 EXE 指紋執行硬性拒絕；`status`／`verify` 仍應保持唯讀並回報未知組建。
+  - 將 SelfTest 改為驗證未知組建時整批套用失敗且所有目標檔案零寫入，再跑完整 Release build、SelfTest 與已知實機組建 `verify`。
+
+---
+
 ### ISSUE-027: GUI 小視窗內容被裁切與日常穩定性入口不清楚
 - **問題編號**: `ISSUE-027`
 - **發現日期**: 2026-08-23

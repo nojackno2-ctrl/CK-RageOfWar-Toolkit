@@ -91,8 +91,8 @@ public sealed class TrainerPage : UserControl
         _riskBanner.Margin = new Padding(6, 6, 6, 4);
         root.Controls.Add(_riskBanner, 0, 1);
 
-        // 直接把「啟動遊戲」放在修改器頁裡：調整完作弊/數值不必再跑到最下面的全域列，
-        // 一鍵套用現在的設定並帶診斷層啟動，馬上就能測。
+        // 「啟動遊戲」放在作弊／數值設定的下方：先完成調整，再一鍵套用現在的設定並
+        // 帶診斷層啟動，操作順序由上而下。
         var launchRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
@@ -112,13 +112,12 @@ public sealed class TrainerPage : UserControl
         _launchHint.ForeColor = Color.FromArgb(100, 116, 139);
         _launchHint.Margin = new Padding(0, 10, 0, 0);
         launchRow.Controls.AddRange([_launchGame, _launchHint]);
-        root.Controls.Add(launchRow, 0, 2);
 
         _hint.AutoSize = true;
         _hint.MaximumSize = new Size(1000, 0);
         _hint.ForeColor = Color.FromArgb(71, 85, 105);
         _hint.Padding = new Padding(8, 6, 8, 8);
-        root.Controls.Add(_hint, 0, 3);
+        root.Controls.Add(_hint, 0, 2);
 
         _subTabs.Dock = DockStyle.Top;
         _subTabs.Height = 440;
@@ -126,7 +125,8 @@ public sealed class TrainerPage : UserControl
         _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
-        root.Controls.Add(_subTabs, 0, 4);
+        root.Controls.Add(_subTabs, 0, 3);
+        root.Controls.Add(launchRow, 0, 4);
         Controls.Add(root);
     }
 

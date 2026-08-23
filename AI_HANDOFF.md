@@ -14,6 +14,29 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
+## 最新進度：完整專案稽核進行中，發現未知組建仍可寫入 (2026-08-23)
+
+- Release managed build：成功，0 warning / 0 error；39 組 SelfTest 全綠。
+- CKPerf `Release|Win32`：成功；重建 DLL 與簽入資產同為 167,936 bytes，SHA-256 完全一致。
+- 實際 `CKToolkit.exe status --json` / `verify --json`：exit 0；本機 Steam 組建為已知 `0x4034EFB1`，5 個目標檔案皆 recognised 且與設定相符。
+- 稽核發現 `ISSUE-029`：`AGENTS.md` 要求未知組建拒絕修改，但目前程式與 SelfTest 明確允許只警告後繼續寫入。已登記為 🔴，本次檢查任務未擅自改變行為。
+- 稽核發現 `ISSUE-030`：西班牙語主戰役 1,199 筆中有 876 筆含漢字、877 筆與繁中完全相同，與 README 的 100% 覆蓋聲明衝突；現有測試無法抓出內容污染。
+- 稽核發現 `ISSUE-031`：正式 Release EXE 內嵌簽入的預建 `ckperf.dll`，但 release job 不重建它；獨立原生 workflow 的 attestation 並未綁定 EXE 內的那份 DLL。目前本機重建雜湊一致，但 CI 缺少硬性來源鏈門檻。
+- 稽核發現 `ISSUE-032`：日文主戰役／教學共 156 筆把字面換行控制序列變成 XML attribute 的實際換行，可能在遊戲解析時被正規化而遺失；SelfTest 未覆蓋控制序列保持。
+- Codex 子代理另確認 `ISSUE-034`～`ISSUE-042`：解析度硬上限可由設定繞過、RestoreAll 可部分寫入後失敗、損壞設定 fail-open、marker 不完整造成不可逆、第三方語言 metadata 注入／DoS、player.ini 競寫與時間截斷、遺失語言包仍成功 apply、watch JSON 契約破壞、zh-CN 修改器 UI 退回英文。
+- AGY CLI 已依使用者明確授權，以 `gemini-3.7-flash-medium` read-only 模式分析 `LanguagePack.cs`／`LangModule.cs`／`IniFile.cs`（exit 0）；獨立確認 CRLF→INI 注入與 `font.ranges` 資源耗盡。AGY 的 stock-language 大小寫與 GUI 匯入路徑疑慮經主代理核對後排除。
+- 發佈／文件稽核另登記 `ISSUE-043`：master 與 v1.0.2 版本識別、tag gate、`*.cksave` 排除、公開本機路徑／PDB path、README 矛盾與失效連結需在下次發布前處理。
+- 最終本機驗證：Release build 0 warning / 0 error；SelfTest 593 個 `[OK]` 全通過；framework-dependent 與 self-contained win-x64 單檔 publish 成功（4,214,445 / 53,111,297 bytes）；NuGet vulnerability audit 無已知漏洞。
+- 最終實機唯讀 `CKToolkit.exe verify --json`：exit 0、`allMatchesConfig=true`、`allRecognised=true`、0 warning / 0 error。公開 GitHub repo 與 v1.0.2 的 release／ckperf workflow 均為 success；遠端發布 EXE 未執行，因本機權限審查要求另行明確授權執行下載的二進位檔。
+
+## 最新進度：修改器「啟動遊戲」移到設定下方 (2026-08-23)
+
+- 依使用者要求，`TrainerPage` 的「啟動遊戲」按鈕與提示列已從風險提示下方移到作弊／數值分頁下方。
+- 僅調整 `TableLayoutPanel` 列順序；按鈕事件與「先套用設定再啟動」流程未變。
+- `dotnet build CKToolkit.sln --no-restore`：成功，0 warning / 0 error。
+- `dotnet run --project src/CKToolkit.SelfTest --no-build`：39 組全部通過。
+- 已開啟 Debug GUI 實際確認：修改器內容下方完整顯示啟動列，底部全域操作列未受影響；驗證用視窗已關閉。
+
 ## 最新進度：全戰役與劇本在地化補全與 local.pak 注入 (2026-08-23)
 
 ### 使用者需求
