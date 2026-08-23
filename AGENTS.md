@@ -1,6 +1,6 @@
 # AGENTS.md — CK-RageOfWar-Toolkit
 
-本專案是《Celtic Kings: Rage of War》(2004) 的整合工具包，由三個前身專案合併而成：
+本專案是《Celtic Kings: Rage of War》（凱爾特之王：戰爭狂怒，2004）的整合工具包，由三個前身專案合併而成：
 **效能最佳化 (C++17)**、**繁體中文化 (C# .NET Framework 4.8 + Python)**、**修改器 (C# .NET 10)**。
 三個前身專案在整合完成後會被刪除，因此本儲存庫必須自給自足——所有翻譯資料、
 逆向工程筆記、Python 交叉驗證工具都已遷入。

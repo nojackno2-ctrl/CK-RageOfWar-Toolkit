@@ -235,7 +235,7 @@ public static partial class CliHost
 
     private static int HandleVersion(bool isJson, TextWriter stdout)
     {
-        string versionStr = "1.0.1";
+        string versionStr = "1.0.2";
         if (isJson)
         {
             var envelope = new JsonEnvelope

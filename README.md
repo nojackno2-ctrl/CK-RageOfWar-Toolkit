@@ -12,7 +12,7 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 ### 這是什麼
 
-《Celtic Kings: Rage of War》（高盧羅馬同仇錄，2004 年 Steam 版）的現代化全功能整合工具包。單一執行檔 `CKToolkit.exe` 涵蓋三大核心領域：
+《Celtic Kings: Rage of War》（凱爾特之王：戰爭狂怒，2004 年 Steam 版）的現代化全功能整合工具包。單一執行檔 `CKToolkit.exe` 涵蓋三大核心領域：
 
 | 模組 | 功能特色 |
 |---|---|

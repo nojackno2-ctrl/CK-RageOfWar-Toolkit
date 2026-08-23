@@ -1,4 +1,4 @@
-﻿{
+{
   "Battle for Stonehenge (normal)": "巨石阵之战（一般）",
   "A mountainous area which is dominated by a powerful Roman AI. The map holds five players whose goal is to eliminate the AI.\\nIt is strongly recommended that all players play in one team.": "一片由强大罗马电脑势力主宰的山地。地图可容纳五名玩家，目标是消灭该电脑势力。\\n强烈建议所有玩家组成同一队伍。",
   "Four kingdoms (normal)": "四大王国（一般）",
@@ -655,7 +655,7 @@
   "Refresh": "重新整理",
   "Notes": "笔记",
   "No active notes": "没有进行中的笔记",
-  "Celtic Kings": "凯尔特诸王",
+  "Celtic Kings": "凯尔特之王",
   "Paused ...": "已暂停…",
   "Rename": "重新命名",
   "New player": "新增玩家",
@@ -1340,7 +1340,7 @@
   "Waiting for player %s1 (%d2)": "等待玩家 %s1（%d2）",
   "Player %s1 dropped\\n": "玩家 %s1 已离线\\n",
   "different game version": "游戏版本不同",
-  "Please insert the Celtic Kings - Rage of War CD!": "请放入 Celtic Kings - Rage of War 光碟！",
+  "Please insert the Celtic Kings - Rage of War CD!": "请放入《凯尔特之王：战争狂怒》光盘！",
   "You don't have the map file '%s1.bfhp' and can't participate in this game.": "你没有地图档「%s1.bfhp」，无法参加这场游戏。",
   "Error when launching GameSpy": "启动 GameSpy 时发生错误",
   "Easy": "简单",
