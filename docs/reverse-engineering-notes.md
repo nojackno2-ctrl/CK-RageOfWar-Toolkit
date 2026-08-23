@@ -1407,3 +1407,497 @@ sidecar 修的是列軸（閃退），這個修的是行軸（塗抹），兩者
 目前對 Steam 版執行檔全部通過。
 
 **已於 2026-08-21 經使用者實機遊玩驗證通過。** 2560x1440（2K）與 3840x2160（4K）下進關卡零閃退、向右向下捲動鏡頭無任何塗抹殘留與破圖，畫面 100% 渲染正確（幀率維持 75~98 FPS）！方案 A（9-byte 32px cell 換算）徹底解決了原版 2048px 寬度上限的捲動塗抹問題，全線高解析度正式驗收通過。
+
+## 大軍團閃退：第一份實機故障報告 (2026-08-22)
+
+呼應本檔前面「Where to resume」清單第 4 項——「隨單位數增加而出現的延遲與靜默閃退，
+目前沒有任何 WER 記錄，這本身就是線索」——**現在有了那份一直缺的故障報告。**
+
+### 重現操作
+
+使用者原話：「我最後一個動作是呼叫一個英雄編組去攻擊，然後那個英雄帶了一千多個單位」。
+即：一個由英雄統率、成員數量遠超一般規模（1000+ 單位）的編組，下達攻擊指令後閃退。
+
+### 故障報告（`ckperf.dll` 注入式診斷層擷取，`GameRunner.LaunchWithDiagnostics` 路徑）
+
+```
+CKPerf fault report #1
+2026-08-22 15:22:14.115   thread 20948
+
+  game module   : Celtic kings.exe base 0x00400000 size 0x4D6000
+  live objects  : 37894  (peak this session 37900)
+  guard         : 0 null write-backs suppressed before this fault
+  exception     : 0xC0000005  ACCESS_VIOLATION
+  faulting eip  : 0x004AA5C9   Celtic kings.exe+0xAA5C9
+  fault address : 0x0094B600   (read from)
+  region        : base 0x0094B000  size 0x57000  state RESERVE  protect 0x0  type 0x20000
+
+  registers
+    eax 0094B600  ebx 00001722  ecx 00000000  edx 0094B600
+    esi 00806568  edi 00006BCF  ebp 00000012  esp 001AFB84
+    eip 004AA5C9  eflags 00210246
+
+  code at eip-8 (fault is at +8)
+    8D 44 31 18 33 C9 8B D0 83 3A 00 7C 13 41 83 C2
+    08 83 F9 04 7C F2 5F 5E 5D 5B 83 C4 18 C2 08 00
+```
+
+遊戲在這次 fault 後約 0.9 秒就 `process exiting`——**這次不是被引擎吞掉繼續跑的
+非致命例外，是真正的閃退**（telemetry log 裡只有 `FAULT #1`，沒有更高編號，
+符合本檔前面故障報告固定寫的那句「最高編號的才是造成結束的那份」）。
+
+### 跟已知的「stale reference 寫回」bug（本檔前面「第二／三／四／五次故障」章節）是不同的東西
+
+- 那一類是**寫入**（write-back）到失效的引用，位址在 `0x0068FACB`/`0x0068FD9E` 一帶，
+  guard.cpp 的 null-guard 專門防這個，而這次故障報告明寫 `guard: 0 null write-backs
+  suppressed before this fault`——guard 沒有動作，因為這次根本不是它防的那種寫入。
+- 這次是**讀取**（read from），EIP `0x004AA5C9` 從未出現在本檔任何一次故障記錄，
+  也不在 `Profiler.cs` 的 `KnownRegions` 熱區表或 hires.cpp 的 redirect 站點表裡——
+  是全新的位址，需要另外反組譯確認。
+
+### 正式反組譯（capstone，AGY CLI 執行，2026-08-22——粗讀 100% 核對成功）
+
+委託 AGY CLI 寫了 `tools/perf/analyze_crash_004aa5c9.py`（唯讀，手法照抄
+`verify_cell_sites.py` 的 section table / VA-to-offset），對 `0x004AA400`..
+`0x004AA700` 做 capstone 線性反組譯。**下面粗讀的每一條指令、運算元、位元組長度
+全部核對吻合，EIP 落點也完全對上**，可以當結論用了：
+
+```
+0x004AA5C1:  8D443118          lea      eax, [ecx + esi + 0x18]
+0x004AA5C5:  33C9              xor      ecx, ecx
+0x004AA5C7:  8BD0              mov      edx, eax
+0x004AA5C9:  833A00            cmp      dword ptr [edx], 0      <- FAULT (讀取 [0x0094B600])
+0x004AA5CC:  7C13              jl       0x4aa5e1
+0x004AA5CE:  41                inc      ecx
+0x004AA5CF:  83C208            add      edx, 8
+0x004AA5D2:  83F904            cmp      ecx, 4
+0x004AA5D5:  7CF2              jl       0x4aa5c9
+0x004AA5D7:  5F                pop      edi
+0x004AA5D8:  5E                pop      esi
+0x004AA5D9:  5D                pop      ebp
+0x004AA5DA:  5B                pop      ebx
+0x004AA5DB:  83C418            add      esp, 0x18
+0x004AA5DE:  C20800            ret      8
+```
+
+#### 函式邊界與呼叫慣例
+
+- 函式範圍 `0x004AA4F0`–`0x004AA69B`（430 bytes，83 條指令），前後都是
+  `nop` 對齊到下一個函式，邊界乾淨。
+- `__thiscall`：`ecx` = this，堆疊帶兩個 dword 參數（X、Y 座標，
+  `ret 8` 由被呼叫端清堆疊）。進入函式先 `mov esi, ecx` 把 this 存進 esi。
+
+#### 完整控制流（confirmed，不是猜測）
+
+1. `0x004AA4F0`–`0x004AA530`：邊界檢查。讀全域指標 `[0x895E40]`，
+   把傳入的 (X, Y) 跟 `[eax+0xA8..0xB4]` 這個矩形比對，超出範圍就直接跳到
+   共用出口 `0x004AA694`（什麼都不做，安全返回）。
+2. `0x004AA536`–`0x004AA561`：位元遮罩檢查。`ecx = (Y>>4)*[eax+0x64] + (X>>9)`，
+   查 `[eax+0x54+ecx*4]` 的第 `(X>>4)&0x1F` 個 bit 是不是 1，是的話一樣跳出口。
+   （這兩步都是 this=`[0x895E40]` 那個「外部管理員」物件的資料，不是本函式自己的。）
+3. `0x004AA567`–`0x004AA5C1`：**這裡開始才是本函式自己 (esi) 的資料**。
+   `eax = X>>4`, `ecx = Y>>4`，跟 `[esi]`/`[esi+4]`/`[esi+8]`/`[esi+0xC]`
+   （esi 自己的一個矩形邊界）比對；呼叫子函式 `0x004AA730` 算出
+   `delta_x = (X>>4) - origin_x`、`delta_y = (Y>>4) - origin_y`
+   （origin 存在 esi 自己的欄位裡）；接著算網格位移：
+   `edx = delta_x*33`，`ecx = (delta_y + edx*4) * 32 = (delta_y + delta_x*132) * 32`，
+   目標陣列元素位址 = `ecx + esi + 0x18`。
+4. `0x004AA5C5`–`0x004AA5D5`（**故障處**）：在算出來的那個位址上，
+   固定掃 4 格（每格 8 bytes），找第一格 `dword < 0`（空格）的位置；
+   4 格都不是空的就直接 `ret 8` 放棄（沒有任何錯誤處理，靜默失敗）。
+5. `0x004AA5E1`–`0x004AA693`：找到空格就把 (X, Y) 寫進去，順便更新
+   `esi` 身上好幾個計數器／索引（`+0x8D764`、`+0x8D798`、`+0x88218`..`+0x88224`、
+   `+0x88228` 那塊做 `add dword ptr [esi], 0x01010101`——四個 packed byte
+   計數器一次全部 +1）。
+
+#### 是誰在呼叫這個函式（xrefs，全 `.text` 線性掃描找到 5 處）
+
+四處直接硬編 `mov ecx, 0x806568`（同一個全域物件，`.data`/BSS 段的固定實例）：
+`0x0049EEC6`、`0x004A13A5`、`0x004A23D5`、`0x005F130C`；第五處
+`0x004AA715` 在緊鄰的下一個函式 `0x004AA6A0` 裡，this 是從呼叫端參數
+（`[ebp+8]`）轉傳進來的，X/Y 座標還先各呼叫一次 `0x006DB6E0`
+（浮點轉整數）——`0x004AA6A0` 看起來是「接收 float 座標」的外層包裝，
+轉成整數後呼叫同一個核心函式。
+
+#### 故障當下的位移量（confirmed）
+
+`esi=0x00806568`，故障位址 `0x0094B600`，扣掉固定的 `+0x18` 之後，
+偏移量是 `0x145080`（約 1.33 MB）——落在 `region: base 0x0094B000
+size 0x57000 state RESERVE`，也就是這塊只保留、沒提交的記憶體。
+1.33 MB 的偏移量對照公式 `(delta_y + delta_x*132) * 32`，反推
+`delta_x`（往格線那個方向的座標差）大約落在 **300 以上**的等級——
+也就是說，觸發故障的 (X, Y) 跟 esi 自己記的 origin，在其中一軸上差了
+至少幾百格（每格 16 單位），是「座標差距很大」造成偏移量爆掉，
+不是「陣列真的有第 1000 個成員被讀到」（迴圈本身固定只跑 4 次）。
+
+### 附件
+
+- `ckperf-20260822-150024-pid23712.log`（完整 telemetry，含這次故障前後的
+  frame/memory/物件數趨勢）與 `ckcrash-20260822-152214-01.dmp`（minidump）
+  留在 `%LOCALAPPDATA%\CKToolkit\diag`，還沒歸檔進本檔案，下次要深入分析時
+  先去那裡找同一個時間戳的檔案。
+
+### 排除實驗：純粹的超大編組不會炸（使用者實測，2026-08-22）
+
+使用者接著測了「下一步」建議的排除實驗：組一個同樣超大（1000+ 單位）的編組，
+**不下攻擊指令**——結果**不會閃退，只是有點 lag**。
+
+這排除了「單純編組人數/物件數本身」是觸發條件：光是把 1000+ 單位塞進同一個
+編組、讓它們站在那裡（甚至移動），引擎撐得住，只是效能變差。**閃退的必要條件
+是對這個超大編組下攻擊指令**，故障點很可能就在「攻擊指令」專屬會走到的那段
+程式碼裡（例如建立攻擊目標清單、逐一驗證編組成員、或指派攻擊任務給每個成員），
+而不是每一幀都會執行的一般編組維護/繪製邏輯——這跟前面粗讀出來「函式看起來像
+在檢查某個陣列前 4 格是否非零」的猜測方向是吻合的（如果那是「攻擊指令建立目標
+清單」相關的一次性檢查，而不是每幀都跑的東西，就能同時解釋「為何只有下攻擊指令
+才會觸發」跟「為何 fault 發生在 ecx=0 也就是第一輪」）。
+
+### 這個函式本身看起來跟「編組/英雄」沒有直接關係——要小心不要走錯方向
+
+反組譯結果有一點跟原本的直覺不一樣：`0x004AA4F0` 本身只是一個很通用的
+「在 (X, Y) 座標登記一筆資料到某個以 esi 為 this 的網格物件，4 格滿了就默默放棄，
+不報錯」的工具函式，5 個呼叫點也沒有一個名字或參數看起來專屬於編組／英雄／
+攻擊指令——4 處直接寫死呼叫同一個全域單例（`0x00806568`），像是某種
+全域的座標事件/標記登記系統（例如視覺特效觸發點、聲音播放點、或某種
+全域格狀索引），跟「英雄帶超大編組攻擊」不是同一層概念。
+
+所以合理的解讀是：**這個函式大概率不是 bug 的根本原因，只是最後被炸到的那一棒。**
+真正該問的問題變成——「英雄編組攻擊指令」為什麼會產生一個座標，讓
+delta_x/delta_y 算出來的偏移量差了幾百格（見上面「故障當下的位移量」小節），
+遠遠超出這個全域物件（esi）原本記錄的 origin 附近？可能性：
+(a) 攻擊指令本身把某個座標算錯／算爆了（例如 1000+ 單位在算「編組平均位置」
+或「攻擊目標中心點」時整數溢位或用了錯的單位換算）再傳進來給這個登記函式；
+(b) 這個全域物件的 origin 本身就沒有針對「攻擊」場景正確設定/更新過。
+
+### 下一步
+
+1. **往上追、不要往下追。** 已知呼叫點 `0x0049EEC6` / `0x004A13A5` /
+   `0x004A23D5` / `0x005F130C` 各自把 (X, Y) 從哪個結構的哪個欄位讀出來——
+   對這四個呼叫點各自往回反組譯它們自己的函式，找出 X/Y 的真正來源，
+   看有沒有一條路徑會被「編組成員數」或「攻擊指令」影響到座標計算。
+2. **確認 `0x00895E40` 全域指標與 esi=`0x00806568` 這兩個物件是什麼。**
+   前者的 `+0xA8`..`+0xB4` 矩形、`+0x54`/`+0x64` 的位元遮罩，看起來像某種
+   「全地圖分區管理員」；後者的 `+0x18` 起始、8-byte/格、4 格上限的小陣列，
+   加上 `+0x88218`..`+0x88228` 那一串計數器，是否對得上遊戲資料裡任何
+   已知的類別（`docs/HMMSYS_PackFile格式.md` 或已解開的 `.sc.xml` 類別定義
+   可能有線索）。
+3. **實機重現實驗**：小編組（10~20 人）一樣下攻擊指令，看是否也會炸——
+   如果不會，代表確實跟「1000+ 這種遠超一般規模的人數」有關（見前面
+   「排除實驗」小節已排除「純編組不下攻擊指令」這個變因，這是下一個要排除的）。
+   如果分析器（`Profiler.cs`）這次能提前掛上（先在分析器分頁按「開始分析」
+   再操作），偵錯器模式會直接給 minidump + JSON，不必再靠 ckperf.dll 那邊
+   湊資料。
+
+### 執行期修復：`arrayguard.cpp`（2026-08-22，使用者要求「完全修好」）
+
+上面「往上追」還沒做完——4 個呼叫點各自的座標來源還沒追出來，所以真正
+「為什麼攻擊指令會算出離譜座標」的根因**仍然未知**。但使用者要的是先讓遊戲
+不要閃退，不是非得先找到根因才能動手；而這個 bug 剛好符合本檔 `guard.cpp`
+（`0x0068FACB`/`0x0068FD9E` 那次）已經驗證過的修法哲學：**在唯一真的會炸的
+那個讀取點做防護，而不是等追完整條因果鏈**——只要防護點本身的行為
+「跟這個函式自己既有的失敗語意完全一致」，就不算是亂猜。
+
+這個函式自己就有「失敗語意」可以借：4 格全部非空時，它本來就什麼都不做、
+直接 `ret 8`，呼叫端拿不到任何回饋。所以防護的做法是：**每次讀格子前先確認
+那塊記憶體真的有 COMMIT、讀得到**（用 `common.cpp` 既有的 `SafeRead`，
+VirtualQuery-based，設計上就是「不管地址多離譜都不會出例外」），讀不到就當
+「這格不是空的」處理——這正是函式在真正遇到 4 格都滿時本來就會做的事，
+行為上完全沒有新增分支，只是把「無法判斷」也歸進「當作滿格」這個既有選項。
+
+新增檔案 `src/CKPerf/arrayguard.cpp`：
+- 驗證 `0x004AA5C5`（迴圈起點 `xor ecx,ecx`）的 18 個原始位元組完全吻合才會
+  patch，不吻合就拒絕（同 `guard.cpp` 的驗證優先原則）。
+- 用 `__declspec(naked)` + MASM inline asm 蓋一個 5-byte `jmp` 過去，
+  把整個 4 格迴圈換成呼叫一個 C++ 函式 `FindFreeSlot(base)`（逐格
+  `SafeRead`，讀不到就回傳 -1 並計數，讀到負數就回傳格子編號）——
+  eax（陣列基底位址）全程不變、ecx 在找到空格時等於格子編號，跟原本
+  的呼叫慣例完全對齊，找到空格跳 `0x004AA5E1`（寫入路徑），沒找到跳
+  `0x004AA5D7`（原本的共用結尾）。
+- 可疑讀取次數計入 `g_suppressedArrayReads`，跟 `guard.cpp` 的
+  `g_suppressedNullStores` 一樣寫進每份故障報告與 telemetry（只在數字變動
+  時才印，同樣的「只在移動時才報」紀律）、可用 `arrayguard=0` 關掉。
+
+**已做的驗證**（實機遊戲測試前）：
+1. `FindFreeSlot` 的獨立邏輯測試（`tools/perf` 之外，純測試用途，未簽入）：
+   4 格全滿、格 0/2/3 各自為空、以及**完全複製故障當下的記憶體狀態**
+   （`VirtualAlloc(..., MEM_RESERVE, PAGE_NOACCESS)`，只保留不提交，
+   跟故障報告的 `region: ... state RESERVE` 一模一樣）——全部通過，
+   RESERVE 情境下正確回傳 -1、不閃退、計數器有增加。
+2. Cave 的暫存器保留與分支邏輯測試（技巧相同，但指向測試用的假出口位址，
+   因為真正的 `0x004AA5E1`/`0x004AA5D7` 只存在於真的遊戲行程裡）：
+   確認 `eax` 全程等於原始基底位址、`ecx` 正確等於命中的格子編號、
+   在 RESERVE-not-COMMIT 的情境下正確跳到「沒找到」出口而不閃退。
+   全部通過。
+
+**還沒做、也做不到的驗證**：實機重現「英雄帶 1000+ 單位下攻擊指令」再確認
+真的不閃退了——這需要使用者實際玩。建置已完成並內嵌進
+`assets/ckperf/ckperf.dll`（`tools/perf/build-ckperf.ps1` 產出，SHA256
+`81EA680E423D61478C0E688EF8525A12B1D6EF5AB068A5507AB096F3BC1CB852`），
+下次用「帶診斷啟動遊戲」或修改器頁的「啟動遊戲」跑遊戲時就會生效；
+故障報告（若還有别的原因閃退）會多印一行 `arrayguard : N 次不可讀的
+格子讀取已被攔截`，那個數字從 0 變成非 0 就是這次防護實際生效過的證據。
+
+### 第二次實機測試：防護生效了，但防錯了東西（2026-08-22 18:39）
+
+使用者帶 1300 個士兵下攻擊指令，**又閃退了**。這次是從分析器分頁啟動的，
+所以輸出跑到 `Profiler` 的預設資料夾（桌面）而不是 `%LOCALAPPDATA%\CKToolkit\diag`——
+下次找不到檔案時先想到這件事。
+
+telemetry log（`ckperf-20260822-183033-pid20772.log`）把整件事講得很清楚：
+
+```
+[18:30:33.679] grid-slot read guard installed. 0x004AA5C5 now redirects ...
+[18:39:11.539] FAULT #1  code=0xC0000005 (ACCESS_VIOLATION)  eip=0x004AA5E1
+[18:39:11.545] arrayguard: suppressed 1 unreadable grid-slot reads so far (+1 ...)
+```
+
+防護**有裝上、有攔到、計數器有動**，遊戲還是死了，而且死在
+`0x004AA5E1`——也就是 `kFoundExit`，「找到空格、要寫進去」那一條：
+
+```
+0x004AA5E1:  891CC8   mov dword ptr [eax + ecx*8], ebx
+```
+
+#### 為什麼 SafeRead 是錯的判準
+
+`arrayguard.cpp` 第一版問的問題是「這一格**讀得到**嗎」。但一個離陣列尾端幾百格的
+位址，完全可能落在「已提交、可讀、不可寫」的頁面上：於是防護放行 → 掃描在一塊
+根本不屬於陣列的記憶體裡找到「空格」→ 崩潰點從 `0x004AA5C9` 的讀往下移四條指令，
+變成 `0x004AA5E1` 的寫。
+
+更糟的是，可讀性不只是「不夠」，是**危險**：萬一那頁剛好可寫，這個防護就會把一次
+看得見的閃退，換成一次寫進別人記憶體的靜默破壞。頁面保護不是該問的問題，
+**位址在不在陣列裡**才是。
+
+#### 陣列真正的邊界（這是這次新拿到的關鍵事實）
+
+物件的初始化函式 `0x004AA010` 一次把整個陣列清掉：
+
+```
+0x004AA02A:  push 0x88200            ; count
+0x004AA02F:  lea  ecx, [esi + 0x18]  ; dst
+0x004AA032:  push 0xff               ; fill
+0x004AA043:  push ecx
+0x004AA04A:  call 0x41E880           ; memset(esi + 0x18, 0xFF, 0x88200)
+```
+
+所以網格陣列**精確地**是 `[esi+0x18, esi+0x18+0x88200)`，而且預填 `0xFF`——
+這同時解釋了掃描為什麼用 `dword < 0` 判斷空格：`0xFFFFFFFF` 就是「空」的寫法。
+三件事互相對得上：
+
+- 物件下一個已知欄位在 `+0x88218`，而 `0x18 + 0x88200 = 0x88218`，剛好接上；
+- `0x88200 / 32` bytes per cell `= 17424 = 132 x 132`；
+- `132` 正是引擎自己的位移公式 `(delta_y + delta_x * 132) * 32` 裡的列距。
+
+回頭看 15:22 那次故障：`esi = 0x00806568`、base `0x0094B600`，位移 `0x145080`，
+換算成 cell 41604，也就是 `delta_x = 315`——在一個只有 132 格寬的網格裡。
+不是差一點點，是差了約 2.4 倍。它碰到的每一個 byte 都是別人的。
+
+#### 修法：把引擎漏掉的邊界檢查補上
+
+`arrayguard.cpp` 改成純組合語言的範圍檢查，不再呼叫 C++ 函式、熱路徑上也不再用
+`SafeRead`（一旦證明 base 在物件自己的陣列裡，那塊記憶體就是初始化函式 memset 過的
+同一塊配置，普通讀取就是對的，每格做一次 VirtualQuery 只是白付成本）：
+
+```
+offset = eax - esi - 0x18
+拒絕，除非 (unsigned)offset <= 0x881E0     ; 0x88200 - 0x20，四格 32 bytes 要全部放得下
+拒絕，除非 (offset & 0x1F) == 0            ; 引擎只會算出 cell*32
+拒絕時：計數 +1，跳 0x004AA5D7（函式自己既有的靜默放棄）
+放行時：跑原本的 4 格掃描，找到 → ecx=格號、eax=base，跳 0x004AA5E1
+                              沒找到 → 跳 0x004AA5D7
+```
+
+用**無號**比較是刻意的：base 落在陣列之前會 wrap 成一個巨大的無號數，同一條
+比較就一起擋掉了。這順帶清掉一個引擎自己的老問題——`(X>>4, Y>>4)` 沒通過
+`0x004AA585` 的矩形檢查時，引擎做的是 `xor eax, eax; jmp 0x004AA5C5`，
+**帶著 base = 0 走進同一個迴圈**，也就是原版程式碼自己會去解參考位址 0。
+現在那條路徑一樣走到靜默放棄出口，不必再靠 `nullstore.cpp` 事後修補一次 null 讀取。
+
+Cave 的暫存器紀律（建置後反組譯核對過，見下）：不 push 任何東西，所以兩個出口的
+堆疊跟進入時 byte-for-byte 相同（`kNotFoundExit` 是 `pop/pop/pop/pop/add esp/ret 8`，
+這件事非做對不可）；`ebx`/`esi`/`edi` 全程不碰；`eax` 只讀不寫；`ecx`/`edx` 是原本
+就死掉的暫存器。**不借用 `ebp` 當 scratch**——沒有必要為了省一個暫存器，去賭一個
+「ebp 在這裡是死的」的論證。
+
+出口位址一律寫成字面立即數並加 `static_assert` 綁住具名常數。原因值得記下來：
+MSVC 的 inline asm 會把 C++ 變數名當成**記憶體運算元**，所以 `mov edx, kFoundExit`
+會從那個常數的位址**載入**，而不是把它的值當立即數——第一版就是這個寫法。
+
+建置後從 `assets/ckperf/ckperf.dll` 反組譯出來的 cave（確認立即數是立即數）：
+
+```
+8BC8             mov     ecx, eax
+2BCE             sub     ecx, esi
+83E918           sub     ecx, 0x18
+81F9E0810800     cmp     ecx, 0x881e0
+7725             ja      Reject
+F6C11F           test    cl, 0x1f
+7520             jne     Reject
+33C9             xor     ecx, ecx
+8BD0             mov     edx, eax
+833A00      Scan:cmp     dword ptr [edx], 0
+7C10             jl      Found
+41               inc     ecx
+83C208           add     edx, 8
+83F904           cmp     ecx, 4
+7CF2             jl      Scan
+BAD7A54A00       mov     edx, 0x4aa5d7
+FFE2             jmp     edx
+BAE1A54A00  Found:mov    edx, 0x4aa5e1
+FFE2             jmp     edx
+F0FF05707F0210 Reject:lock inc dword ptr [g_suppressedArrayReads]
+BAD7A54A00       mov     edx, 0x4aa5d7
+FFE2             jmp     edx
+```
+
+計數器語意跟著改了：不再是「攔下幾次讀不到的格子」，而是
+「拒絕幾次落在網格外的登記」，`crash.cpp` 與 `telemetry.cpp` 的字串同步更新。
+
+**根因仍然未解**：為什麼攻擊指令會產生一個離網格 315 格遠的座標，還通過了
+`0x004AA567..0x004AA594` 那個矩形檢查？前面「下一步」第 1、2 項還是要做——
+特別值得懷疑的是矩形（`[esi]`/`[esi+4]`/`[esi+8]`/`[esi+0xC]`）跟原點
+（`[esi+0x10]`/`[esi+0x14]`）是不是會跟這個**固定 132x132** 的陣列失去同步，
+例如矩形按實際地圖尺寸設定、陣列卻永遠是 132x132。這次補的是引擎漏掉的邊界檢查，
+不是那條因果鏈。
+
+### 順帶修掉：非 ASCII 輸出資料夾會把整份故障報告毀掉
+
+18:39 那份故障報告 `ckcrash-20260822-183911-01.txt` 在磁碟上是 65535 bytes，
+第三行之後**全部是 NUL**。活下來的只有：
+
+```
+CKPerf fault report #1
+2026-08-22 18:39:11.223   thread 7292
+
+  telemetry log : C:\Users\nojac\Desktop\（然後就沒有了）
+```
+
+一份真實崩潰的故障報告就這樣整份沒了，而且是靜默地沒。機制：
+
+- `crash.cpp` 用 `Append(..., "  telemetry log : %S\r\n\r\n", LogFilePath())`。
+  窄字元 printf 的 `%S` 走 C locale 轉換，而 locale 是 `"C"`，只認 ASCII。
+  這次的路徑是 `C:\Users\nojac\Desktop\紀錄\...`，第一個中文字就轉不過去，
+  `_vsnprintf_s` 失敗回傳 -1。
+- `common.cpp` 的 `Append()` 把 `n < 0` 一律對映成 `return cap - 1`。那個寫法
+  對「截斷」是對的，對「格式化失敗」卻是災難：`pos` 變成 65535，之後每一次
+  `Append` 都被 `if (pos >= cap - 1) return pos` 擋掉什麼都不寫，最後
+  `WriteFile(h, buf, (DWORD)pos, ...)` 把 64 KB 幾乎全是零的靜態緩衝區倒進檔案。
+
+兩邊都修：
+
+1. `Append()` 在 `n < 0` 時不再把 `pos` 推到 `cap - 1`。`_vsnprintf_s` 搭
+   `_TRUNCATE` 在「截斷」和「失敗」兩種情況都會補 NUL（失敗時留下空字串），
+   所以改成量實際寫出去多少：`buf[cap-1] = 0; return pos + strlen(buf + pos);`。
+   截斷照樣把 `pos` 推到塞得下的結尾，失敗則讓 `pos` 原封不動，
+   **報告剩下的部分照常寫出來**。
+2. 不再把寬字串餵給窄 printf。`common.cpp` 新增 `WideToUtf8()`
+   （`WideCharToMultiByte(CP_UTF8, ...)`，一定補 NUL，轉不過去時退回
+   `"(path could not be converted)"` 這種看得見的字串，不會再變成空白行），
+   `ckperf.h` 宣告。`crash.cpp` 與 `dllmain.cpp` 這兩個 `%S` 站點都改用 `%s` +
+   `WideToUtf8`。UTF-8 是對的目標：報告其餘內容都是 ASCII，整份檔案仍是合法 UTF-8。
+
+`dllmain.cpp` 那一站也是真的壞掉的——18:30 那份 log 第 5 行
+（`[18:30:33.669] `）就是被同一個原因洗成空白的 `log file:` 行。
+
+## 2026-08-23: Null indirect call repair and reporter EIP underflow
+
+The 08:54 session (pid 27096) established a three-stage chain at the end of a 35,764-object
+battle:
+
+```text
+0069305D  mov edx, [ecx+4]       ecx=0 -> read AV at 0x00000004
+00693070  call dword ptr [edx+4] edx=0 -> read AV at 0x00000004
+00000000  DEP execute AV         return address on stack = 0x00693073
+```
+
+The generic repair redirected both base registers to zero-filled per-site scratch. That is
+valid data semantics for the first ordinary load, but invalid for the second instruction:
+`FF /2` consumes the loaded dword as the next EIP. Scratch supplied zero, so the repair
+manufactured the DEP fault. `nullstore.cpp` now rejects memory forms of `FF /2,/3` (CALL) and
+`FF /4,/5` (JMP); rejected control flow is reported and returned to the engine unchanged.
+The exact field bytes `FF 52 04` are part of the startup regression test.
+
+While reporting EIP 0, `WriteReport` computed `eip-8 = 0xFFFFFFF8`. `SafeRead` then computed
+`end = addr+32 = 0x18`; because the unsigned validation loop saw `p >= end`, it skipped every
+`VirtualQuery` check and entered `memcpy`, faulting at shipped `ckperf.dll+0x23FE`. `SafeRead`
+now rejects wrapping ranges and non-progressing/wrapping regions, while `ReadCodeWindow`
+independently rejects EIP 0..7 before subtraction. Both have DLL-startup self-tests; failure
+disables crash reporting and null repair for the session rather than risk a recursive VEH fault.
+
+This does not resolve why the object returned by `0x00481A20` has a null or freed `[eax+4]`
+field. That lifetime/initialisation problem remains ISSUE-006. The change only prevents the
+diagnostic repair from inventing a new control-flow target and guarantees the original fault can
+be captured faithfully.
+
+## 2026-08-23: second corrupt VM lvalue proves high-half contamination
+
+The next field run (pid 3736) validated the diagnostic fixes and then died at the previously
+open ISSUE-017 success-path store:
+
+```text
+005D9BE2  mov edx, [esp+6]
+005D9BE6  mov byte ptr [eax+edx], bl
+
+eax          = 0x15FEE2C0
+edx          = 0x428800F6
+fault target = 0x5886E3B6 (FREE)
+VM bytes     = DA 00 F6 00 88 42
+```
+
+At the fault, the reconstructed six-byte lvalue starts at current `esp+4`. Decoding the exact
+VM representation gives `objectId=0x00DA` and `byteOffset=0x428800F6`; the handle resolves to a
+live object, then the high half of the offset drives the store 1.1 GB away. The earlier dump at
+the same instruction contained `0x4A8800E4`. In both cases the low half (`0x00E4/0x00F6`) is a
+plausible field offset while the high half (`0x4A88/0x4288`) is stale data. This is not a
+35,000-object capacity boundary; it is repeatable partial corruption of the packed lvalue.
+
+### AV-time repair instead of a guessed offset ceiling
+
+`vmlvalue.cpp` registers eight exact stores: the dword and byte success/null pairs plus three
+multi-field assignment families. Each site records expected instruction bytes, length, target
+equation, and repair mode. Nothing runs on valid assignments. After a real write AV, the handler
+requires all of the following before changing context:
+
+1. EIP is one of the eight sites and still belongs to the Steam image at base `0x00400000`.
+2. The live bytes exactly match the disassembled instruction.
+3. The exception is a write AV and its reported target equals EAX or 32-bit `EAX+EDX`, as declared.
+
+Single-store handlers skip only the faulting MOV and resume their original epilogue. Multi-store
+handlers redirect EAX to a per-site 4 KB scratch page and re-execute, so their interleaved stores,
+reads, and register pops retain the original stack discipline. Startup self-tests exercise all
+eight real game instructions and disable the subsystem on any mismatch.
+
+The source of the contaminated high word remains unknown. This is a narrow repair of a store that
+Windows has already proved invalid, not a claim that the producer-side lifetime bug is solved.
+
+## 2026-08-23: per-EIP scratch still hangs across VM opcodes
+
+The first field run with `vmlvalue.cpp` prevented all previously fatal assignment stores, then
+froze at the old `0x005D98BF` integer `+=` handler. The telemetry is conclusive: 35,883 live
+objects, zero births/deaths, and zero frames for six minutes while the same null load accumulated
+exactly 5,000,000 repairs. At the configured cap the handler stopped repairing and the game exited
+on that AV.
+
+The previous explanation was incomplete. Within one invocation, `0x005D98BF` redirects EAX and
+`0x005D98C3` stores through that same redirected EAX, so its private scratch value does advance.
+But the script loop checks the same dead logical lvalue through a different VM opcode/EIP, which
+maps to a different scratch slot and still reads zero. Per-EIP scratch preserves instruction-local
+progress, not cross-opcode lvalue identity.
+
+The VM dispatcher already defines the correct control path for an operator that cannot continue:
+after the indirect handler call at `0x005DF5EB`, return value 2 branches at `0x005DF5FA` to
+`0x005DF921`, sets status 3, and leaves the current script/atomic section. The repair for exact site
+`0x005D98BF` now selects a naked epilogue equivalent to the handler's own cleanup but returns 2:
+
+```asm
+pop edi
+mov eax, 2
+pop esi
+add esp, 8
+ret
+```
+
+This does not guess a loop bound and does not attempt to make all dead objects share memory. It
+uses an error/abort path already designed into the interpreter. Startup self-test checks the live
+`8B 08` instruction and the selected resume stub; live validation must still prove that frames and
+simulation resume after the bad script is aborted.

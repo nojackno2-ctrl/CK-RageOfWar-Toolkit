@@ -40,8 +40,10 @@ static DWORD WINAPI InitThread(LPVOID) {
 
     CrashLoadSymbolHelper();
     NullPageTryMap();
+    VmLvalueInit();
     NullStoreSelfTest();
     GuardInstall();
+    ArrayGuardInstall();
     FrameTimingInstall();
     TelemetryStart();
 
@@ -81,14 +83,30 @@ static void Startup(HMODULE self) {
     Logf("ckperf attached to pid %u at %04d-%02d-%02d %02d:%02d:%02d",
          (unsigned)GetCurrentProcessId(), st.wYear, st.wMonth, st.wDay,
          st.wHour, st.wMinute, st.wSecond);
-    Logf("log file: %S  (flushed after every line)", LogFilePath());
-    Logf("options: crash=%d dump=%d telemetry=%d frames=%d guard=%d repair=%d maxreports=%d telemetryms=%d",
+    char logPath[MAX_PATH * 3];
+    Logf("log file: %s  (flushed after every line)",
+         WideToUtf8(LogFilePath(), logPath, (int)sizeof(logPath)));
+    Logf("options: crash=%d dump=%d telemetry=%d frames=%d guard=%d repair=%d arrayguard=%d maxreports=%d telemetryms=%d",
          g_cfg.crashReports ? 1 : 0, g_cfg.miniDumps ? 1 : 0,
          g_cfg.telemetry ? 1 : 0, g_cfg.frameTiming ? 1 : 0, g_cfg.nullGuard ? 1 : 0, g_cfg.nullStoreRepair ? 1 : 0,
-         g_cfg.maxReports, g_cfg.telemetryMs);
+         g_cfg.arrayGuard ? 1 : 0, g_cfg.maxReports, g_cfg.telemetryMs);
 
     // Installed before anything else can fault.
     NullStoreInit();
+    bool safeReadOk = SafeReadSelfTest();
+    bool crashWindowOk = safeReadOk && CrashSelfTest();
+    if (!safeReadOk || !crashWindowOk) {
+        // Null-store repair and reporting share SafeRead and the same VEH. If either
+        // safety proof fails, observing an engine fault could create a nested fault in
+        // this DLL, which is worse than leaving the original exception untouched.
+        g_cfg.crashReports = false;
+        g_cfg.nullStoreRepair = false;
+        Logf("diagnostic safety self-test FAILED (SafeRead=%d, code-window=%d). "
+             "Crash reporting and null-store repair are DISABLED for this session.",
+             safeReadOk ? 1 : 0, crashWindowOk ? 1 : 0);
+    } else {
+        Logf("diagnostic safety self-test passed -- wrapping reads and EIP 0..7 code windows are rejected.");
+    }
     CrashInstall();
 
     g_initThread = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
@@ -99,8 +117,9 @@ static void Shutdown(bool processExiting) {
     if (processExiting) {
         // The process is on its way out and other threads are already dead. Touching
         // synchronisation objects here can hang the exit, so only flush and leave.
+        VmLvalueLogSites();
         NullStoreLogSites();
-    Logf("process exiting.");
+        Logf("process exiting.");
         LogShutdown();
         return;
     }

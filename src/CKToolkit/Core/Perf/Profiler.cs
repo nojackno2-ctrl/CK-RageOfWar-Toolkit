@@ -21,6 +21,13 @@ namespace CKToolkit.Core.Perf;
 ///
 /// This toolkit builds x64 and the game is 32-bit, so use Wow64SuspendThread and
 /// Wow64GetThreadContext reading WOW64_CONTEXT.Eip.
+///
+/// 2026-08-22 起這裡多了一層「抓閃退」的職責：
+///   * 每秒把完整現場寫進記錄檔並立刻 flush (ProfilerTimeline.cs)；
+///   * 可選的偵錯器模式，在例外發生的那一瞬間攔下來，寫出 minidump 與 JSON 狀態快照
+///     (ProfilerDebugger.cs)；
+///   * 可選的遊戲加速器，用引擎自己的 SetSpeed 把重現時間壓短 (GameSpeed.cs)。
+/// 一次遊戲執行 = 一個記錄檔，預設寫在桌面。
 /// </summary>
 public static partial class Profiler
 {
@@ -35,6 +42,9 @@ public static partial class Profiler
     private const uint ThreadGetContext = 0x0008;
     private const uint ThreadQueryInformation = 0x0040;
     private const uint Wow64ContextControl = 0x00010001;
+
+    /// <summary>CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS —— 每秒的詳細取樣用。</summary>
+    private const uint Wow64ContextFull = 0x00010007;
 
     private const int VkEscape = 0x1B;
     private const int VkControl = 0x11;
@@ -84,17 +94,53 @@ public static partial class Profiler
         public fixed char szExePath[260];
     }
 
+    /// <summary>
+    /// WOW64_CONTEXT。位移取自 x86 CONTEXT 的標準版面：
+    /// Dr0..Dr7 在 4..28、FLOATING_SAVE_AREA 在 28..140、區段暫存器 140..156、
+    /// 整數暫存器 156..180、Ebp 180、Eip 184、SegCs 188、EFlags 192、Esp 196、SegSs 200，
+    /// 之後是 512 bytes 的 ExtendedRegisters，合計 716。
+    /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = 716)]
     public struct Wow64Context
     {
         [FieldOffset(0)]
         public uint ContextFlags;
 
+        [FieldOffset(156)]
+        public uint Edi;
+
+        [FieldOffset(160)]
+        public uint Esi;
+
+        [FieldOffset(164)]
+        public uint Ebx;
+
+        [FieldOffset(168)]
+        public uint Edx;
+
+        [FieldOffset(172)]
+        public uint Ecx;
+
+        [FieldOffset(176)]
+        public uint Eax;
+
+        [FieldOffset(180)]
+        public uint Ebp;
+
         [FieldOffset(184)]
         public uint Eip;
 
+        [FieldOffset(188)]
+        public uint SegCs;
+
+        [FieldOffset(192)]
+        public uint EFlags;
+
         [FieldOffset(196)]
         public uint Esp;
+
+        [FieldOffset(200)]
+        public uint SegSs;
     }
 
     [LibraryImport("kernel32.dll")]
@@ -227,10 +273,44 @@ public static partial class Profiler
         public bool WaitForProcess { get; set; } = false;
         public int DelaySeconds { get; set; } = 0;
         public bool WaitHotkey { get; set; } = false;
-        public string? OutFile { get; set; }
         public string ProcessName { get; set; } = DefaultProcessName;
+
+        /// <summary>
+        /// 直接指定要記錄的行程 ID；0 代表照 <see cref="ProcessName"/> 去找。
+        ///
+        /// 整合流程（<c>DiagnosticSession</c>）會把剛啟動／剛掛上的 pid 帶進來。
+        /// 同一台機器上可能同時開著兩個遊戲行程，用名稱再找一次會挑錯人。
+        /// </summary>
+        public uint ProcessId { get; set; }
         public Action<string>? Log { get; set; }
         public Func<bool>? CancelRequested { get; set; }
+
+        /// <summary>記錄檔要放的資料夾。空的話用桌面。一次遊戲執行只產生一個記錄檔。</summary>
+        public string? LogDirectory { get; set; }
+
+        /// <summary>直接指定記錄檔完整路徑；設了就蓋過 <see cref="LogDirectory"/> 的自動命名。</summary>
+        public string? LogFile { get; set; }
+
+        /// <summary>每秒詳細記錄：每個執行緒的暫存器、堆疊、熱點、記憶體與資源計數。</summary>
+        public bool Detailed { get; set; } = true;
+
+        /// <summary>每秒每執行緒最多掃幾層堆疊。0 = 關閉堆疊掃描。</summary>
+        public int StackDepth { get; set; } = 16;
+
+        /// <summary>崩潰時要回溯的秒數 (環形緩衝區大小)。</summary>
+        public int CrashRingSeconds { get; set; } = 30;
+
+        /// <summary>掛上偵錯器，在例外發生的那一刻攔截並寫出 minidump 與 JSON 狀態快照。</summary>
+        public bool CatchCrash { get; set; } = true;
+
+        /// <summary>minidump 是否包含完整記憶體 (檔案會有 1~2 GB)。</summary>
+        public bool FullMemoryDump { get; set; } = false;
+
+        /// <summary>遊戲加速倍率 (以引擎原生速度 1000 為基準，10 = 10 倍速)。0 或 1 = 不加速。</summary>
+        public int SpeedMultiplier { get; set; } = 0;
+
+        /// <summary>加速的方式。</summary>
+        public GameSpeed.Method SpeedMethod { get; set; } = GameSpeed.Method.Hotkey;
     }
 
     private sealed class Segment
@@ -243,16 +323,28 @@ public static partial class Profiler
         public Dictionary<uint, uint> Hits { get; } = new();
     }
 
+    /// <summary>分析結束後回報給呼叫端的東西 —— 報告文字之外還有落地的檔案路徑。</summary>
+    public sealed class RunResult
+    {
+        public string Report { get; set; } = string.Empty;
+        public string? LogPath { get; set; }
+        public string? DumpPath { get; set; }
+        public string? StatePath { get; set; }
+        public bool Crashed { get; set; }
+        public uint ExitCode { get; set; }
+        public bool ExitCodeKnown { get; set; }
+    }
+
     /// <summary>
     /// 執行取樣分析。
     /// </summary>
-    public static Result<string> Run(Options opt)
+    public static Result<RunResult> Run(Options opt)
     {
         void Output(string msg) => opt.Log?.Invoke(msg);
 
         string target = string.IsNullOrWhiteSpace(opt.ProcessName) ? DefaultProcessName : opt.ProcessName;
 
-        uint pid = FindProcess(target);
+        uint pid = opt.ProcessId != 0 ? opt.ProcessId : FindProcess(target);
         if (pid == 0 && opt.WaitForProcess)
         {
             Output($"等待 {target} 啟動中... (按 Esc 取消)");
@@ -260,7 +352,7 @@ public static partial class Profiler
             {
                 if (opt.CancelRequested?.Invoke() == true || (GetAsyncKeyState(VkEscape) & 0x8000) != 0)
                 {
-                    return Result<string>.Fail(Strings.Get("Error_ProfilerCancelled"), ExitCodes.GeneralFailure);
+                    return Result<RunResult>.Fail(Strings.Get("Error_ProfilerCancelled"), ExitCodes.GeneralFailure);
                 }
                 Sleep(200);
                 pid = FindProcess(target);
@@ -270,19 +362,25 @@ public static partial class Profiler
 
         if (pid == 0)
         {
-            return Result<string>.Fail(Strings.Get("Error_TargetProcessNotRunning"), ExitCodes.GeneralFailure);
+            return Result<RunResult>.Fail(Strings.Get("Error_TargetProcessNotRunning"), ExitCodes.GeneralFailure);
         }
 
-        IntPtr proc = OpenProcess(ProcessQueryInformation, false, pid);
+        // QUERY_INFORMATION 供計數器、VM_READ 供堆疊與程式碼讀取、SYNCHRONIZE 供
+        // WaitForSingleObject 精準判定「程序已經死了」(不必靠列舉猜，也不怕 pid 被重用)。
+        IntPtr proc = OpenProcess(ProcessQueryInformation | ProcessVmRead | SynchronizeAccess, false, pid);
         if (proc == IntPtr.Zero)
         {
-            return Result<string>.Fail(Strings.Get("Error_CannotOpenGameProcess"), ExitCodes.GeneralFailure);
+            return Result<RunResult>.Fail(Strings.Get("Error_CannotOpenGameProcess"), ExitCodes.GeneralFailure);
         }
 
         IsWow64Process(proc, out bool wow64);
-        CloseHandle(proc);
-
         Output($"附加到 {target} (pid {pid}, {(wow64 ? "32-bit" : "64-bit")})");
+        if (!wow64)
+        {
+            // 取樣走的是 Wow64SuspendThread / Wow64GetThreadContext，對 64 位元目標一定失敗。
+            // 講清楚比事後給一份空報告好。
+            Output("*** 目標不是 32 位元程序，EIP 取樣不會有任何結果（每秒的狀態記錄與崩潰攔截仍然有效）。");
+        }
 
         uint modBase = 0x00400000;
         uint modSize = 0x00400000;
@@ -302,13 +400,15 @@ public static partial class Profiler
             {
                 if (opt.CancelRequested?.Invoke() == true || (GetAsyncKeyState(VkEscape) & 0x8000) != 0)
                 {
-                    return Result<string>.Fail(Strings.Get("Error_ProfilerCancelled"), ExitCodes.GeneralFailure);
+                    CloseHandle(proc);
+                    return Result<RunResult>.Fail(Strings.Get("Error_ProfilerCancelled"), ExitCodes.GeneralFailure);
                 }
                 if ((GetAsyncKeyState(VkControl) & 0x8000) != 0 && (GetAsyncKeyState(VkF12) & 0x8000) != 0)
                     break;
                 if (FindProcess(target) == 0)
                 {
-                    return Result<string>.Fail("遊戲在開始取樣前已結束", ExitCodes.GeneralFailure);
+                    CloseHandle(proc);
+                    return Result<RunResult>.Fail("遊戲在開始取樣前已結束", ExitCodes.GeneralFailure);
                 }
                 Sleep(50);
             }
@@ -320,9 +420,60 @@ public static partial class Profiler
             Sleep(1000);
         }
 
+        var startedAt = DateTime.Now;
+        string logPath = string.IsNullOrWhiteSpace(opt.LogFile)
+            ? BuildLogPath(opt.LogDirectory, pid, startedAt)
+            : opt.LogFile;
+
+        var log = new TraceLog(logPath);
+        if (!log.IsOpen)
+        {
+            Output($"*** 記錄檔開不起來 ({log.OpenError})，這一次只會有畫面上的摘要。");
+        }
+        else
+        {
+            Output($"記錄檔: {logPath}");
+        }
+
+        // 程式碼映像只讀一次；之後的堆疊掃描與位元組傾印都從這份快取算，不再碰遊戲記憶體。
+        byte[]? image = SnapshotImage(proc, modBase, modSize);
+
+        var tracer = new Tracer(log, proc, pid, target, modBase, modSize, annotate, image,
+                                opt.Hz, opt.CrashRingSeconds, opt.Detailed ? opt.StackDepth : 0, startedAt);
+        tracer.WriteHeader(opt, wow64);
+
+        // 偵錯器模式：唯一能在「例外發生的那一瞬間」把現場凍住的辦法。引擎自己裝了
+        // unhandled-exception filter 又呼叫 SetErrorMode，所以沒有偵錯器就永遠只剩屍體。
+        CrashCatcher? catcher = null;
+        if (opt.CatchCrash)
+        {
+            catcher = new CrashCatcher(pid, logPath, opt.FullMemoryDump, modBase, modSize, annotate, image,
+                                      line => tracer.WriteNote(line), Output);
+            if (!catcher.Start())
+            {
+                Output($"崩潰攔截啟動失敗 ({catcher.StartError})，改用每秒記錄 (仍然抓得到結束代碼)。");
+                tracer.WriteNote($"[!] 崩潰攔截 (偵錯器) 啟動失敗：{catcher.StartError}");
+                catcher.Dispose();
+                catcher = null;
+            }
+            else
+            {
+                Output("崩潰攔截已啟動 (偵錯器模式)。");
+            }
+        }
+
+        // 加速器：用引擎自己的 SetSpeed，不寫遊戲記憶體。
+        if (opt.SpeedMultiplier > 1)
+        {
+            var speed = GameSpeed.Apply(pid, opt.SpeedMultiplier, opt.SpeedMethod);
+            Output(speed.Message);
+            tracer.WriteNote($"[加速器] {speed.Message}");
+            tracer.WriteNote();
+        }
+
         bool untilExit = opt.Seconds <= 0;
         Output(untilExit
-            ? $"\n記錄中，直到遊戲結束。每 {opt.SegmentSeconds} 秒寫一次報告。(按 Esc 提前結束)\n"
+            ? $"\n記錄中，直到遊戲結束。每 1 秒寫一筆詳細記錄。(按 Esc 提前結束)\n"
             : $"\n記錄 {opt.Seconds} 秒。\n");
 
         var totalHits = new Dictionary<uint, uint>();
@@ -341,6 +492,8 @@ public static partial class Profiler
 
         void RefreshThreads()
         {
+            var before = new HashSet<uint>(tids);
+
             for (int i = 0; i < handles.Count; i++)
             {
                 if (handles[i] != IntPtr.Zero)
@@ -361,6 +514,12 @@ public static partial class Profiler
                 {
                     startCpu[tid] = CpuSeconds(h);
                 }
+                if (!before.Contains(tid)) tracer.NoteThreadStart(tid, h);
+            }
+
+            foreach (uint gone in before.Where(t => !tids.Contains(t)))
+            {
+                tracer.NoteThreadExit(gone);
             }
         }
 
@@ -425,39 +584,33 @@ public static partial class Profiler
             return sb.ToString();
         }
 
-        void FlushReport(double runTime, bool finished)
-        {
-            if (string.IsNullOrWhiteSpace(opt.OutFile)) return;
-            try
-            {
-                string rep = BuildReport(runTime, finished);
-                File.WriteAllText(opt.OutFile, rep, Encoding.UTF8);
-            }
-            catch { }
-        }
-
         int segIndex = 1;
         bool gameExited = false;
         curSegment.Index = segIndex;
         curSegment.Start = 0;
+        double lastTick = 0;
 
+        // 取樣迴圈裡不管出什麼事，收尾的部分都一定要跑完 —— 使用者要的就是
+        // 「遊戲閃退之後手上有東西可以看」，這裡絕不能因為一個例外就什麼都不輸出。
+        string? fatalError = null;
+        try
+        {
         while (true)
         {
             double t = Elapsed();
             if (!untilExit && t >= opt.Seconds) break;
             if (opt.CancelRequested?.Invoke() == true || (GetAsyncKeyState(VkEscape) & 0x8000) != 0) break;
 
-            bool anyAlive = false;
             for (int i = 0; i < handles.Count; i++)
             {
                 if (handles[i] == IntPtr.Zero) continue;
-                if (!SampleEip(handles[i], out uint eip)) continue;
+                if (!SampleEip(handles[i], out uint eip, out uint esp)) continue;
 
-                anyAlive = true;
                 totalSamples++;
                 curSegment.Samples++;
 
-                if (eip >= modBase && eip < modBase + modSize)
+                bool inModule = eip >= modBase && eip < modBase + modSize;
+                if (inModule)
                 {
                     uint bucket = eip & ~0xFu;
                     totalHits[bucket] = totalHits.GetValueOrDefault(bucket) + 1;
@@ -466,34 +619,41 @@ public static partial class Profiler
                     totalInModule++;
                     curSegment.InModule++;
                 }
+
+                tracer.Record(t, tids[i], eip, esp, inModule);
             }
 
-            if (t - curSegment.Start >= opt.SegmentSeconds)
+            // 每秒一次：先確認程序還活著，再把這一秒的現場寫下去。
+            if (t - lastTick >= 1.0)
             {
-                curSegment.End = t;
-                segments.Add(curSegment);
-                curSegment = new Segment { Index = ++segIndex, Start = t };
-
-                RefreshThreads();
-                if (FindProcess(target) == 0)
+                if (ProcessExited(proc))
                 {
                     gameExited = true;
                     break;
                 }
-                FlushReport(t, false);
-                Output($"  {t:F0} 秒, {totalSamples} 樣本 (遊戲碼內 {totalInModule}) -- 已寫檔");
-            }
-            else if (!anyAlive)
-            {
-                if (FindProcess(target) == 0)
-                {
-                    gameExited = true;
-                    break;
-                }
+
                 RefreshThreads();
+                if (opt.Detailed) tracer.Tick(t, tids, handles);
+                lastTick = t;
+
+                if (t - curSegment.Start >= opt.SegmentSeconds)
+                {
+                    curSegment.End = t;
+                    segments.Add(curSegment);
+                    curSegment = new Segment { Index = ++segIndex, Start = t };
+                    Output($"  {t:F0} 秒, {totalSamples} 樣本 (遊戲碼內 {totalInModule})");
+                }
             }
 
             PreciseSleepUs(intervalUs);
+        }
+        }
+        catch (Exception ex)
+        {
+            fatalError = ex.ToString();
+            Output($"*** 取樣迴圈發生例外，記錄仍會寫出：{ex.Message}");
+            tracer.WriteNote($"[!!] 取樣迴圈發生例外，以下為分析器自己的錯誤，不是遊戲的：\r\n{ex}");
+            if (ProcessExited(proc)) gameExited = true;
         }
 
         double finalRunTime = Elapsed();
@@ -512,24 +672,77 @@ public static partial class Profiler
             }
         }
 
-        Output($"\n{(gameExited ? "遊戲結束" : "記錄結束")}，共 {totalSamples} 個樣本。");
+        // 偵錯器如果攔到了例外，它手上的現場比取樣器精確得多，等它把報告寫完再收尾。
+        if (gameExited) catcher?.WaitForCapture(TimeSpan.FromSeconds(60));
+
+        bool exitCodeKnown = GetExitCodeProcess(proc, out uint exitCode) && exitCode != 259; // STILL_ACTIVE
+        if (gameExited && !exitCodeKnown)
+        {
+            // 極少數情況下控制代碼已經失效，退回偵錯器記錄到的值。
+            exitCodeKnown = catcher?.ExitCodeKnown == true;
+            exitCode = catcher?.ExitCode ?? 0;
+        }
+
+        bool crashed = (exitCodeKnown && IsCrashExitCode(exitCode)) || catcher?.Captured == true;
+
+        Output($"\n{(gameExited ? (crashed ? "遊戲閃退" : "遊戲結束") : "記錄結束")}，共 {totalSamples} 個樣本。");
+
+        // 遊戲還活著、而且我們動過速度，就把它調回正常再走人。
+        if (!gameExited && opt.SpeedMultiplier > 1)
+        {
+            var restored = GameSpeed.Restore(pid, opt.SpeedMethod);
+            Output(restored.Message);
+            tracer.WriteNote($"[加速器] {restored.Message}");
+        }
+
+        string finalReport = BuildReport(finalRunTime, gameExited);
 
         if (totalSamples == 0)
         {
-            return Result<string>.Fail(Strings.Get("Error_NoSamplesCollected"), ExitCodes.GeneralFailure);
+            // 一個樣本都沒有也照樣輸出。什麼都收不到本身就是線索
+            // （遊戲一啟動就死、或分析器沒有權限開執行緒控制代碼）。
+            string why = Strings.Get("Error_NoSamplesCollected");
+            finalReport = $"{why}\r\n\r\n{finalReport}";
+            tracer.WriteNote($"[!] {why}");
         }
 
-        string finalReport = BuildReport(finalRunTime, true);
-        FlushReport(finalRunTime, true);
-        if (!string.IsNullOrWhiteSpace(opt.OutFile))
+        if (fatalError is not null)
         {
-            Output($"報告已寫入 {opt.OutFile}");
+            finalReport = $"分析器本身發生例外（記錄仍完整寫出）：\r\n{fatalError}\r\n\r\n{finalReport}";
         }
 
-        return Result<string>.Ok(finalReport);
+        if (gameExited)
+        {
+            tracer.WriteExitReport(finalRunTime, exitCodeKnown, exitCode, finalRunTime, catcher?.CapturedSummary);
+        }
+        tracer.WriteSummary(finalReport);
+
+        string? dumpPath = catcher?.DumpPath;
+        string? statePath = catcher?.StatePath;
+        catcher?.Dispose();
+        tracer.Dispose();
+        CloseHandle(proc);
+
+        if (log.IsOpen) Output($"記錄已寫入 {logPath}");
+        if (dumpPath is not null) Output($"崩潰傾印: {dumpPath}");
+        if (statePath is not null) Output($"狀態快照: {statePath}");
+
+        return Result<RunResult>.Ok(new RunResult
+        {
+            Report = finalReport,
+            LogPath = log.IsOpen ? logPath : null,
+            DumpPath = dumpPath,
+            StatePath = statePath,
+            Crashed = crashed,
+            ExitCode = exitCode,
+            ExitCodeKnown = exitCodeKnown
+        });
     }
 
     #region Helper Methods
+
+    /// <summary>用 SYNCHRONIZE 控制代碼判定程序是否已結束，不受 pid 重用影響。</summary>
+    private static bool ProcessExited(IntPtr process) => WaitForSingleObject(process, 0) == 0;
 
     private static unsafe uint FindProcess(string want)
     {
@@ -615,9 +828,10 @@ public static partial class Profiler
         return list;
     }
 
-    private static bool SampleEip(IntPtr thread, out uint eip)
+    private static bool SampleEip(IntPtr thread, out uint eip, out uint esp)
     {
         eip = 0;
+        esp = 0;
         if (Wow64SuspendThread(thread) == unchecked((uint)-1)) return false;
 
         var ctx = new Wow64Context { ContextFlags = Wow64ContextControl };
@@ -626,6 +840,7 @@ public static partial class Profiler
 
         if (!ok) return false;
         eip = ctx.Eip;
+        esp = ctx.Esp;
         return true;
     }
 

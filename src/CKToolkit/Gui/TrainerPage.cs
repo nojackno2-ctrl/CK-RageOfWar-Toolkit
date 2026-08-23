@@ -21,8 +21,11 @@ public sealed class TrainerPage : UserControl
     private readonly DataGridView _tweaks = new();
     private readonly Button _resetCheats = new();
     private readonly Button _resetTweaks = new();
+    private readonly Button _launchGame = new();
+    private readonly Label _launchHint = new();
     private readonly Label _hint = new();
     private readonly Label _tweaksWarning = new();
+    private readonly Label _riskBanner = new();
     private bool _loading;
     private int _capturingRow = -1;
 
@@ -34,8 +37,12 @@ public sealed class TrainerPage : UserControl
         Keys.LWin, Keys.RWin,
     ];
 
+    /// <summary>使用者按下修改器頁裡的「啟動遊戲」。MainForm 收到後會先套用目前設定、再帶診斷層啟動。</summary>
+    public event Action? LaunchGameRequested;
+
     public TrainerPage()
     {
+        AutoScroll = true;
         BackColor = Color.White;
         Padding = new Padding(12);
         BuildUi();
@@ -44,10 +51,12 @@ public sealed class TrainerPage : UserControl
 
     private void BuildUi()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 5 };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var settings = new FlowLayoutPanel
         {
@@ -56,7 +65,7 @@ public sealed class TrainerPage : UserControl
         };
         _enabled.AutoSize = true;
         _enabled.Font = new Font(Font, FontStyle.Bold);
-        _enabled.CheckedChanged += (_, _) => RefreshEnabledState();
+        _enabled.CheckedChanged += (_, _) => { RefreshEnabledState(); UpdateRiskBanner(); };
         _numpad.AutoSize = true;
         _numpad.CheckedChanged += (_, _) => NumpadModeChanged();
         _keepVanilla.AutoSize = true;
@@ -74,17 +83,50 @@ public sealed class TrainerPage : UserControl
         settings.Controls.AddRange([_enabled, _numpad, _keepVanilla, _playerModeLabel, _playerMode, _fixedPlayerLabel, _fixedPlayer]);
         root.Controls.Add(settings, 0, 0);
 
+        _riskBanner.AutoSize = true;
+        _riskBanner.Dock = DockStyle.Fill;
+        _riskBanner.MaximumSize = new Size(1050, 0);
+        _riskBanner.Font = new Font(Font, FontStyle.Bold);
+        _riskBanner.Padding = new Padding(12, 9, 12, 9);
+        _riskBanner.Margin = new Padding(6, 6, 6, 4);
+        root.Controls.Add(_riskBanner, 0, 1);
+
+        // 直接把「啟動遊戲」放在修改器頁裡：調整完作弊/數值不必再跑到最下面的全域列，
+        // 一鍵套用現在的設定並帶診斷層啟動，馬上就能測。
+        var launchRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
+            Padding = new Padding(6, 6, 6, 2)
+        };
+        _launchGame.AutoSize = true;
+        _launchGame.MinimumSize = new Size(140, 34);
+        _launchGame.FlatStyle = FlatStyle.Flat;
+        _launchGame.BackColor = Color.FromArgb(37, 99, 235);
+        _launchGame.ForeColor = Color.White;
+        _launchGame.FlatAppearance.BorderColor = Color.FromArgb(37, 99, 235);
+        _launchGame.Font = new Font(Font, FontStyle.Bold);
+        _launchGame.Margin = new Padding(0, 0, 12, 0);
+        _launchGame.Click += (_, _) => LaunchGameRequested?.Invoke();
+        _launchHint.AutoSize = true;
+        _launchHint.Anchor = AnchorStyles.Left;
+        _launchHint.ForeColor = Color.FromArgb(100, 116, 139);
+        _launchHint.Margin = new Padding(0, 10, 0, 0);
+        launchRow.Controls.AddRange([_launchGame, _launchHint]);
+        root.Controls.Add(launchRow, 0, 2);
+
         _hint.AutoSize = true;
         _hint.MaximumSize = new Size(1000, 0);
         _hint.ForeColor = Color.FromArgb(71, 85, 105);
         _hint.Padding = new Padding(8, 6, 8, 8);
-        root.Controls.Add(_hint, 0, 1);
+        root.Controls.Add(_hint, 0, 3);
 
-        _subTabs.Dock = DockStyle.Fill;
+        _subTabs.Dock = DockStyle.Top;
+        _subTabs.Height = 440;
+        _subTabs.MinimumSize = new Size(0, 360);
         _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
-        root.Controls.Add(_subTabs, 0, 2);
+        root.Controls.Add(_subTabs, 0, 4);
         Controls.Add(root);
     }
 
@@ -109,6 +151,7 @@ public sealed class TrainerPage : UserControl
         });
         _cheats.CellToolTipTextNeeded += CheatsCellToolTipTextNeeded;
         _cheats.CellClick += CheatsCellClick;
+        _cheats.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
         _cheats.KeyCaptured += OnKeyCaptured;
         _cheats.Leave += (_, _) => CancelCapture();
         _resetCheats.AutoSize = true;
@@ -140,6 +183,8 @@ public sealed class TrainerPage : UserControl
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Default", ReadOnly = true, Width = 100 });
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Range", ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
         _tweaks.CellToolTipTextNeeded += TweaksCellToolTipTextNeeded;
+        _tweaks.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
+        _tweaks.CellEndEdit += (_, _) => UpdateRiskBanner();
         _resetTweaks.AutoSize = true;
         _resetTweaks.Margin = new Padding(6);
         _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
@@ -236,6 +281,7 @@ public sealed class TrainerPage : UserControl
         _loading = false;
         RefreshEnabledState();
         ApplyLanguage();
+        UpdateRiskBanner();
     }
 
     public void SaveConfig(TrainerConfig config)
@@ -317,8 +363,11 @@ public sealed class TrainerPage : UserControl
         _tweaksTab.Text = Strings.Get("Gui_Trainer_Tweaks");
         _resetCheats.Text = Strings.Get("Gui_Trainer_ResetCheats");
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
+        _launchGame.Text = Strings.Get("Gui_Trainer_Launch");
+        _launchHint.Text = Strings.Get("Gui_Trainer_LaunchHint");
         _hint.Text = Strings.Get("Gui_Trainer_Hint");
         _tweaksWarning.Text = Strings.Get("Gui_Trainer_TweaksWarning");
+        UpdateRiskBanner();
         _cheats.Columns["Enabled"]!.HeaderText = Strings.Get("Gui_Enabled");
         _cheats.Columns["Name"]!.HeaderText = Strings.Get("Gui_Name");
         _cheats.Columns["Key"]!.HeaderText = Strings.Get("Gui_Key");
@@ -366,6 +415,63 @@ public sealed class TrainerPage : UserControl
         _playerMode.Enabled = enabled;
         _fixedPlayer.Enabled = enabled && _playerMode.SelectedIndex == 1;
         _subTabs.Enabled = enabled;
+    }
+
+    private void UpdateRiskBanner()
+    {
+        TrainerRiskLevel risk;
+        try
+        {
+            risk = TrainerRisk.Assess(BuildRiskSnapshot());
+        }
+        catch
+        {
+            risk = TrainerRiskLevel.Extreme;
+        }
+
+        string statusKey = risk switch
+        {
+            TrainerRiskLevel.Extreme => "Gui_Trainer_RiskExtreme",
+            TrainerRiskLevel.Elevated => "Gui_Trainer_RiskElevated",
+            _ => "Gui_Trainer_RiskNormal",
+        };
+        _riskBanner.Text = Strings.Get("Gui_Trainer_RiskBanner", Strings.Get(statusKey));
+        _riskBanner.ForeColor = risk switch
+        {
+            TrainerRiskLevel.Extreme => Color.FromArgb(153, 27, 27),
+            TrainerRiskLevel.Elevated => Color.FromArgb(146, 64, 14),
+            _ => Color.FromArgb(55, 65, 81),
+        };
+        _riskBanner.BackColor = risk switch
+        {
+            TrainerRiskLevel.Extreme => Color.FromArgb(254, 226, 226),
+            TrainerRiskLevel.Elevated => Color.FromArgb(255, 237, 213),
+            _ => Color.FromArgb(241, 245, 249),
+        };
+    }
+
+    private TrainerConfig BuildRiskSnapshot()
+    {
+        var config = new TrainerConfig { Enabled = _enabled.Checked };
+        foreach (DataGridViewRow row in _tweaks.Rows)
+        {
+            if (row.Tag is not Tweak tweak) continue;
+            string raw = Convert.ToString(row.Cells["Value"].Value, CultureInfo.InvariantCulture) ?? string.Empty;
+            if (TryParseDecimal(raw, out decimal value)) config.Tweaks[tweak.Id] = value;
+        }
+        foreach (DataGridViewRow row in _cheats.Rows)
+        {
+            if (row.Tag is not Cheat cheat) continue;
+            config.Cheats.Add(new CheatConfig
+            {
+                Id = cheat.Id,
+                Enabled = Convert.ToBoolean(row.Cells["Enabled"].Value ?? false, CultureInfo.InvariantCulture),
+                Parameters = row.Cells["Parameters"].Tag is Dictionary<string, string> parameters
+                    ? new Dictionary<string, string>(parameters, StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal),
+            });
+        }
+        return config;
     }
 
     private void NumpadModeChanged()
@@ -449,6 +555,7 @@ public sealed class TrainerPage : UserControl
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             SetParameterCell(row, new Dictionary<string, string>(dialog.ResultParameters, StringComparer.Ordinal));
+            UpdateRiskBanner();
         }
     }
 
@@ -515,6 +622,7 @@ public sealed class TrainerPage : UserControl
     {
         foreach (DataGridViewRow row in _tweaks.Rows)
             if (row.Tag is Tweak tweak) row.Cells["Value"].Value = FormatDecimal(tweak.Default);
+        UpdateRiskBanner();
     }
 
     private void CheatsCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)

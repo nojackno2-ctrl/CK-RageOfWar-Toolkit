@@ -42,9 +42,14 @@
 //   * anything outside the null page, so a genuine wild pointer still dies loudly;
 //   * anything outside the game image;
 //   * every instruction form the decoder is not certain about -- read-modify-write,
-//     string operations, floating point. Those produce a full report instead, which is
-//     how the ninth site was found: it was a `mov ecx,[eax]` load, and at the time this
-//     file only handled stores.
+//     string operations, floating point;
+//   * indirect call/jump memory operands. A zero-filled scratch page is valid data
+//     semantics for an ordinary load, but `call [reg+disp]` uses that data as the next
+//     EIP. The 2026-08-23 field crash proved that redirecting `call [edx+4]` to scratch
+//     simply converts the original null read into a DEP fault at EIP 0.
+//
+// Rejected forms produce a full report instead, which is how new precise sites are
+// discovered without turning visible faults into silent control-flow corruption.
 //
 // Every distinct site is recorded with a hit count and reported in the log and in each
 // crash report. That table is the real deliverable: a map of every place the engine
@@ -262,6 +267,29 @@ bool HasModRm(unsigned char op) {
     return false;
 }
 
+// FF /2,/3 are indirect CALL and FF /4,/5 are indirect JMP. Their memory operand is
+// not ordinary data: it becomes the next instruction pointer. Redirecting the base to
+// a zero-filled scratch page would manufacture target 0 and resume into a guaranteed
+// DEP fault, exactly what happened at 0x00693070 (`FF 52 04`) in pid 27096.
+bool IsIndirectControlFlowMemoryOperand(const unsigned char* code, size_t avail) {
+    size_t i = 0;
+    while (i < avail && i < 4) {
+        unsigned char b = code[i];
+        if (b == 0x66 || b == 0x67 || b == 0xF2 || b == 0xF3 ||
+            b == 0x26 || b == 0x2E || b == 0x36 || b == 0x3E || b == 0x64 || b == 0x65) {
+            ++i;
+            continue;
+        }
+        break;
+    }
+    if (i + 1 >= avail || code[i] != 0xFF) return false;
+
+    unsigned char modrm = code[i + 1];
+    if ((modrm >> 6) == 3) return false;  // register target; no memory operand to redirect
+    int group = (modrm >> 3) & 7;
+    return group >= 2 && group <= 5;
+}
+
 // Finds the base register of the memory operand, or returns false when the addressing
 // mode has no base register to redirect (absolute disp32, or an unrecognised opcode).
 bool FindBaseRegister(const unsigned char* code, size_t avail, int& baseReg) {
@@ -345,6 +373,24 @@ int StoreLength(const unsigned char* code, size_t avail) {
 // documented exception, and it is cleared the moment the test finishes.
 static volatile uintptr_t g_selfTestStoreEip = 0;
 
+// 0x005D9880 is the VM's integer += handler. Returning 2 is not invented behavior:
+// the dispatcher at 0x005DF5F1 explicitly branches on handler return 2 to 0x005DF921,
+// marks status 3, and leaves the current script/atomic section. The field run proved
+// that redirecting this handler's null `mov ecx,[eax]` to per-EIP scratch can still
+// loop forever because another VM opcode reads the same dead lvalue through a different
+// scratch slot. Abort the invalid compound assignment instead of emulating shared state.
+constexpr uintptr_t kInvalidAddAssignLoad = 0x005D98BF;
+
+__declspec(naked) static void AbortInvalidAddAssignment() {
+    __asm {
+        pop edi          // mirrors 0x005D98CE
+        mov eax, 2       // VM handler return code: abort current script section
+        pop esi          // mirrors 0x005D98D1
+        add esp, 8       // release the handler's local area
+        ret
+    }
+}
+
 void NullStoreInit() {
     InitializeCriticalSection(&g_lock);
     g_lockReady = true;
@@ -369,6 +415,11 @@ void NullStoreInit() {
 typedef LONG (NTAPI* PFN_NtAllocateVirtualMemory)(HANDLE, PVOID*, ULONG_PTR, PSIZE_T, ULONG, ULONG);
 
 bool NullPageTryMap() {
+    // Respect both the user option and the diagnostic safety fail-closed path. Mapping
+    // page zero changes engine behaviour even though no VEH repair is involved, so it
+    // must never happen after repair has been disabled.
+    if (!g_cfg.nullStoreRepair) return false;
+
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) return false;
     auto alloc = (PFN_NtAllocateVirtualMemory)GetProcAddress(ntdll, "NtAllocateVirtualMemory");
@@ -420,6 +471,64 @@ static bool RunStub(const unsigned char* stub, size_t stubLen, int faultOffset,
     return true;
 }
 
+static bool IndirectControlFlowSelfTest() {
+    // Directly exercise NullStoreTryRepair with the exact instruction from the field
+    // crash. Do not execute it: a correctly rejected instruction must be allowed to
+    // fault normally, and executing that negative test would intentionally create a
+    // crash report during every game startup.
+    unsigned char code[16] = { 0xFF, 0x52, 0x04 };  // call dword ptr [edx+4]
+    EXCEPTION_RECORD er = {};
+    er.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+    er.NumberParameters = 2;
+    er.ExceptionInformation[0] = 0;  // read
+    er.ExceptionInformation[1] = 4;
+
+    CONTEXT cx = {};
+    cx.Eip = (DWORD)(uintptr_t)code;
+    cx.Edx = 0;
+    EXCEPTION_POINTERS ep = { &er, &cx };
+
+    bool first = false;
+    unsigned resume = 0;
+    g_selfTestStoreEip = (uintptr_t)code;
+    bool repaired = NullStoreTryRepair(&ep, first, resume);
+    g_selfTestStoreEip = 0;
+
+    if (repaired || resume != 0 || cx.Edx != 0) return false;
+
+    const unsigned char indirectJump[] = { 0xFF, 0x60, 0x08 }; // jmp dword ptr [eax+8]
+    const unsigned char ordinaryLoad[] = { 0x8B, 0x51, 0x04 }; // mov edx,[ecx+4]
+    return IsIndirectControlFlowMemoryOperand(indirectJump, sizeof(indirectJump)) &&
+           !IsIndirectControlFlowMemoryOperand(ordinaryLoad, sizeof(ordinaryLoad));
+}
+
+static bool InvalidAddAssignmentSelfTest() {
+    unsigned char actual[2] = {};
+    if (!SafeRead(kInvalidAddAssignLoad, actual, sizeof(actual)) ||
+        actual[0] != 0x8B || actual[1] != 0x08) return false; // mov ecx,[eax]
+
+    EXCEPTION_RECORD er = {};
+    er.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
+    er.NumberParameters = 2;
+    er.ExceptionInformation[0] = 0; // read
+    er.ExceptionInformation[1] = 0;
+
+    CONTEXT cx = {};
+    cx.Eip = (DWORD)kInvalidAddAssignLoad;
+    cx.Eax = 0;
+    cx.Edi = 1;
+    EXCEPTION_POINTERS ep = { &er, &cx };
+
+    bool first = false;
+    unsigned resume = 0;
+    g_selfTestStoreEip = kInvalidAddAssignLoad;
+    bool repaired = NullStoreTryRepair(&ep, first, resume);
+    g_selfTestStoreEip = 0;
+
+    return repaired && resume == (unsigned)(uintptr_t)&AbortInvalidAddAssignment &&
+           cx.Eax == 0 && cx.Edi == 1;
+}
+
 bool NullStoreSelfTest() {
     if (!g_cfg.nullStoreRepair) return true;
 
@@ -453,13 +562,23 @@ bool NullStoreSelfTest() {
         else if (ret != 0) { ok = false; failure = "the null LOAD resumed without delivering zero"; }
     }
 
+    if (ok && !IndirectControlFlowSelfTest()) {
+        ok = false;
+        failure = "an indirect call/jump memory operand was accepted for repair";
+    }
+
+    if (ok && !InvalidAddAssignmentSelfTest()) {
+        ok = false;
+        failure = "the invalid VM += handler did not select its return-code-2 abort path";
+    }
+
     // Start the session counter from zero so the number the user sees is entirely the
     // engine's doing.
     InterlockedExchange(&g_totalRepairs, 0);
 
     if (ok) {
-        Logf("null-store repair: self-test passed -- a real null store and a real null load "
-             "were both decoded, repaired, and execution resumed correctly.");
+        Logf("null-store repair: self-test passed -- a real null store/load were repaired, "
+             "indirect control flow was rejected, and invalid VM += selects abort code 2.");
         return true;
     }
 
@@ -539,13 +658,27 @@ bool NullStoreTryRepair(EXCEPTION_POINTERS* ep, bool& firstTimeAtThisSite, unsig
     unsigned char code[16];
     if (!SafeRead(eip, code, sizeof(code))) return false;
 
+    // This exact operator was observed spinning at >100,000 first-chance AVs while the
+    // process remained alive but rendered no frames. Per-site scratch cannot preserve
+    // lvalue identity across separate VM opcodes, so continuing it is not safe.
+    if (eip == kInvalidAddAssignLoad && op == 0 && target == 0 &&
+        code[0] == 0x8B && code[1] == 0x08) {
+        if (eip != g_selfTestStoreEip) {
+            if (!RecordSite(eip, firstTimeAtThisSite)) return false;
+        }
+        InterlockedIncrement(&g_totalRepairs);
+        resumeEip = (unsigned)(uintptr_t)&AbortInvalidAddAssignment;
+        return true;
+    }
+
     // Strategy 1, preferred: point the base register at scratch and re-execute. This
     // works for any instruction form, and it lets accumulate-in-place patterns actually
     // progress instead of spinning forever on a value that never changes.
     int baseReg = -1;
     DWORD* baseSlot = nullptr;
     void* scratch = ScratchFor(eip);
-    if (scratch && FindBaseRegister(code, sizeof(code), baseReg)) {
+    if (!IsIndirectControlFlowMemoryOperand(code, sizeof(code)) &&
+        scratch && FindBaseRegister(code, sizeof(code), baseReg)) {
         baseSlot = RegSlot(ep->ContextRecord, baseReg);
         // Only redirect when that register really is the null pointer. If it already
         // holds something large the fault came from elsewhere, and moving it would be

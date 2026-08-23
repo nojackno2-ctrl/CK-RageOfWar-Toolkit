@@ -7,7 +7,7 @@ namespace CKToolkit.Gui;
 /// <summary>
 /// 修改器作弊參數的視覺化圖形設定對話框。
 /// 支援數值微調（NumericUpDown）、62 種全遊戲單位的分類挑選（最多 20 種）、
-/// 初始等級設定（Level 1~100）與 23 種攜帶物品裝備挑選（最多 6 件）。
+/// 初始等級設定（Level 1~1000）與 23 種攜帶物品裝備挑選（最多 6 件）。
 /// 所有單位與物品均以 3 欄等寬表格排列整齊，並支援即時搜尋與預設組合。
 /// </summary>
 public sealed class CheatParamsDialog : Form
@@ -254,15 +254,15 @@ public sealed class CheatParamsDialog : Form
         var levelNum = new NumericUpDown
         {
             Minimum = 1,
-            Maximum = 100,
+            Maximum = 1000,
             Value = 1,
-            Width = 65,
+            Width = 70,
             Margin = new Padding(0, 1, 16, 0),
         };
         if (_parameters.TryGetValue("level", out string? levelStr) &&
             int.TryParse(levelStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int lVal))
         {
-            levelNum.Value = Math.Clamp(lVal, 1, 100);
+            levelNum.Value = Math.Clamp(lVal, 1, 1000);
         }
         _inputControls["level"] = levelNum;
 

@@ -1,0 +1,519 @@
+# ISSUES.md — 問題、修復與實機驗證狀態追蹤清單
+
+本文件由 **AI 代理人**（AI Coding Agents）專門撰寫與即時維護，旨在全面追蹤《Celtic Kings: Rage of War Toolkit》專案中發現的所有問題（Defects / Crashes / Bugs / Performance Issues）、對應的逆向工程分析、程式碼修復進度，以及**是否經過遊戲真實實機測試（Field-Tested In-Game）**。
+
+---
+
+## 1. 狀態定義與 AI 維護守則
+
+### 1.1 四大狀態標籤
+
+| 狀態標籤 | 英文標識 | 定義說明 |
+|---|---|---|
+| 🔴 **未修復／調查中** | `Open / Investigating` | 已知問題，尚未修復或正在進行逆向工程分析。 |
+| 🟡 **已修碼 · 待實測** | `Fixed - Pending Field Test` | 程式碼修復已實作，單元測試／SelfTest 通過，**但尚未在《Celtic Kings》真實遊戲中實機驗證**。 |
+| 🟢 **已實機驗收** | `Verified In-Game` | **已由使用者在真實遊戲中實機重現、操作並確認修復生效且無副作用**。 |
+| ⚪ **僅本地／合成驗證** | `Verified Locally / Synthetic` | 在測試用假環境或合成 x86 程序驗證通過，但尚未進行真實遊戲實測。 |
+
+### 1.2 AI 協作鐵律（違反即視為工作失誤）
+
+1. **嚴禁虛報實測狀態**：程式碼寫完、測試套件（SelfTest）通過，**僅代表靜態邏輯與單元測試正確，狀態一律只能標記為 `🟡 已修碼 · 待實測` 或 `⚪ 僅本地／合成驗證`**。
+2. **唯一實測來源**：只有使用者回報在真實遊戲內（Steam 正版執行環境）測試成功、或分析器取得實機 Log / Dump 佐證時，AI 才能將狀態改為 `🟢 已實機驗收`。
+3. **即時同步更新**：每當發現新 Bug、完成程式碼修復、或收到使用者實機測試回饋時，AI 必須立即更新本文件與 `AI_HANDOFF.md`。
+
+---
+
+## 2. ⚡ 待實機測試清單（待實測看板）
+
+> 💡 **使用者測試指引**：以下為目前程式碼已修復或功能已實作，**急需使用者在真實遊戲中進行實機驗收**的項目。
+
+| Issue 編號 | 項目簡述 | 觸發／測試方式 | 期望結果 |
+|---|---|---|---|
+| [ISSUE-027](#issue-027-gui-小視窗內容被裁切與日常穩定性入口不清楚) | **GUI 小視窗與穩定性產品化** | 以最小視窗逐頁操作，分別用已驗證／實驗性／停用穩定保護啟動一場遊戲。 | 重要入口不用全螢幕即可找到；日常啟動依設定載入對應保護；分析器仍可獨立啟動完整記錄。 |
+| [ISSUE-017](#issue-017-腳本-vm-指派運算子用殘留左值寫穿記憶體本場致命) | **無效 VM 左值＋runaway `+=` 中止** | 再次把物件數推到約 3.5 萬。 | 8-site 與 return-code-2 自測通過；有 REPAIRED、沒有 `0x005D98BF RUNAWAY`，遊戲繼續正常操作。 |
+| [ISSUE-026](#issue-026-程序退出後位址空間掃描失敗被誤報為-100-用滿) | **死行程位址空間假警報** | 讓分析中的遊戲閃退或退出。 | 最後一秒顯示取樣失敗／n/a，不再警告 100% 用滿或 0 MB 空閒。 |
+| [ISSUE-023](#issue-023-null-store-通用修復誤把間接-call-的函式指標讀取當成可修復資料讀取) | **拒絕修復間接 call/jmp** | 重現 `0x0069305D → 0x00693070` 高負載故障鏈。 | 啟動自測顯示 indirect call/jump 已拒絕；`0x00693070` 不再出現 `REPAIRED`，也不再衍生 EIP 0。 |
+| [ISSUE-024](#issue-024-ckperf-故障報告器在-eip0-時位址下溢並於自身-dll-內二次崩潰) | **EIP 低位址報告安全** | 再次產生 EIP 0 或其他低於 8 的例外現場。 | 啟動安全自測通過，最高編號 `ckcrash` 完整，沒有 `ckperf.dll` 二次 AV。 |
+| [ISSUE-020](#issue-020-cli-run-的執行配置清單沒有寫在設定的輸出路徑) | **CLI 執行清單的輸出路徑** | 用 CLI `run` 指定自訂輸出資料夾。 | `ckrun-config.txt` 與 `ckperf-*.log`、`ckcrash-*.txt` 在同一個資料夾。 |
+| [ISSUE-021](#issue-021-設定的輸出資料夾在真正開跑之前不存在gui-會默默退回桌面) | **設定的路徑要建立資料夾** | 在分析器分頁把輸出資料夾填成一個還不存在的路徑並離開輸入框。 | 資料夾立刻被建出來；「開啟資料夾」與「瀏覽」都指向它而不是桌面。 |
+| [ISSUE-022](#issue-022-分析器直接把所有產物散落在使用者選擇的根目錄) | **根資料夾、日期與每場記錄分類** | 在 GUI 選擇桌面後啟動兩場分析。 | 桌面只出現一個 `CKToolkit 分析紀錄`根資料夾；內部依日期與每場執行分開，同一場的完整證據鏈仍在同一資料夾。 |
+| [ISSUE-002](#issue-002-分析器遊戲加速器預設倍率防呆與連動) | **分析器遊戲加速器 10x 與主控台加速** | 在分析器分頁選擇「10x 極速」，啟動遊戲並測試加速效果。 | 遊戲速度顯著加快，主控台未打錯字至其他視窗。 |
+| [ISSUE-004](#issue-004-第三方自製語言包匯出與匯入上手機制) | **第三方語言包範本匯出與匯入** | 於語言分頁點擊「匯出翻譯範本」，修改一筆字串後透過「匯入語言包」匯入。 | 正確識別新語言包、安裝至 `local.pak` 並在遊戲中顯示。 |
+
+---
+
+## 3. 🔴 未修復／進行中調查清冊 (Open Issues)
+
+### ISSUE-027: GUI 小視窗內容被裁切與日常穩定性入口不清楚
+- **問題編號**: `ISSUE-027`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 效能、修改器與分析器頁的內容偏長，部分控制項必須把主視窗放到全螢幕才看得到。
+  - 最下方同時存在「套用／檢查／還原」三個全域按鈕；「檢查」與套用前驗證重疊，增加辨識成本。
+  - 已有的低風險防閃退保護只藏在分析器工作流程，日常從修改器啟動遊戲時看不出是否啟用；極端修改也沒有依目前設定顯示風險程度。
+- **修復實作**:
+  - 主視窗最小尺寸改為 `900x650`、預設 `1100x800`，壓縮標題與底部列；長頁面改用垂直捲動，修改器表格保留自己的內部捲動。
+  - 底部列移除重複的「檢查」按鈕，只保留主要動作「一鍵套用」與復原動作「還原原版」；CLI `verify` 仍保留給代理程式與自動化。
+  - 效能頁新增「已驗證的穩定性保護（建議）」與「實驗性極端負載腳本保護」。修改器啟動先套用設定，再依此選擇窄範圍 guard、實驗性 VEH 修復或不注入執行期保護。
+  - 修改器頁新增依英雄帶兵、人口增長、訓練速度與生成數量計算的正常／偏高／極端風險橫幅。
+  - 分析器保留專用「帶分析器啟動遊戲」按鈕，並移到說明卡下方；附加與等待模式會顯示對應動詞，避免誤以為只有日常啟動。
+  - 所有新增文字均走三語 `I18n`；`RunManifest` 會記錄三種 guard 狀態與效能頁兩個穩定性設定。
+- **本地驗證**:
+  - 已用實際 WinForms 程式在最小視窗逐頁目視檢查：效能頁穩定性區、修改器風險橫幅與啟動鍵、分析器專用啟動鍵、底部套用／還原均可藉清楚入口或頁面捲動操作；未為了檢查版面而啟動遊戲。
+  - Managed build 0 warning / 0 error；SelfTest 38 組全綠，含三語 310 鍵一致、三種穩定模式映射、風險分級與設定序列化。
+- **實機驗證需求**:
+  - 以修改器頁各跑一次「已驗證保護」、「實驗性保護」、「完全停用」，核對啟動 log 與 `ckrun-config.txt` 的選項完全符合效能頁設定，並確認遊戲可正常進入與退出。
+  - 分析器頁再啟動一場，確認完整 profiler／dump 工作流程仍維持獨立且不受日常啟動簡化影響。
+
+---
+
+### ISSUE-023: Null-store 通用修復誤把間接 call 的函式指標讀取當成可修復資料讀取
+- **問題編號**: `ISSUE-023`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **實機證據（pid 27096，08:57:31）**:
+  - `0x0069305D` 的 `mov edx, [ecx+4]` 先因 `ecx = 0` 讀取 `0x00000004`；`nullstore.cpp` 把 `ecx` 重導到全零 scratch page 後重跑，結果 `edx = 0`。
+  - 下一道 `0x00693070` 是 `call dword ptr [edx+4]`，再次因 `edx = 0` 讀取 `0x00000004`。通用修復又把 `edx` 重導到 scratch page 並重跑，從 `[scratch+4]` 取得函式指標 `0`，隨即產生第三次故障：`EIP = 0x00000000`、DEP execute AV。
+  - 外部偵錯器的 `crash-12.json`、`crash-13.json`、`crash-14.json` 與反組譯的 `0x0069305D / 0x00693070 / 0x00693073` 回傳位址構成連續證據鏈；這不是推測。
+- **根因**:
+  - `NullStoreTryRepair()` 的 strategy 1 只辨識「有基底暫存器的 Null-page 讀寫」，沒有辨識該記憶體操作是否同時控制流程。對一般資料讀取，scratch page 的零值可模擬 Null page；對 `call [reg+disp]`，零值是下一個 EIP，不能安全續行。
+- **修復實作（2026-08-23）**:
+  - `nullstore.cpp` 新增 `IsIndirectControlFlowMemoryOperand()`，精確拒絕 `FF /2,/3`（indirect call）與 `FF /4,/5`（indirect jump）的記憶體形式；拒絕後不改暫存器、不增加修復計數、不續行，交還引擎／外部偵錯器保存原始故障。
+  - 啟動自測直接把本場機器碼 `FF 52 04` 與合成的 `FF 60 08` 丟進真正的 `NullStoreTryRepair()`／解碼器，要求兩者被拒絕；普通 `8B 51 04` load 仍放行，既有真實 Null store/load 自測維持。
+  - 原生 Release `/W4 /WX` 建置成功；`ckperf.dll` 164,864 bytes，SHA256 `91F2ABF98F050EC03040BBB40823E492B0A1990B8F526AED316005D4B07E92DD`。DLL 字串已核對包含新的拒絕自測成功／失敗訊息。
+- **實機驗證需求**:
+  - 啟動 log 必須出現 `indirect call/jump memory operands were rejected`。若再到 `0x00693070`，該站點不得出現 `REPAIRED`，且後續不得再衍生 EIP 0；原始 `0x00693070` 報告應完整留下。這只修正危險的通用修復行為，`0x0069305D` 的物件生命週期根因仍屬 ISSUE-006。
+
+---
+
+### ISSUE-024: CKPerf 故障報告器在 EIP=0 時位址下溢並於自身 DLL 內二次崩潰
+- **問題編號**: `ISSUE-024`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **實機證據（pid 27096，08:57:31–08:57:32）**:
+  - 第 14 次外部快照是 `EIP = 0x00000000` 的 DEP execute AV；行程內 `WriteReport()` 隨後沒有完成第 7 份 `ckcrash` 文字報告。
+  - 第 15 次外部快照落在 `ckperf.dll+0x23FE`（載入位址 `0x745F23FE`），嘗試讀取 `0xFFFFFFFFFFFFFFFF`。對 shipped DLL 反組譯，`+0x23FE` 正是 `movups xmm0, xmmword ptr [ebx]`，而 `ebx = eip - 8 = 0xFFFFFFF8`。
+  - 原始碼 `crash.cpp` 直接呼叫 `SafeRead(eip - 8, code, 32)`。`addr = 0xFFFFFFF8` 後，`end = addr + 32` 又溢位成 `0x18`，導致 `while (p < end)` 的驗證迴圈完全不執行；接著 `memcpy` 直接讀取 `0xFFFFFFF8`，使報告器本身在 VEH 重入期間崩潰。
+- **影響**:
+  - 會把真正的遊戲致命故障（本場是 ISSUE-023 造成的 EIP=0）再包上一層 `ckperf.dll` 故障，且行程內最高編號文字報告遺失；外部偵錯器仍成功保住兩份 JSON/dump，所以這次才沒有失去根因鏈。
+- **修復實作（2026-08-23）**:
+  - `SafeRead()` 現在先拒絕 null destination、`addr + len` 溢位、記憶體區段尾端溢位與不前進的區段；`0xFFFFFFF8 + 32` 在進入 `VirtualQuery`／`memcpy` 前即回傳 false。
+  - `crash.cpp` 新增 `ReadCodeWindow()`，語意層直接拒絕 `eip < 8`；`CrashSelfTest()` 逐一驗證 EIP `0..7` 全部拒絕，再對普通 32-byte 視窗做正向逐位元組比對。
+  - DLL 載入時先跑 `SafeReadSelfTest()` 與 `CrashSelfTest()`；任何一項失敗會停用 crash reporting 與 null-store repair，避免診斷層把原始故障變成自身的巢狀故障。
+  - 原生 Release `/W4 /WX` 建置成功，產物與雜湊同 ISSUE-023。
+- **實機驗證需求**:
+  - 啟動 log 必須出現 `diagnostic safety self-test passed`。下一次低 EIP 故障應仍完成最高編號文字報告，且外部 JSON 不得再出現 `ckperf.dll+0x23FE`／讀取 `0xFFFFFFFFFFFFFFFF`。
+
+---
+
+### ISSUE-025: 外部分析器把第一個 first-chance AV 永久當成致命摘要
+- **問題編號**: `ISSUE-025`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **實機證據（pid 27096）**:
+  - 程序退出摘要寫成 `0x005D99A4` 寫入 Null 是「致命例外」，但該故障在 08:57:30.868 已由行程內修復層承接，遊戲繼續執行約 3 秒並再產生 14 份外部現場；真正的致命鏈是 ISSUE-023 的 `0x0069305D → 0x00693070 → EIP 0`。
+- **根因**:
+  - `CrashCatcher.OnException()` 把所有 `0xC...` first-chance 例外都視為 `fatal`，再用 `CapturedSummary ??=` 永久保留第一筆。它沒有 second-chance、是否被引擎／VEH 修復、以及後續程序是否繼續執行的判別。
+- **影響**:
+  - JSON 原始現場仍完整，但 GUI／log 最後的單句結論會指錯故障，正好違反分析器「最高編號才可能解釋退出」的既有判讀規則。
+- **修復實作（2026-08-23）**:
+  - 新增 `CrashCandidateTracker`，每次 crash-looking 例外都更新 `LatestSummary`；移除 `CapturedSummary ??=` 的「第一筆永久凍結」。
+  - 結束報告改寫為「退出前最後例外」與「疑似閃退／候選」，明確要求用完整序列判讀，不再聲稱單筆 first-chance AV 已證明根因。
+  - Managed build 0 警告 0 錯誤；SelfTest 新增 Group 36，以 `0x005D99A4 → EIP 0` 合成序列確認第二筆取代第一筆，全部 36 組通過。
+- **實機驗證需求**:
+  - 下一場多例外退出時，末尾摘要須指向時間上最後的候選，且文字不得再出現「偵錯器攔到了致命例外」這種過度結論。
+- **實機驗證結果（2026-08-23 09:41–09:43，pid 3736）**:
+  - 外部偵錯器依序攔到 11 次 AV；退出摘要正確選到第 11 次 `0x005D9BE6`／寫入 `0x5886E3B6`，沒有再凍結於第一筆 `0x005D99A4`。
+  - 判定文字為「疑似閃退／退出前最後例外候選／需完整序列判讀」，沒有再聲稱單筆 first-chance AV 已證明根因。
+
+---
+
+### ISSUE-026: 程序退出後位址空間掃描失敗被誤報為 100% 用滿
+- **問題編號**: `ISSUE-026`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **實機證據（pid 3736）**:
+  - 行程內最終故障報告記錄位址空間仍有 3,604 MB free、最大連續空閒 2,046 MB；外部分析器卻在收到 EXIT_PROCESS 後的最後取樣印出「已用 100%、最大空閒 0 MB」。
+- **根因與修復**:
+  - `QueryAddressSpace()` 遇到死行程時第一次 `VirtualQueryEx` 就失敗，回傳 `Free=0`；舊的 `Used = Limit-Free` 因而把「沒有資料」算成「100% 用滿」。
+  - `AddressSpaceInfo` 新增 `Complete`；只有完整掃到位址上限時才計算 Used／UsedPercent。時間軸遇到不完整掃描改印 `取樣失敗／n/a`，不產生即時警告，也不納入退出原因判讀。
+  - SelfTest Group 37 用無效程序 handle 驗證不完整掃描的 Used 與 UsedPercent 都是 0。
+- **實機驗證需求**:
+  - 下一次遊戲退出後，最後一秒不得再出現 100%／0 MB 假警報；趨勢表應顯示 `n/a`。
+
+---
+
+### ISSUE-017: 腳本 VM 指派運算子用殘留左值寫穿記憶體（本場致命）
+- **問題編號**: `ISSUE-017`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - pid 35620，`21:16:09.9`–`21:16:11.4` 這 **1.5 秒內連續 10 次 `0xC0000005`**。前 9 次都寫在 Null page、被 `nullstore.cpp` 事後修好，遊戲繼續跑；第 10 次（`0x005D9BE6`）寫到 `0x5DCB10AC`（`state FREE`），不是 Null、修不了，**程序結束**。
+  - 對應檔案：`ckcrash-20260822-211610-01.txt` ~ `ckcrash-20260822-211611-10.txt`、`ckperf-20260822-211210-pid35620.log`。
+- **逆向分析（本輪新增，全部可重現）**:
+  - `0x005D9BB0` 是腳本 VM 的 **`=` 指派運算子**（byte 型別版）。註冊點 `0x005DC4D4`：`push 7 / push 0x107 / push 2 / push 0 / push "="(0x0072BA34) / push 0x005D9BB0`。同家族共 7 個 `=` 處理常式（型別 1、3、6、7、8、0xA、0xB），`0x100|T` 就是「T 的左值參考」型別碼。
+  - 左值在 VM 堆疊上是 **6 bytes 的緊排結構 `{ u16 objectId; u32 byteOffset; }`**。處理常式先把它拆成 dword + word 塞進 8-byte 區域，再用 `mov edx, [esp+N]`（= 區域 +2）把 32 位元 offset 讀回來。這不是編譯瑕疵：`0x005D9960`、`0x005D9BB0`、`0x005DB160`、`0x005DB650` 四個獨立處理常式**全部用同一個 +2 位移**，而且下面兩份實機堆疊直接印證了這個排版。
+  - 解析函式 `0x00481A20` 只有三行：`eax = table_0x00798CB8[id & 0xFFFF]; ret`。**沒有任何有效性檢查**，就是一張 65536 槽的全域指標表（緊鄰其後是 `0x007D8CBC` 的 u16 表與 `0x007F8CBC`）。釋放函式 `0x00481A40` 用 **`0xFFFF` 當「無效／已釋放」哨兵**。
+  - 外部偵錯器第一手捕捉到的堆疊可以直接把左值讀出來：
+    - `...-crash.json`（eip `0x005D99A4`，dword 版）→ **`id = 0xFFFF`, `offset = 14`**
+    - `...-crash-2.json`（eip `0x005D9BF2`，byte 版）→ **`id = 0xFFFF`, `offset = 41`**
+    - id 正是釋放哨兵 → `table[0xFFFF] = NULL` → 引擎自己走 `xor eax, eax` / `mov [eax], reg`，**把腳本指派的結果寫到位址 0**。這條路上引擎一個檢查都沒有。
+  - 致命的第 10 次走的是同一函式的另一條路：這次 id 解析出一個**活著的指標** `eax = 0x13430FC8`，但 `offset = 0x4A8800E4`（1,250,033,892）。`mov byte ptr [eax+edx], bl` → `0x5DCB10AC`，離物件 1.25 GB 遠。offset 的低半 `0x00E4` 像正常值、高半 `0x4A88` 是垃圾，代表那筆左值**只有一半是有效資料**。
+  - **第二份實機證據（2026-08-23 09:43，pid 3736）**：再次死在同一成功路徑 store `0x005D9BE6`。堆疊原始 6 bytes 為 `DA 00 F6 00 88 42`，即 `objectId=0x00DA`（查表成功）、`offset=0x428800F6`；低半 `0x00F6` 合理、高半 `0x4288` 是垃圾，寫入 `0x15FEE2C0 + 0x428800F6 = 0x5886E3B6` 的 FREE 區域。兩場高半分別為 `0x4A88/0x4288`，確認是同一腐敗模式，不是容量上限。
+  - **第三份實機證據（2026-08-23 09:58–10:07，pid 26256）**：八站點窄修復先成功承接 15 次 `0x005D99A4/0x005D9BF2`，避免先前的 wild store；但主執行緒隨後在 `0x005D98BF`（invalid lvalue 的 `*p += 1`）形成例外風暴。7 秒到 100,000 次，約 6 分鐘精確到 `kMaxPerSite=5,000,000` 後停止承接並閃退。期間 live objects 永遠 35,883、出生/死亡 0、完全沒有新 frame，證明是死循環而非單純低 FPS。
+- **為什麼現有防護擋不住**:
+  - `nullstore.cpp` 只認 Null page。offset 是垃圾時算出來的是真實 32 位元位址，防護既不該、也無法用「可不可讀」來判斷——ISSUE-001 第一版防護就是這樣失敗的，可讀不代表屬於這個物件。
+- **修復實作（2026-08-23）**:
+  - 新增 `src/CKPerf/vmlvalue.cpp`，只處理 8 個已反組譯確認、逐位元組驗證的 VM 指派 store：`0x005D9998/A4`、`0x005D9BE6/F2`、`0x005DB1AA`、`0x005DB458`、`0x005DB68E/69D`。
+  - 不猜 offset 上限。合法 store 不會進 handler；只有 OS 已經產生 write AV，且 EIP、原始 bytes、存取類型、fault address 與暫存器計算全部相符時才承接。
+  - 單一 store（dword/byte）直接略過故障指令，走原函式 epilogue；多欄位 store 將 EAX 重導至每站點獨立 4 KB scratch 後重跑，保留後續 stores、reads、pop 與堆疊紀律。
+  - 啟動自測使用真正的 Steam 指令 bytes，對 8 站點逐一驗證 target 方程式、EIP 續行、暫存器變化與 first-hit 計數；任一不符整套停用。
+  - `0x005D98BF` 不再走 per-EIP scratch。這是整數 `+=` handler；dispatcher 在 `0x005DF5F1` 原生辨識返回碼 2 並跳到 `0x005DF921`，設定狀態 3、離開目前腳本／atomic section。新增 naked epilogue 精確還原 EDI/ESI/ESP 後回傳 2，直接中止無效 compound assignment，避免跨 opcode scratch 不共享造成永遠讀 0。
+  - 啟動自測核對 `0x005D98BF` 仍是 `8B 08`，並要求 `NullStoreTryRepair()` 選到 return-code-2 abort stub，而不是一般 scratch。
+  - 最終 DLL 已直接反組譯：`ckperf.dll+0x5830` 精確為 `pop edi; mov eax,2; pop esi; add esp,8; ret`，沒有編譯器序言或額外堆疊操作。
+  - CKPerf Win32 Release `/W4 /WX` 建置成功；DLL 167,936 bytes，SHA256 `25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`。Managed build 0 警告 0 錯誤，SelfTest 37 組全綠。
+- **實機驗證需求**:
+  - 啟動 log 必須同時出現 `vm lvalue repair: self-test passed -- 8 exact assignment stores verified` 與 `invalid VM += selects abort code 2`。
+  - 再觸發時應有 `REPAIRED an invalid VM lvalue assignment`，但不得再出現 `0x005D98BF RUNAWAY`；遊戲必須繼續產生 frames、live objects/birth/death 繼續變動且操作正常，只有這個實機結果才能標綠。
+- **根因仍未解**:
+  - 是誰把 `0xFFFF` 或「正常低半＋垃圾高半」推上 VM 堆疊。窄修復是對已證實無效寫入的止血，不是來源端生命週期修正。
+  - 極端修改器設定（人口每秒 +100、訓練 20 倍、近乎無限資源、英雄帶兵 2000）會快速製造物件與死亡事件，明顯加速 stale-reference 出現；但 2026-08-20 的全原廠數值場次也在 31,134 物件重現 use-after-free，因此修改器是放大器而非唯一根因。
+
+---
+
+### ISSUE-005: 3 萬以上超大物件規模時模擬端超線性卡頓尖峰
+- **問題編號**: `ISSUE-005`
+- **發現日期**: 2026-08-20
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - 當遊戲存活物件數（Units/Buildings/Projectiles/Effects）超過 25,000~31,000 時，幀時間從 ~30ms 暴增至 216ms（掉至 2 FPS）。
+  - 每秒出現 3~5 次持續 200~500ms 的嚴重尖峰。
+  - GDI Blit 搬移時間全程穩定在 1.0~1.5ms（不到每幀 1%），證明繪圖不是瓶頸，瓶頸在主執行緒單執行緒模擬迴圈。
+- **根因線索**:
+  - 模擬端存在隨物件數超線性成長（$O(N \log N)$ 或 $O(N^2)$）的遍歷清單迴圈。
+- **下一步處置**:
+  - 將「每 tick 模擬耗時」從幀時間裡拆出獨立量測，利用分析器尋找模擬尖峰時的熱點函式。
+
+---
+
+### ISSUE-006: 物件遍歷時 Use-After-Free 存取已釋放記憶體閃退
+- **問題編號**: `ISSUE-006`
+- **發現日期**: 2026-08-20
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - 故障 EIP `0x0069305D` (`mov edx, [ecx+4]`)，讀取位址 `0x61FA0004`。
+  - 該位址為真實記憶體（非 Null page，大小 ~5.75MB），但狀態已為 `FREE`。
+  - 控制代碼本身解析成功（跳過失敗分支），但在走訪物件內部欄位指標時碰觸已釋放空間。
+- **根因分析**:
+  - 此為典型的 Use-After-Free（釋放後使用），與 Null 句柄無效是兩個**完全獨立**的成因。現有 Null-store 防護機制無法且不應攔截真實位址。
+  - **2026-08-23 新證據（pid 27096）**：同一站點 `0x0069305D` 再次出現，但這次 `eax = 0x102E8AB0` 解析成功後，內部欄位 `[eax+4]` 是 `NULL`，所以 `ecx = 0` 並讀取 `0x00000004`。同一欄位已經分別觀察到「指向已釋放區塊」與「直接為 NULL」兩種失效狀態，更支持物件生命週期／初始化失配，而非單純位址空間壓力。
+- **下一步處置**:
+  - 待取得更多該位址存取前後的堆疊快照，分析是哪個物件生命週期管理提早釋放。
+
+---
+
+### ISSUE-007: 遊戲主選單固定 21 FPS 節流現象
+- **問題編號**: `ISSUE-007`
+- **發現日期**: 2026-08-19
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - 遊戲在選單狀態下每秒約 21 幀，其中 10~11 幀耗時超過 50ms（雙峰分佈落於 63ms），呈現規律節流。
+- **根因線索**:
+  - `Celtic kings.exe` 唯一呼叫 `Sleep` 的位置為 `0x006C8805`（由 `0x006C6380` 呼叫）。
+- **下一步處置**:
+  - 評估是否需要對選單節流進行解鎖或維持原廠節能行為。
+
+---
+
+## 4. 🟡 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
+
+### ISSUE-018: 腳本寫回防護只蓋住 4 個同型函式中的 2 個
+- **問題編號**: `ISSUE-018`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 同一場的 6 次 AV（故障報告 #3~#8）落在 `0x0068F91A / 0x0068F925 / 0x0068F931` 與 `0x00690315 / 0x00690320 / 0x00690328`，全部寫到 Null。
+  - 每份報告都是 `guard : 0 null write-backs suppressed before this fault`——**現有的寫回防護一次都沒觸發**，六次全靠 `nullstore.cpp` 事後修。
+- **根因分析**:
+  - 已裝的防護只掛在 `0x0068FACB` 與 `0x0068FD9E` 兩個函式收尾。反組譯確認**至少有四個函式**收尾形狀完全一樣：連續三個 `mov dword ptr [reg], reg`（中間夾 `pop`），把三個計算結果寫回呼叫端傳進來的指標，而那些指標可能是 Null。
+  - 也就是說防護當初是照「已經看到的兩個站點」寫死的，不是照形狀掃出來的。
+- **修復實作（2026-08-22）**:
+  - `src/CKPerf/guard.cpp` 新增 `kWriteBackExitC = 0x0068F912` 與 `kWriteBackExitD = 0x00690309` 兩個站點，各 40 bytes，照現有 cave 的做法把三個 store 逐一加上 null 檢查。
+  - 兩段收尾的原始位元組與「只能從第一條指令進入」是用 capstone 線性掃描整個函式驗證過的：`0x0068F912` 有 8 個真實分支跳進來、`0x00690309` 有 1 個，而且**沒有任何真實分支落在 40 bytes 範圍中間**，所以整段換成 `jmp rel32` + `int3` 填充是安全的。工具留在 `tools/perf/`。
+  - 三個 guard 的 test 暫存器對應（C：`edx` → `ecx` → `eax`；D：`eax` → `edx` → `ecx`）與 cave 內指令順序、`pop edi`／`pop esi`／`pop ebp` 的夾放位置，都與原始位元組流逐條核對過——esp 在每一次記憶體存取時的值必須一致，錯一格就是讀到別的堆疊槽。
+  - 四段 cave 合計約 291 bytes，現有的 4096 bytes 配置足夠；安裝成功訊息更新為四個站點、十二個 write-back。
+  - 建置：`build-ckperf.ps1` 通過，`ckperf.dll` 164,864 bytes、SHA256 `B7A2C41A166C0010B70CB74364CDE5E1EF6F8BDBD1FCADDD3F00351E2ADAB321`；`dotnet build` 成功、SelfTest 全綠。
+- **實機驗證結果（2026-08-23，pid 27096）**:
+  - 35,764 個存活物件的真實高負載場次中，啟動訊息列出四個防護站點／十二個 write-back；`guard` 計數實際前進 6 次。
+  - 本場 13 次被 `nullstore` 修復的遊戲碼故障中，完全沒有 `0x0068F91A/925/931` 或 `0x00690315/320/328`，證明新增的兩段 cave 已在故障發生前承接同型 Null 寫回。
+
+---
+
+### ISSUE-019: 診斷層自身的兩個取證缺陷
+- **問題編號**: `ISSUE-019`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象與根因**:
+  - **(a) dump 配額全部浪費在無害故障上。** `src/CKToolkit/Core/Perf/ProfilerDebugger.cs:157` `MaxDumps = 3`。本場三份 **434 MB 全記憶體 dump 全給了 #1/#2/#3**——那三次都是已經被修好、遊戲照常跑下去的 first-chance 故障；**真正致命的第 10 次一份都沒有**。1.3 GB 磁碟換到零證據。配額應該保留給最後一次／無法修復的那一次。
+  - **(b) 故障報告印的是修復後的暫存器。** `src/CKPerf/crash.cpp:370` 註解寫 `pre-repair context`，但 `NullStoreTryRepair()` 在 `WriteReport()` **之前**就把基底暫存器改指到 scratch page 了。直接對照：同一次故障，偵錯器第一手記到 `eax = 0x00000000`，ckperf 報告卻印 `eax 02DC0000`。報告上「`fault address : 0x00000000`」與一個非 Null 的 `eax` 並排，會把下一個讀報告的人帶往完全錯誤的方向。
+- **修復實作（2026-08-22）**:
+  - **(a)** `ProfilerDebugger.cs` 把「要不要留現場」拆成兩個獨立配額：`.json` 狀態快照便宜（215 KB），`MaxCaptures = 20`，每次致命例外都寫；`.dmp` 很貴（434 MB），維持 `MaxDumps = 3`，另加 `MaxNullPageDumps = 1`，Null page 故障最多只能吃掉一份傾印，其餘配額留給非 Null 的故障。判斷式是 `(code == 0xC0000005 || code == 0xC0000006) && ExceptionInformation1 < 0x10000`，與 `crash.cpp` 用的門檻一致。
+  - 檔名後綴改用 `_capturesWritten`（原本是 `_dumpsWritten`），否則略過傾印之後編號會亂跳甚至覆蓋前一份 json。`Capture()` 簽章加上 `bool writeDump`，`WriteMiniDump()` 只在為真時呼叫；下游 `WriteStateJson` / `WriteHumanReadable` 本來就吃得下 `null`，沒有動到。
+  - 拿本場的序列驗算：#1 Null（json + dmp）、#2~#15 Null（只有 json）、#16 非 Null（json + dmp）——致命那次拿得到現場。
+  - **(b)** `crash.cpp` 在呼叫 `NullStoreTryRepair()` **之前**用函式範圍的 `static CONTEXT` 存下修復前的暫存器，`WriteReport()` 收到指向該複本的 `EXCEPTION_POINTERS`。用 static 而非區域變數是刻意的：x86 的 `CONTEXT` 有幾百 bytes，而這個 handler 也要能在堆疊快用完時活著，`g_inHandler` 已保證同時只有一個執行緒進來。`ep->ContextRecord->Eip = resumeEip;` 仍作用在真正的 `ep` 上，修復續行沒有被破壞。
+  - 建置：`dotnet build` 成功、SelfTest 全綠、`build-ckperf.ps1` 通過。
+- **實機驗證結果（2026-08-23，pid 27096）**:
+  - 15 次 AV 全部各有 JSON；全記憶體 dump 只保留 2 份（第 1 次 Null-page 故障，以及最後一次非 Null-page 的 `ckperf.dll` 故障），配額不再被前幾次可恢復故障耗盡。
+  - 行程內第 1 份報告與外部第 1 份 JSON 都記到修復前的 `eax = 0`；其餘首次站點亦不再呈現「fault address 是 Null、基底暫存器卻已指向 scratch」的矛盾。
+  - 本場另外揭露的報告器 EIP 下溢是獨立的新缺陷，已登記為 ISSUE-024，不否定本項兩個既定修復的實機驗收。
+
+---
+
+### ISSUE-020: CLI `run` 的執行配置清單沒有寫在設定的輸出路徑
+- **問題編號**: `ISSUE-020`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象與根因**:
+  - `src/CKToolkit/Cli/CliHost.cs` 的 `run` 指令用**寫死的** `GameRunner.DiagnosticsDirectory`（`%LOCALAPPDATA%\CKToolkit\diag`）寫出 `ckrun-config.txt`，忽略了同一個 `diag` 物件上的 `OutputDirectory`；但同一個指令後面的 `ckperf-*.log`、`ckcrash-*.txt` 走的是使用者設定的資料夾。
+  - 結果是清單跟它要解釋的證據被拆到兩個地方，正好違反 `ckrun-config.txt` 自己開頭寫的那句「解讀**同目錄下**的 `ckcrash-*.txt` 時必須先看這裡」。
+  - GUI／`DiagnosticSession` 那條路徑沒有這個問題：`DiagnosticSession.Run()` 把兩層都指到同一個 `outDir` 之後才 `WriteManifest(outDir, opt)`。
+- **修復實作（2026-08-22）**:
+  - 改成 `string diagOutDir = GameRunner.ResolveOutputDirectory(diag);`，`Directory.CreateDirectory` 與 `RunManifest.Write` 共用同一次解析結果。
+  - 已全 `src/` 掃過一次：除了 `GameRunner.ResolveOutputDirectory` / `DiagnosticSession.Run` 這兩個「決定路徑」的地方本身，以及 `ProfilerPage.cs` 拿 `DefaultLogDirectory()` 當輸入框**預設值**（合理，不算落檔）之外，沒有其他診斷輸出繞過設定路徑。
+- **實機驗證需求**:
+  - 用 CLI `run` 指定一個自訂輸出資料夾，確認 `ckrun-config.txt` 與 `ckperf-*.log`、`ckcrash-*.txt` 落在同一個資料夾。
+
+---
+
+### ISSUE-021: 設定的輸出資料夾在真正開跑之前不存在，GUI 會默默退回桌面
+- **問題編號**: `ISSUE-021`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象與根因**:
+  - 輸出資料夾只有在**實際開始跑一場診斷**時才被建出來（`DiagnosticSession.cs:108`、`GameRunner.cs:92/192/259`、`ProfilerTrace.cs:472` 的 `TraceLog` 建構子）。
+  - 在那之前，`src/CKToolkit/Gui/ProfilerPage.cs` 的 `BrowseOutput()` 與 `OpenOutputFolder()` 都寫成「`Directory.Exists(_output.Text)` 才用它，否則用 `Profiler.DefaultLogDirectory()`」。使用者填了一個還沒建的資料夾，按「開啟資料夾」會開到桌面、按「瀏覽」也從桌面開始——看起來就像設定沒生效。
+- **修復實作（2026-08-22）**:
+  - 新增 `EnsureOutputDirectory()`：輸出框有值就建立它與固定的 `CKToolkit 分析紀錄` 根資料夾；只有建不出來（權限、路徑非法）才退回預設位置，而且把原因記進 log，不再默默吞掉。
+  - `BrowseOutput()` 的 `SelectedPath`、`OpenOutputFolder()` 的退路都改用它；輸出框 `Leave` 時（且沒有正在跑診斷時）也建一次。開跑前「開啟資料夾」會開固定根資料夾，開跑後開最新場次資料夾（延伸規格見 ISSUE-022）。
+  - `Profiler.DefaultLogDirectory()`（桌面）作為**預設儲存位置**維持不變；語言範本匯出資料夾不是記錄檔，沒有動。
+- **實機驗證需求**:
+  - 在分析器分頁把儲存位置填成一個還不存在的路徑，離開輸入框後該位置與其 `CKToolkit 分析紀錄` 根資料夾應立刻出現；「開啟資料夾」不得退回桌面根目錄。
+
+---
+
+### ISSUE-022: 分析器直接把所有產物散落在使用者選擇的根目錄
+- **問題編號**: `ISSUE-022`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 分析器把「記錄檔資料夾」當成實際落檔目錄；選桌面就會把 `ckprofile-*`、`ckperf-*`、`ckrun-config.txt`、`ckcrash-*` 與 dump/JSON 全部直接丟在桌面。
+  - 連續跑多場後，不同日期、不同 pid 的證據全部混在一起，很難判斷哪些檔案屬於同一場。
+- **使用者要求**:
+  - 選擇桌面時，工具必須自己建立一個資料夾，不能直接把檔案灑在桌面。
+  - 根資料夾內還要再以資料夾分類。
+- **擬定結構**:
+  - `<選擇位置>\CKToolkit 分析紀錄\yyyy-MM-dd\HH-mm-ss_<mode>\`。
+  - 分類以「日期 → 單次執行」為單位；同一場的兩層 log、設定快照、崩潰報告、dump 與 JSON 保持在同一資料夾，避免證據鏈被副檔名分類拆散。
+- **實作進度**:
+  - 已新增單一路徑權威 `DiagnosticOutputLayout`，並接到 GUI、`DiagnosticSession`、CLI `profile` 與 CLI `run`。
+  - 已補上 CLI `profile --out` 可越出場次資料夾、CLI `run` 缺少 `--log-dir`、掛載模式 `ckperf.ini` 寫入失敗時靜默退回舊路徑三個一致性缺口。
+  - SelfTest Group 36 已驗證固定根資料夾、日期與每場分類、同秒第二場不覆寫、選到既有根資料夾不重複套層，以及 legacy `--out` 不能逃出場次資料夾。
+- **本地驗證（2026-08-22）**:
+  - `dotnet build CKToolkit.sln --no-restore`：成功，0 警告、0 錯誤。
+  - `dotnet run --project src/CKToolkit.SelfTest --no-build`：全組通過，Group 36 新增 10 項輸出配置檢查全綠。
+- **實機驗證需求**:
+  - GUI 選桌面後連續跑兩場真實遊戲，確認桌面只有一個 `CKToolkit 分析紀錄`，內部依日期與場次分開，且同一場的兩層證據完整。
+
+---
+
+### ISSUE-002: 分析器遊戲加速器預設倍率防呆與連動
+- **問題編號**: `ISSUE-002`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 使用者回報：在分析器選擇「原版按鍵綁定」加速方式，進遊戲速度完全沒變。
+- **根因分析**:
+  - UI 預設倍率為「不加速（1倍）」，此時 `GameSpeed.Apply` 安全略過送鍵；使用者改了「方式」卻漏看「倍率」，誤以為加速器失效。
+- **修復實作**:
+  - `ProfilerPage.cs`：預設倍率調整為「10x 極速」；當倍率選擇「不加速」時，「加速方式」下拉選單自動灰階停用（防呆連動）。
+- **實機驗證需求**:
+  - 使用者啟動遊戲實測 10x 加速與內建主控台方式是否能正確切換遊戲速度。
+
+---
+
+### ISSUE-004: 第三方自製語言包匯出與匯入上手機制
+- **問題編號**: `ISSUE-004`
+- **發現日期**: 2026-08-21
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 語言包擴充架構需確認外人能否透過 `export-template` 與 GUI 匯入功能順利製作新語言。
+- **修復實作**:
+  - 實作 `LangPackService.cs`（安全路徑防護、Staging 原子替換）與 `LanguagePage.cs`（匯入／匯出對話框）。
+- **實機驗證需求**:
+  - 實機匯出並匯入自訂語言包，確認遊戲 `local.pak` 正常載入。
+
+---
+
+## 5. 🟢 已實機驗收清冊 (Verified In-Game History)
+
+### ISSUE-003: 分析器單一入口啟動與雙層診斷層整合
+- **問題編號**: `ISSUE-003`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 原有 5 顆按鈕分散在修改器頁面、底部診斷列與分析器頁面，機制互不連通，導致啟動遊戲時漏掉偵錯器或注入層。
+- **修復實作**:
+  - 新增 `DiagnosticSession.cs`，分析器頁面作為唯一啟動入口，同步啟動內部注入層 (`ckperf.dll`) 與外部取樣／偵錯器層 (`Profiler.cs`)，兩層日誌統一輸出至同一資料夾。
+- **實機驗證結果**: **2026-08-22 21:12–21:16（pid 35620）單一入口啟動，兩層同時上線，並在同一資料夾產出完整證據鏈**：
+  - `ckperf-20260822-211210-pid35620.log`（內部注入層，2.1 MB）
+  - `ckprofile-20260822-211210-pid35620.log`（外部取樣＋偵錯器層，2.2 MB，含全場熱點彙總）
+  - `ckrun-config.txt`（本次啟動的檔案修補與設定快照）
+  - `ckcrash-*.txt` ×10 與 `*-crash*.dmp` / `*.json` ×3
+  - 兩層記錄的是同一個 pid、同一個 module base，時間軸可互相對照——第 1 次故障同時被兩層看到（偵錯器 `21:16:09.918`、注入層 `21:16:10.062`），這正是雙層整合要的效果。
+  - 附註：本場以閃退結束而非正常退出，那是遊戲本身的問題（見 ISSUE-017），不影響本項整合的驗收。
+
+---
+
+### ISSUE-015: WOW64 Profiler 偵錯器 WaitForDebugEvent 逾時脫離
+- **問題編號**: `ISSUE-015`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `WaitForDebugEvent` 第一次逾時（200ms）時因 P/Invoke 遺漏 `SetLastError=true` 誤判為錯誤而退出，導致偵錯器脫離，無法抓取後續閃退。
+- **修復方案**:
+  - 加入 `SetLastError=true`，同時支援 `ERROR_SEM_TIMEOUT (121)` 與 `WAIT_TIMEOUT (258)`，偵錯迴圈遇逾時一律 `continue`。
+- **實機驗證結果（2026-08-22，pid 35620）**: **偵錯器在真實遊戲裡連續在線約 4 分鐘（`21:12:10` 掛上 → `21:16:11` 仍在攔截），跨越上千次 200ms 逾時沒有脫離**，並第一手攔到三次真實的 `0xC0000005`，寫出 3 份 `.dmp` 與 3 份 `.json` 現場快照（`0x005D99A4`、`0x005D9BF2`、`0x0068F91A`）。
+  - 這些第一手快照的價值在同一場就兌現了：偵錯器比行程內的修復機制更早看到現場，它記到的 `eax = 0x00000000` 才是真值，而行程內報告印的是修復後的 `eax`（見 ISSUE-019(b)）；快照裡的堆疊位元組也讓 ISSUE-017 的左值結構得以直接讀出來。
+  - 仍有一個獨立缺陷：dump 配額用完在前三次無害故障上，致命那次沒有 dump——那是 ISSUE-019(a)，不影響本項（「偵錯器不會脫離」）的驗收。
+
+---
+
+### ISSUE-001: 大軍團下達攻擊指令存取違規閃退
+- **問題編號**: `ISSUE-001`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 使用者重現操作：英雄帶領 1000+ 大編組單位時下達攻擊指令，遊戲立即閃退 (`0xC0000005` Access Violation)。
+  - 排除實驗：若僅組建 1000+ 編組而不下達攻擊指令，遊戲不會閃退（僅卡頓）。
+- **實機測試紀錄**:
+  - 第 1 次（2026-08-22 15:22:14，pid 23712，無防護）：崩潰 EIP `0x004AA5C9`（`cmp dword ptr [edx], 0`），`edx = 0x0094B600` 落在 `RESERVE` 未提交記憶體。
+  - 第 2 次（2026-08-22 18:39:11，pid 20772，1300 士兵，**第一版防護已裝上**）：**仍然閃退**，崩潰 EIP 位移到 `0x004AA5E1`（`mov dword ptr [eax+ecx*8], ebx`）。log 明確記錄 `arrayguard: suppressed 1 unreadable grid-slot reads`，證明防護有生效卻沒擋住。
+  - 第 3 次（2026-08-22 20:06:01–20:11:29，pid 37768，1300+ 士兵下攻擊指令，**第二版邊界檢查已裝上**）：**遊戲全程未閃退，部隊正常攻擊**（使用者原話：「成功，不會閃退了，部隊可以正常攻擊」）。`ckperf-20260822-200601-pid37768.log` 記錄 `arrayguard: rejected 140 out-of-range grid cells so far`，且**沒有產生任何 `ckcrash-*` 檔案**，process 乾淨退出。140 次真實攔截證明根因（攻擊指令算出的座標常落在網格外）比預期更頻繁，且防護確實在承接。
+- **逆向分析與根因**:
+  - 函式 `0x004AA4F0`（430 bytes，`this = 0x00806568`）把 (X, Y) 換算成格子位址 `esi + 0x18 + (delta_y + delta_x*132)*32`，掃描 4 個 8-byte 槽位找空位。
+  - 陣列真正邊界已確認：初始化函式 `0x004AA010` 執行 `memset(esi + 0x18, 0xFF, 0x88200)`，即網格精確為 `[esi+0x18, esi+0x18+0x88200)` = 17424 格 = **132 x 132**。三重佐證：下一個欄位在 `+0x88218`（`0x18 + 0x88200` 剛好接上）、`0x88200 / 32 = 17424 = 132²`、`132` 就是位移公式的列距。
+  - 故障當下位移 `0x145080` → cell 41604 → `delta_x = 315`，在只有 132 格寬的網格裡超出約 2.4 倍。**引擎在這裡完全沒有邊界檢查**。
+  - 第一版防護失敗的原因：它問的是「這一格讀得到嗎」。離陣列數百格的位址完全可能落在「已提交、可讀、不可寫」的頁面上，於是掃描在不屬於陣列的記憶體裡找到「空格」，崩潰點往下移四條指令，從讀變成寫。可讀性不只不夠，還危險——若該頁剛好可寫，防護會把看得見的閃退換成靜默的記憶體破壞。
+- **修復實作（第二版，取代第一版）**:
+  - `src/CKPerf/arrayguard.cpp` 改寫為純組合語言邊界檢查，不再用 `SafeRead`：拒絕任何 `(unsigned)(eax - esi - 0x18) > 0x881E0` 或非 32-byte 對齊的格子位址，改走函式自己既有的「沒有空位」靜默出口 `0x004AA5D7`。無號比較同時擋掉引擎自己 `xor eax, eax` 的越界路徑（原版會去解參考位址 0）。
+  - Cave 不 push 任何東西（兩個出口堆疊與進入時完全相同）、不碰 `ebx`/`esi`/`edi`、不借用 `ebp`；出口位址寫成字面立即數並以 `static_assert` 綁住具名常數（第一版的 `mov edx, kFoundExit` 在 MSVC inline asm 會變成記憶體載入）。
+  - 建置後已從 `assets/ckperf/ckperf.dll` 反組譯核對產出的 cave 機器碼（立即數確實是立即數、暫存器紀律正確），詳見 `docs/reverse-engineering-notes.md`。
+  - 計數器語意改為「拒絕幾次落在網格外的登記」，`crash.cpp` / `telemetry.cpp` 字串同步更新。
+  - `assets/ckperf/ckperf.dll` SHA256 `0A02853FB6791ED5EEA80C9D248AF9A26A913AC74FEDB5DF35FCAB3CBC972A60`；`dotnet publish` 已重新產出 `dist/`，SelfTest 全綠。
+- **仍未解決（根因，不影響本項驗收）**:
+  - 為什麼攻擊指令會算出離網格 315 格遠的座標，且通過了 `0x004AA567..0x004AA594` 的矩形檢查？最可疑的是矩形（`[esi]`..`[esi+0xC]`）與原點（`[esi+0x10]`/`[esi+0x14]`）可能按實際地圖尺寸設定，卻與固定的 132x132 陣列失去同步。這次補的是引擎漏掉的邊界檢查，不是那條因果鏈——140 次/場的攔截頻率代表這條因果鏈仍然常態性發生，只是不再能讓遊戲閃退。
+- **實機驗證結果**: **使用者於 2026-08-22 攜帶 1300+ 士兵下攻擊指令實機測試，遊戲全程未閃退，部隊正常攻擊；telemetry log 確認防護攔截 140 次越界登記！**
+
+---
+
+### ISSUE-008: 2K / 4K 高解析度 CVXVisible 75 列陣列溢位崩潰
+- **問題編號**: `ISSUE-008`
+- **發現日期**: 2026-08-21
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: `CVXVisible` 可見性網格在原版固定 75 列，高解析度（>1080p）時視埠高度超出 75 列，覆寫物件尾端 `+0x4C0..+0x50F` 導致崩潰。
+- **修復方案**: `CellGridPatch.cs` 將網格由 16px 改為 32px，覆蓋範圍擴增為 4096 寬、2400 高（4K 僅需 68 列）。
+- **實機驗證結果**: **使用者於 2026-08-21 實機測試 2560x1440 (2K) 與 3840x2160 (4K) 進入戰鬥，零閃退、渲染完全正常！**
+
+---
+
+### ISSUE-009: 2K 解析度鏡頭向右捲動畫面塗抹破圖
+- **問題編號**: `ISSUE-009`
+- **發現日期**: 2026-08-21
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: Dirty-rect 網格每列僅 16 bytes (128 bits)，128 × 16px = 2048px。寬度大於 2048 時右側無對應 bit 可標記 dirty，捲動時殘留塗抹。
+- **修復方案**: 改為 32px 網格後，單列覆蓋 128 × 32 = 4096px。
+- **實機驗證結果**: **使用者於 2026-08-21 實機測試 2K (2560x1440)，鏡頭劇烈捲動完全無塗抹殘留！**
+
+---
+
+### ISSUE-010: 腳本 VM / Null 句柄讀寫引發存取違規閃退
+- **問題編號**: `ISSUE-010`
+- **發現日期**: 2026-08-19
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: 單位陣亡後腳本 VM 仍持有過期句柄，對 Null Page (< 0x10000) 進行讀取或寫回導致崩潰；直接略過讀取會導致計數迴圈死循環。
+- **修復方案**: `src/CKPerf/nullstore.cpp` 將 Null 指標存取重導至每站點獨立之 Scratch 記憶體並重新執行指令，使迴圈能正常推進終止。
+- **實機驗證結果**: **使用者實機打一場高負載戰鬥（3 萬物件），修復機制成功攔截 9 個站點 11 次存取，遊戲撐過無閃退！**
+
+---
+
+### ISSUE-011: HMMSYS Pak 檔案目錄未排序導致語言包失效
+- **問題編號**: `ISSUE-011`
+- **發現日期**: 2026-08-18
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: 引擎依靠二分或前綴查表走訪 `local.pak` 目錄。若追加的語言項目 append 在尾端，引擎查表失敗直接略過，導致遊戲仍顯示英文。
+- **修復方案**: `HmmPak.cs` 序列化前強制對目錄項目進行序數升冪排序。
+- **實機驗證結果**: **繁體中文、簡體中文等語言包安裝後遊戲內 100% 成功顯示中文，實機驗證生效！**
+
+---
+
+### ISSUE-012: 遊戲離開時自動將 vxSettings.ini 之 Resolution 重設為 0
+- **問題編號**: `ISSUE-012`
+- **發現日期**: 2026-08-18
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: 引擎退出流程 `0x00658FAB` 會將已清零的結構欄位寫回 `vxSettings.ini` 的 `Resolution` 鍵，導致重啟後解析度還原回 1024x768。
+- **修復方案**: `ResolutionWriteback` 修補將該 21 位元組寫回邏輯 NOP 掉，保護設定檔。
+- **實機驗證結果**: **實機遊戲遊玩並正常退出後，`Resolution=4` 依然完整保留！**
+
+---
+
+### ISSUE-013: APF 點陣字型不可逆性與 local.pak 逐位元組還原
+- **問題編號**: `ISSUE-013`
+- **發現日期**: 2026-08-18
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: 原廠 APF 字型包含複雜位移，重新編碼會破壞未修改區塊，無法達成無備份下的精確還原。
+- **修復方案**: `ApfFont.cs` 保留原廠 `RawBlock` + 寫入 `FONTS\.patch_marker.json` 清冊，反安裝時精確剝離新增範圍。
+- **實機驗證結果**: **安裝語言包後再還原，`local.pak` 逐位元組 100% 與原廠檔案一致！**
+
+---
+
+### ISSUE-014: 16-Bit 視訊模式在 Windows 10/11 驅動下遭拒閃退
+- **問題編號**: `ISSUE-014`
+- **發現日期**: 2026-08-17
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **根因**: 現代 WDDM 驅動不支援 16bpp 模式，`SetVideoMode` (`0x006BE340`) 失敗回傳 `0xFFFF`，錯誤處理常式存取未配置結構引發崩潰。
+- **修復方案**: 將 `SetVideoMode` 進入點替換為 `xor eax, eax; ret`，完全交由 GDI `SetDIBitsToDevice` 於 32 位元 DC 渲染。
+- **實機驗證結果**: **遊戲在 Win10/11 正常啟動不崩潰，解析度正常生效！**
+
+---
+
+
+### ISSUE-016: 非 ASCII 輸出資料夾會讓故障報告整份變成 NUL
+- **問題編號**: `ISSUE-016`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `ckcrash-20260822-183911-01.txt` 在磁碟上是 65535 bytes，第三行之後**全部是 NUL**。一份真實崩潰（ISSUE-001 第 2 次實測）的故障報告整份遺失，而且是靜默地遺失。
+  - 同一場次 `ckperf-*.log` 的第 5 行 `log file:` 也被洗成空白行。
+- **根因分析**:
+  - `crash.cpp` 用 `Append(..., "  telemetry log : %S...", LogFilePath())`。窄字元 printf 的 `%S` 走 C locale 轉換，locale 是 `"C"` 只認 ASCII；當時路徑是桌面的「紀錄」資料夾，第一個中文字就轉不過去，`_vsnprintf_s` 回傳 -1。
+  - `common.cpp` 的 `Append()` 把 `n < 0` 一律對映成 `return cap - 1`。對「截斷」是對的，對「格式化失敗」是災難：`pos` 變成 65535，之後每次 `Append` 都被 `if (pos >= cap - 1) return pos` 擋掉，最後 `WriteFile(h, buf, (DWORD)pos, ...)` 把 64 KB 幾乎全是零的靜態緩衝區倒進檔案。
+  - 這個 bug 是被 ISSUE-001 的實測連帶挖出來的：使用者改用分析器分頁啟動，輸出落到桌面的「紀錄」資料夾，才第一次踩到非 ASCII 路徑。
+- **修復實作**:
+  - `common.cpp` `Append()`：`n < 0` 時改成量實際寫出多少（`buf[cap-1] = 0; return pos + strlen(buf + pos);`）。截斷照樣推進 `pos`，失敗則讓 `pos` 原封不動，**報告剩下的部分照常寫出來**。
+  - `common.cpp` 新增 `WideToUtf8()`（`WideCharToMultiByte(CP_UTF8, ...)`，一定補 NUL，轉不過去時退回 `"(path could not be converted)"` 這種看得見的字串），`ckperf.h` 宣告。
+  - `crash.cpp` 與 `dllmain.cpp` 兩個 `%S` 站點改用 `%s` + `WideToUtf8`。已全檔搜尋確認 `src/CKPerf` 下再無其他 `%S` / `%ls`。
+- **部分實機證據（2026-08-22，尚不足以標記為已驗收）**:
+  - 同一場 ISSUE-001 第 3 次實測（pid 37768，輸出目錄正是桌面的「紀錄」）中，`dllmain.cpp` 那個 `%S` 站點已確認修好：`[20:06:01.336] log file: C:\Users\nojac\Desktop\紀錄\ckperf-20260822-200601-pid37768.log  (flushed after every line)`，中文路徑正確顯示，不再是空白行。
+  - 但這場沒有閃退，**沒有產生新的 `ckcrash-*.txt`**，所以 `crash.cpp` 那個站點（原本被毀的正是這一行）尚未有機會被同一場測試直接驗證。兩站點共用同一份 `Append()`/`WideToUtf8()` 修法，`dllmain.cpp` 那邊已證實正確是很強的間接證據，但依本文件的規矩，仍須等下一次真的閃退、`ckcrash-*.txt` 完整落地才能標記為 🟢。
+- **實機驗證結果（2026-08-22 21:16，pid 35620）**: **已完整驗證，`crash.cpp` 那個站點確認修好**。
+  - 輸出目錄正是含中文的 `C:\Users\nojac\Desktop\紀錄`，該場實機閃退產出 **10 份 `ckcrash-*.txt`，每份 3,196–3,624 bytes**——不再是 65,535 bytes 的 NUL 檔。
+  - 每份報告第 3 行都是完整的 `telemetry log : C:\Users\nojac\Desktop\紀錄\ckperf-20260822-211210-pid35620.log`，中文路徑正確顯示。
+  - 報告後續所有段落（registers／code at eip／memory／ebp chain／stack scan／null stores by site）全部完整寫出，`Append()` 不再因為一次格式化失敗就吃掉整份報告。
+  - 對照組：同一目錄下 2026-08-22 18:39 修復前那份 `ckcrash-20260822-183911-01.txt` 仍是 65,535 bytes 的 NUL 檔，兩者並排即為修復前後的直接證據。
+
+---
+
+## 6. ⚪ 僅本地／合成環境驗證清冊 (Verified Locally / Synthetic)
+
+> 目前無項目：ISSUE-015 已於 2026-08-22 取得實機證據，移入第 5 節。

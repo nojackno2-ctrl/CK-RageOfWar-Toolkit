@@ -14,6 +14,7 @@ public sealed class AboutPage : UserControl
 
     public AboutPage()
     {
+        AutoScroll = true;
         BackColor = Color.White;
         Padding = new Padding(32);
         var panel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };

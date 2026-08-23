@@ -98,6 +98,14 @@ static bool LooksLikeReturnAddress(uintptr_t v) {
     return false;
 }
 
+static bool ReadCodeWindow(uintptr_t eip, unsigned char* code, size_t len) {
+    // The report prints eight bytes before EIP. For EIP 0..7, subtraction would wrap
+    // into 0xFFFFFFF8..0xFFFFFFFF. SafeRead also rejects wrapping ranges, but keep the
+    // semantic boundary here so a report never asks the helper an invalid question.
+    if (!code || len == 0 || eip < 8) return false;
+    return SafeRead(eip - 8, code, len);
+}
+
 // -------------------------------------------------------------- report formatting
 
 static int DescribeFaultRegion(char* buf, int cap, int pos, uintptr_t addr) {
@@ -207,7 +215,11 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index, bool withDump) {
                      "     memory or framerate history for this session. This report is all\r\n"
                      "     there is.\r\n\r\n", LogOpenError());
     } else {
-        pos = Append(buf, cap, pos, "  telemetry log : %S\r\n\r\n", LogFilePath());
+        // %s with an explicit UTF-8 conversion, never %S: a non-ASCII diagnostics
+        // directory used to make this one line take the entire report down with it.
+        char logPath[MAX_PATH * 3];
+        pos = Append(buf, cap, pos, "  telemetry log : %s\r\n\r\n",
+                     WideToUtf8(LogFilePath(), logPath, (int)sizeof(logPath)));
     }
 
     // Uptime separates "died during loading" from "died an hour into a battle", and
@@ -225,6 +237,8 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index, bool withDump) {
                      live, CensusPeakObjects());
     }
     pos = Append(buf, cap, pos, "  guard         : %ld null write-backs suppressed before this fault\r\n", GuardSuppressedCount());
+    pos = Append(buf, cap, pos, "  arrayguard    : %ld out-of-range grid cells rejected before this fault\r\n", ArrayGuardSuppressedCount());
+    pos = Append(buf, cap, pos, "  vm lvalue     : %ld invalid assignment stores repaired so far (including this fault)\r\n", VmLvalueRepairCount());
     pos = Append(buf, cap, pos, "  exception     : 0x%08X  %s%s\r\n",
                  (unsigned)er->ExceptionCode, CodeName(er->ExceptionCode),
                  (er->ExceptionFlags & EXCEPTION_NONCONTINUABLE) ? "  (noncontinuable)" : "");
@@ -248,7 +262,7 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index, bool withDump) {
     // Raw bytes at the faulting instruction. With this and the .text VA the exact
     // instruction can be identified offline against the untouched Steam binary.
     unsigned char code[32];
-    if (SafeRead(eip - 8, code, sizeof(code))) {
+    if (ReadCodeWindow(eip, code, sizeof(code))) {
         pos = Append(buf, cap, pos, "\r\n  code at eip-8 (fault is at +8)\r\n    ");
         for (int i = 0; i < 32; ++i) {
             pos = Append(buf, cap, pos, "%02X ", code[i]);
@@ -289,11 +303,12 @@ static void WriteReport(EXCEPTION_POINTERS* ep, LONG index, bool withDump) {
     if (found == 0) pos = Append(buf, cap, pos, "    (none -- the stack itself may be corrupted)\r\n");
 
     pos = NullStoreDescribeSites(buf, cap, pos);
+    pos = VmLvalueDescribeSites(buf, cap, pos);
 
     pos = Append(buf, cap, pos,
-                 "\r\n  note: this handler observes only. The engine may have caught this exception\r\n"
-                 "        and carried on. If the game kept running, this report is informational;\r\n"
-                 "        the report that explains an exit is the highest-numbered one.\r\n");
+                 "\r\n  note: first-chance faults may be repaired by the narrowly supported guards above.\r\n"
+                 "        If the game kept running, this report is informational; the report that\r\n"
+                 "        explains an exit is the highest-numbered fault that was not repaired.\r\n");
 
     wchar_t path[MAX_PATH];
     swprintf_s(path, L"%s\\ckcrash-%04d%02d%02d-%02d%02d%02d-%02d.txt",
@@ -353,16 +368,50 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
     // The first fault at each distinct site still gets a full report, because the site
     // table is the point -- it maps every place the engine does this, which is what a
     // proper per-site fix would need.
+    //
+    // Snapshot the CONTEXT before NullStoreTryRepair() modifies registers in
+    // ep->ContextRecord (e.g. strategy 1 redirects base registers to scratch page).
+    // WriteReport needs pre-repair registers so that the fault address and register
+    // state match. Use function-scope static buffers to keep the handler survivable
+    // even when stack is nearly exhausted. g_inHandler guarantees single-threaded entry.
+    static CONTEXT s_preRepairContext;
+    static EXCEPTION_POINTERS s_preRepairEp;
+    if (ep->ContextRecord) {
+        s_preRepairContext = *ep->ContextRecord;
+        s_preRepairEp.ExceptionRecord = ep->ExceptionRecord;
+        s_preRepairEp.ContextRecord = &s_preRepairContext;
+    }
+
     bool firstAtSite = false;
     unsigned resumeEip = 0;
+    if (VmLvalueTryRepair(ep, firstAtSite, resumeEip)) {
+        uintptr_t faultEip = ep->ContextRecord->Eip;
+        if (firstAtSite) {
+            char where[160];
+            DescribeAddress(faultEip, where, sizeof(where));
+            LONG idx = InterlockedIncrement(&g_reportCount);
+            EXCEPTION_POINTERS* reportEp = ep->ContextRecord ? &s_preRepairEp : ep;
+            if (idx <= g_cfg.maxReports) WriteReport(reportEp, idx, /*withDump=*/false);
+            Logf("REPAIRED an invalid VM lvalue assignment: eip 0x%08X %s -- "
+                 "faulting store suppressed, normal epilogue resumed.",
+                 (unsigned)faultEip, where);
+        }
+        ep->ContextRecord->Eip = resumeEip;
+        InterlockedExchange(&g_inHandler, 0);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    firstAtSite = false;
+    resumeEip = 0;
     if (NullStoreTryRepair(ep, firstAtSite, resumeEip)) {
         uintptr_t faultEip = ep->ContextRecord->Eip;
         if (firstAtSite) {
             char where[160];
             DescribeAddress(faultEip, where, sizeof(where));
             LONG idx = InterlockedIncrement(&g_reportCount);
-            if (idx <= g_cfg.maxReports) WriteReport(ep, idx, /*withDump=*/false);  // pre-repair context
-            Logf("REPAIRED a new null-store site: eip 0x%08X %s -- store skipped, execution resumed.",
+            EXCEPTION_POINTERS* reportEp = ep->ContextRecord ? &s_preRepairEp : ep;
+            if (idx <= g_cfg.maxReports) WriteReport(reportEp, idx, /*withDump=*/false);
+            Logf("REPAIRED a new null-access site: eip 0x%08X %s -- supported recovery selected, execution resumed.",
                  (unsigned)faultEip, where);
         }
         ep->ContextRecord->Eip = resumeEip;
@@ -383,6 +432,19 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
 
     InterlockedExchange(&g_inHandler, 0);
     return EXCEPTION_CONTINUE_SEARCH;   // never swallow: engine behaviour stays identical
+}
+
+bool CrashSelfTest() {
+    unsigned char code[32] = {};
+    for (uintptr_t eip = 0; eip < 8; ++eip) {
+        if (ReadCodeWindow(eip, code, sizeof(code))) return false;
+    }
+
+    unsigned char source[48];
+    for (unsigned i = 0; i < sizeof(source); ++i) source[i] = (unsigned char)(0x40u + i);
+    uintptr_t eip = (uintptr_t)source + 8;
+    if (!ReadCodeWindow(eip, code, sizeof(code))) return false;
+    return memcmp(code, source, sizeof(code)) == 0;
 }
 
 void CrashLoadSymbolHelper() {

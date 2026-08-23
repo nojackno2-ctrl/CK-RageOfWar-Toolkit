@@ -37,12 +37,6 @@ public sealed class MainForm : Form
     private readonly AboutPage _aboutPage = new();
     private readonly Button _apply = new();
     private readonly Button _restore = new();
-    private readonly Button _check = new();
-    private readonly Button _diagLaunch = new();
-    private readonly Button _diagAttach = new();
-    private readonly Button _diagWatch = new();
-    private readonly Label _diagHint = new();
-    private CancellationTokenSource? _watchCancel;
     private readonly Label _operationStatus = new();
     private readonly TextBox _log = new();
 
@@ -52,6 +46,10 @@ public sealed class MainForm : Form
         Strings.Language = _config.UiLanguage;
         InitializeComponent();
         _languagePage.GameDirProvider = () => _gamePath.Text.Trim();
+        // 分析器分頁現在是唯一的診斷入口，所以它需要自己拿得到遊戲目錄與當下設定：
+        // 前者用來啟動遊戲，後者寫進執行清單，事後看故障報告才知道當時掛了什麼。
+        _profilerPage.GameDirProvider = () => _gamePath.Text.Trim();
+        _profilerPage.ConfigProvider = SnapshotConfiguration;
         LoadConfigurationIntoControls();
         ApplyLanguage();
         _initialising = false;
@@ -62,8 +60,8 @@ public sealed class MainForm : Form
     private void InitializeComponent()
     {
         AutoScaleMode = AutoScaleMode.Dpi;
-        MinimumSize = new Size(980, 720);
-        Size = new Size(1180, 860);
+        MinimumSize = new Size(900, 650);
+        Size = new Size(1100, 800);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Surface;
         Font = new Font("Microsoft JhengHei UI", 9F);
@@ -71,11 +69,11 @@ public sealed class MainForm : Form
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-            BackColor = Surface, Padding = new Padding(16)
+            BackColor = Surface, Padding = new Padding(12)
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 190F));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130F));
         root.Controls.Add(BuildHeader(), 0, 0);
         root.Controls.Add(BuildTabs(), 0, 1);
         root.Controls.Add(BuildBottomArea(), 0, 2);
@@ -88,8 +86,8 @@ public sealed class MainForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Top, AutoSize = true, ColumnCount = 5, RowCount = 3,
-            BackColor = Color.White, Padding = new Padding(18, 14, 18, 14),
-            Margin = new Padding(0, 0, 0, 12)
+            BackColor = Color.White, Padding = new Padding(14, 10, 14, 10),
+            Margin = new Padding(0, 0, 0, 8)
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
@@ -105,7 +103,7 @@ public sealed class MainForm : Form
 
         _subtitle.AutoSize = true;
         _subtitle.ForeColor = Color.FromArgb(71, 85, 105);
-        _subtitle.Margin = new Padding(0, 2, 0, 12);
+        _subtitle.Margin = new Padding(0, 2, 0, 8);
         panel.Controls.Add(_subtitle, 0, 1);
         panel.SetColumnSpan(_subtitle, 3);
 
@@ -159,6 +157,7 @@ public sealed class MainForm : Form
         _aboutTab.Controls.Add(_aboutPage);
         _profilerPage.BusyChanged += busy => SetBusy(busy, profilerOwnsBusy: true);
         _profilerPage.LogMessage += message => AppendLog(message);
+        _trainerPage.LaunchGameRequested += async () => await ApplyThenLaunchAsync();
         return _tabs;
     }
 
@@ -178,39 +177,19 @@ public sealed class MainForm : Form
         };
         ConfigureActionButton(_apply, Accent, Color.White);
         ConfigureActionButton(_restore, Color.White, Danger);
-        ConfigureActionButton(_check, Color.White, Color.FromArgb(51, 65, 85));
         _apply.Click += async (_, _) => await ApplyAsync();
         _restore.Click += async (_, _) => await RestoreAsync();
-        _check.Click += async (_, _) => await CheckAsync();
         _operationStatus.AutoSize = true;
         _operationStatus.Anchor = AnchorStyles.Left;
         _operationStatus.Margin = new Padding(18, 10, 0, 0);
         _operationStatus.ForeColor = Color.FromArgb(71, 85, 105);
-        actions.Controls.AddRange([_apply, _restore, _check, _operationStatus]);
+        actions.Controls.AddRange([_apply, _restore, _operationStatus]);
         panel.Controls.Add(actions, 0, 0);
 
-        // 診斷這一列刻意獨立於「一鍵套用 / 還原原版」之外：它不寫任何遊戲檔案，
-        // 跟上面那一排的性質完全不同，混在一起會讓人以為按了會改東西。
-        var diagnostics = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false, Padding = new Padding(0, 0, 0, 8)
-        };
-        ConfigureActionButton(_diagLaunch, Color.White, Color.FromArgb(21, 94, 117));
-        ConfigureActionButton(_diagAttach, Color.White, Color.FromArgb(21, 94, 117));
-        ConfigureActionButton(_diagWatch, Color.White, Color.FromArgb(21, 94, 117));
-        _diagLaunch.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: false);
-        _diagAttach.Click += async (_, _) => await LaunchWithDiagnosticsAsync(attachToRunning: true);
-        _diagWatch.Click += (_, _) => ToggleWatch();
-        _diagHint.AutoSize = true;
-        _diagHint.Anchor = AnchorStyles.Left;
-        _diagHint.Margin = new Padding(18, 10, 0, 0);
-        _diagHint.ForeColor = Color.FromArgb(100, 116, 139);
-        diagnostics.Controls.AddRange([_diagLaunch, _diagAttach, _diagWatch, _diagHint]);
-        panel.RowStyles.Insert(1, new RowStyle(SizeType.AutoSize));
-        panel.RowCount = 3;
-        panel.Controls.Add(diagnostics, 0, 1);
-
+        // 這裡以前還有一排診斷按鈕（帶診斷啟動 / 掛載 / 常駐監看）。它們被整合進分析器
+        // 分頁的「怎麼開始」卡片了：三者的差別從來只有「遊戲是誰開的」，那是一個選項，
+        // 不是三顆按鈕；而且舊的那條路只做 ckperf.dll 注入，不會啟動取樣器與偵錯器，
+        // 使用者按了卻以為分析器在記錄，實際上少掉半份證據。
         _log.Dock = DockStyle.Fill;
         _log.Multiline = true;
         _log.ReadOnly = true;
@@ -220,7 +199,7 @@ public sealed class MainForm : Form
         _log.Font = new Font("Cascadia Mono", 8.5F);
         _log.BorderStyle = BorderStyle.None;
         _log.WordWrap = false;
-        panel.Controls.Add(_log, 0, 2);
+        panel.Controls.Add(_log, 0, 1);
         return panel;
     }
 
@@ -275,11 +254,6 @@ public sealed class MainForm : Form
         _aboutTab.Text = Strings.Get("Gui_Tab_About");
         _apply.Text = Strings.Get("Gui_Apply");
         _restore.Text = Strings.Get("Gui_Restore");
-        _check.Text = Strings.Get("Gui_Check");
-        _diagLaunch.Text = Strings.Get("Gui_Diag_Launch");
-        _diagAttach.Text = Strings.Get("Gui_Diag_Attach");
-        _diagWatch.Text = Strings.Get(_watchCancel is null ? "Gui_Diag_Watch" : "Gui_Diag_WatchStop");
-        _diagHint.Text = Strings.Get("Gui_Diag_Hint");
         _operationStatus.Text = _busy ? Strings.Get("Gui_Working") : Strings.Get("Gui_Ready");
         _performancePage.ApplyLanguage();
         _languagePage.ApplyLanguage();
@@ -355,9 +329,9 @@ public sealed class MainForm : Form
         }
     }
 
-    private async Task ApplyAsync()
+    private async Task<bool> ApplyAsync()
     {
-        if (_busy || !TryPrepareOperation(out string gameDir, out ToolkitConfig snapshot)) return;
+        if (_busy || !TryPrepareOperation(out string gameDir, out ToolkitConfig snapshot)) return false;
         SetBusy(true);
         AppendLog(Strings.Get("Gui_Log_ApplyStart"));
         try
@@ -366,139 +340,66 @@ public sealed class MainForm : Form
             if (!result.Success)
             {
                 ShowOperationError(result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "Unknown error"));
-                return;
+                return false;
             }
             foreach (string warning in result.Warnings) AppendLog(Strings.Get("Gui_Log_Warning", warning));
             string files = result.Value is null || result.Value.FilesWritten.Count == 0
                 ? Strings.Get("Gui_NoFilesChanged") : string.Join(", ", result.Value.FilesWritten);
             AppendLog(Strings.Get("Gui_Log_ApplyComplete", files));
             ShowOperationSuccess(Strings.Get("Apply_Success"));
+            return true;
         }
-        catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
+        catch (Exception ex)
+        {
+            ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message));
+            return false;
+        }
         finally { SetBusy(false); }
     }
 
     /// <summary>
-    /// 帶診斷層啟動遊戲，或掛載到已經在跑的遊戲。
-    ///
-    /// 這條路徑<b>不寫任何遊戲檔案</b>，只動被啟動／被掛載行程的記憶體，
-    /// 所以刻意不走 <c>TryPrepareOperation</c>（那會存設定並準備寫檔）。
-    /// 但配置清單仍然要寫，否則事後拿到故障報告會不知道當時掛了什麼。
+    /// 修改器頁「啟動遊戲」按鈕的日常產品流程：先套用目前設定（跟「一鍵套用」同一路徑），
+    /// 成功後依效能頁選擇啟動「已驗證穩定保護／實驗性保護／完全不注入」。
+    /// 不再強迫切到分析器；分析器是出問題時才使用的證據工具。
+    /// 遊戲裡看到的還是上一次套用的舊設定。
     /// </summary>
-    private async Task LaunchWithDiagnosticsAsync(bool attachToRunning)
+    private async Task ApplyThenLaunchAsync()
     {
         if (_busy) return;
+        bool applied = await ApplyAsync();
+        if (!applied) return;
 
         string gameDir = _gamePath.Text.Trim();
-        if (!GamePaths.IsGameDir(gameDir))
-        {
-            ShowOperationError(Strings.Get("Error_GameNotFound"));
-            return;
-        }
-
+        PerfConfig perf = _config.Perf;
         SetBusy(true);
-        AppendLog(Strings.Get(attachToRunning ? "Gui_Log_DiagAttaching" : "Gui_Log_DiagLaunching"));
         try
         {
-            var diag = new DiagnosticsOptions();
-            ToolkitConfig snapshot = SnapshotConfiguration();
+            Result<RunOutcome> launched = await Task.Run(() => perf.StabilityProtection
+                ? GameRunner.LaunchWithDiagnostics(gameDir, GameRunner.CreateStabilityOptions(perf), AppendLog)
+                : GameRunner.LaunchPlain(gameDir));
 
-            Result<RunOutcome> result = await Task.Run(() =>
+            if (!launched.Success || launched.Value is null)
             {
-                try
-                {
-                    Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
-                    RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, snapshot, diag);
-                }
-                catch
-                {
-                    // 清單寫不出來不該擋住診斷本身；故障報告仍然有價值，
-                    // 只是解讀時要自己回想當時的設定。
-                }
-
-                return attachToRunning
-                    ? GameRunner.AttachToRunningGame(diag, m => AppendLog(m))
-                    : GameRunner.LaunchWithDiagnostics(gameDir, diag, m => AppendLog(m));
-            });
-
-            if (!result.Success)
-            {
-                ShowOperationError(result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "Unknown error"));
+                ShowOperationError(Strings.Get("Gui_LaunchFailed", launched.ErrorMessage ?? "Unknown"));
                 return;
             }
 
-            foreach (string warning in result.Warnings) AppendLog(Strings.Get("Gui_Log_Warning", warning));
-            RunOutcome outcome = result.Value!;
-            AppendLog(Strings.Get("Gui_Log_DiagReady", outcome.ProcessId, outcome.OutputDirectory));
-            AppendLog(Strings.Get("Gui_Log_DiagFolder", outcome.OutputDirectory));
-            ShowOperationSuccess(Strings.Get("Gui_Log_DiagFolder", outcome.OutputDirectory));
+            foreach (string warning in launched.Warnings) AppendLog(Strings.Get("Gui_Log_Warning", warning));
+            AppendLog(perf.StabilityProtection
+                ? Strings.Get(perf.ExperimentalStability
+                    ? "Gui_Log_LaunchStabilityExperimental"
+                    : "Gui_Log_LaunchStabilityVerified", launched.Value.ProcessId)
+                : Strings.Get("Gui_Log_LaunchPlain", launched.Value.ProcessId));
+            ShowOperationSuccess(Strings.Get("Gui_LaunchSuccess"));
         }
-        catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
-        finally { SetBusy(false); }
-    }
-
-    /// <summary>
-    /// 開關常駐監看。
-    ///
-    /// 存在的理由是實測出來的：兩次「玩到閃退」都完全沒有資料，因為遊戲是從 Steam
-    /// 啟動的，而那條路上沒有注入點。要求人每次改用別的方式開遊戲，是把工具的缺陷
-    /// 轉嫁給使用者；讓工具自己在背景等，才是正確的分工。
-    ///
-    /// 刻意不走 SetBusy：監看是長時間執行的，把整個介面鎖住反而讓人無法按下停止。
-    /// </summary>
-    private void ToggleWatch()
-    {
-        if (_watchCancel is not null)
+        catch (Exception ex)
         {
-            _watchCancel.Cancel();
-            return;
+            ShowOperationError(Strings.Get("Gui_LaunchFailed", ex.Message));
         }
-
-        string gameDir = _gamePath.Text.Trim();
-        if (!GamePaths.IsGameDir(gameDir))
+        finally
         {
-            ShowOperationError(Strings.Get("Error_GameNotFound"));
-            return;
+            SetBusy(false);
         }
-
-        var cts = new CancellationTokenSource();
-        _watchCancel = cts;
-        _diagWatch.Text = Strings.Get("Gui_Diag_WatchStop");
-        AppendLog(Strings.Get("Gui_Log_WatchStarted"));
-
-        var diag = new DiagnosticsOptions();
-        ToolkitConfig snapshot = SnapshotConfiguration();
-
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                try
-                {
-                    Directory.CreateDirectory(GameRunner.DiagnosticsDirectory);
-                    RunManifest.Write(GameRunner.DiagnosticsDirectory, gameDir, snapshot, diag);
-                }
-                catch
-                {
-                    // 清單寫不出來不該擋住監看本身。
-                }
-                GameRunner.WatchForever(diag, cts.Token, m => AppendLog(m));
-            }
-            catch (Exception ex)
-            {
-                AppendLog(Strings.Get("Gui_Log_Error", ex.Message));
-            }
-            finally
-            {
-                BeginInvoke(() =>
-                {
-                    _watchCancel = null;
-                    cts.Dispose();
-                    _diagWatch.Text = Strings.Get("Gui_Diag_Watch");
-                    AppendLog(Strings.Get("Gui_Log_WatchStopped"));
-                });
-            }
-        });
     }
 
     private async Task RestoreAsync()
@@ -531,40 +432,12 @@ public sealed class MainForm : Form
         finally { SetBusy(false); }
     }
 
-    private async Task CheckAsync()
-    {
-        if (_busy || !TryPrepareOperation(out string gameDir, out ToolkitConfig snapshot)) return;
-        SetBusy(true);
-        AppendLog(Strings.Get("Gui_Log_CheckStart"));
-        try
-        {
-            Result<VerificationReport> result = await Task.Run(() => _pipeline.Verify(gameDir, snapshot));
-            if (!result.Success || result.Value is null)
-            {
-                ShowOperationError(result.ErrorMessage ?? Strings.Get("Error_GeneralFailure", "Unknown error"));
-                return;
-            }
-            foreach (var file in result.Value.Files.Values)
-                AppendLog(Strings.Get("Gui_Log_FileStatus", file.File, file.State,
-                    file.AppliedPatches.Count == 0 ? "-" : string.Join(", ", file.AppliedPatches)));
-            foreach (string warning in result.Warnings) AppendLog(Strings.Get("Gui_Log_Warning", warning));
-            if (result.Value.AllRecognised && result.Value.AllMatchesConfig)
-                ShowOperationSuccess(Strings.Get("Verify_AllOk"));
-            else ShowOperationWarning(Strings.Get("Verify_Mismatch"));
-        }
-        catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
-        finally { SetBusy(false); }
-    }
-
     private void SetBusy(bool busy, bool profilerOwnsBusy = false)
     {
         if (InvokeRequired) { BeginInvoke(() => SetBusy(busy, profilerOwnsBusy)); return; }
         _busy = busy;
         _apply.Enabled = !busy;
         _restore.Enabled = !busy;
-        _check.Enabled = !busy;
-        _diagLaunch.Enabled = !busy;
-        _diagAttach.Enabled = !busy;
         _browse.Enabled = !busy;
         _tabs.Enabled = !busy || profilerOwnsBusy;
         _operationStatus.Text = busy ? Strings.Get("Gui_Working") : Strings.Get("Gui_Ready");
