@@ -8,6 +8,7 @@ using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
 using CKToolkit.Core.Runtime;
+using CKToolkit.Core.Saves;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
@@ -201,6 +202,9 @@ public static partial class CliHost
                 if (trainerSubCmd == "apply")
                     return HandleApply(gameDirOverride, configPathOverride, isJson, stdout, stderr, "trainer apply");
                 return OutputError("trainer", Strings.Get("Error_InvalidArgs", $"未知的 trainer 子指令 '{commands[1]}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
+
+            case "save":
+                return HandleSave(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
 
             case "profile":
                 return HandleProfile(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);

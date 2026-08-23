@@ -2,7 +2,7 @@
 
 *[繁體中文](#繁體中文) · [English](#english)*
 
-An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: Rage of War* (2004, Steam edition) — combining performance enhancements, 1080p/2K/4K high-resolution support, language pack management, and an in-depth trainer into a single, clean GUI and AI-agent-driven CLI.
+An all-in-one performance, localization, trainer, and save-management toolkit for *Celtic Kings: Rage of War* (2004, Steam edition) — combining performance enhancements, 1080p/2K/4K high-resolution support, language packs, an in-depth trainer, portable save archives, and player-data editing in one GUI and AI-agent-driven CLI.
 
 ![4K 解析度實機全景視野 (3840x2160) / 4K Battlefield Overview](docs/screenshots/gameplay-4k-overview.jpg)
 
@@ -12,13 +12,14 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 ### 這是什麼
 
-《Celtic Kings: Rage of War》（凱爾特之王：戰爭狂怒，2004 年 Steam 版）的現代化全功能整合工具包。單一執行檔 `CKToolkit.exe` 涵蓋三大核心領域：
+《Celtic Kings: Rage of War》（凱爾特之王：戰爭狂怒，2004 年 Steam 版）的現代化全功能整合工具包。單一執行檔 `CKToolkit.exe` 整合以下功能：
 
 | 模組 | 功能特色 |
 |---|---|
 | **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動；CVXVisible 32px 網格上限 4096x2400，超過一律拒絕寫入）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
 | **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,458 條詞彙 100% 覆蓋）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
 | **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
+| **存檔與玩家資料** | 列舉 profile 存檔與預覽圖、SHA-256 驗證的 `.cksave` 匯出／匯入、撞名不覆寫、可復原的保護性刪除，以及玩家基本資料與遊戲統計頁（戰績、軍事評價、偏好、資源、單位紀錄）編輯 |
 
 #### 實機遊戲畫面（HD 介面 / 2K / 4K 高解析度支援）
 
@@ -53,7 +54,7 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
 
 ### 安全性設計：零備份副本、精確反轉與正規化
 
-本工具**不建立 `backup/` 目錄，也不複製或保存任何遊戲檔案副本**。作為 Steam 版專用工具，Steam 的「驗證遊戲檔案完整性」隨時可作為終極防線。
+本工具**不建立 `backup/` 目錄，也不複製或保存 EXE／PAK／INI 等原廠遊戲檔案副本**。作為 Steam 版專用工具，Steam 的「驗證遊戲檔案完整性」隨時可作為終極防線。使用者主動匯出的 `.cksave` 與保護性刪除的復原封裝只含玩家 `.adv` 存檔與預覽圖，不含原廠遊戲內容。
 
 取代備份的機制是**精確反轉 (Exact Reversal)**：
 
@@ -81,7 +82,7 @@ An all-in-one performance, localization, and trainer toolkit for *Celtic Kings: 
      ```cmd
      CKToolkit.exe
      ```
-  4. 五大分頁：**效能 / 語言 / 修改器 / 分析器 / 關於**，右上角可自由切換繁體中文／English。
+  4. 六大分頁：**效能 / 語言 / 修改器 / 存檔 / 分析器 / 關於**，右上角可自由切換繁體中文／簡體中文／English。
   5. 勾選欲啟用的項目（如 2K 2560x1440 或 4K 3840x2160、繁體中文語言包、修改器功能）後點擊「一鍵套用」。底部只保留「一鍵套用／還原原版」兩個全域動作，避免重複按鈕混淆。
   6. **套用後可直接從 Steam或桌面捷徑啟動遊戲**；若要使用修改器或效能頁所選的執行期穩定性保護，請從「修改器」頁啟動遊戲。
   7. 若需還原原版，於工具中點擊「還原原版」即可逐位元組恢復原版檔案。
@@ -174,6 +175,31 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
 CKToolkit.exe lang import --src .\my-language [--overwrite]
 ```
 工具會自動進行路徑穿越驗證與安全 Staging 原子安裝。
+
+---
+
+### 存檔與玩家資料管理
+
+「存檔」分頁會列出 `profiles\<玩家>\*.adv`、最後儲存時間、大小與同名 BMP 預覽圖。
+可將單一存檔匯出成含 manifest 與 SHA-256 的 `.cksave`，再安全匯入任一既有玩家；撞名時
+自動配置下一個數字槽，絕不覆寫。保護性刪除會先在 `%LocalAppData%\CKToolkit\SaveTrash`
+建立並驗證可匯回的封裝，再移除原存檔。
+
+同頁可修改 `player.ini` 內已確認的玩家顯示名稱、顏色與種族，並透過「編輯遊戲統計…」
+修改遊戲 profile 畫面上的單／多人戰績、軍事評價（階級由遊戲換算）、遊戲時間、最愛國家／
+單位、資源、擊殺／損失、儀式生命、最高等級單位與單位上限。遊戲執行中所有寫入都會拒絕。
+詳細格式、公式與安全邊界見
+[`docs/save-management.md`](docs/save-management.md)。
+
+```cmd
+CKToolkit.exe save list --json
+CKToolkit.exe save export --profile noname --name 1 --out slot1.cksave
+CKToolkit.exe save import --profile noname --archive slot1.cksave
+CKToolkit.exe save delete --profile noname --name 1
+CKToolkit.exe save player set --profile noname --name Larax --color 6 --race 0
+CKToolkit.exe save stats get --profile noname --json
+CKToolkit.exe save stats set --profile noname --military-rating 50 --single-games 10 --single-wins 8
+```
 
 ---
 
@@ -270,6 +296,7 @@ CKToolkit.exe verify  [--json]              唯讀驗證現行檔案（零寫入
 CKToolkit.exe perf get|set ...              效能與 HD 解析度設定
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
+CKToolkit.exe save list|export|import|delete|player|stats ...
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] [--log-dir <dir>] 完整診斷記錄
 CKToolkit.exe run [--plain|--watch|--attach] 帶診斷執行或掛載遊戲
 CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
@@ -319,13 +346,14 @@ set CKTOOLKIT_VANILLA_DIR=C:\Path\To\VanillaGame
 
 ### What this is
 
-An all-in-one modernization and toolkit for *Celtic Kings: Rage of War* (2004, Steam edition). A single executable `CKToolkit.exe` covers three essential domains:
+An all-in-one modernization toolkit for *Celtic Kings: Rage of War* (2004, Steam edition). A single executable `CKToolkit.exe` integrates:
 
 | Module | Features |
 |---|---|
 | **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam; the CVXVisible 32px grid tops out at 4096x2400 and anything larger is refused), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
 | **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,458 entries each, 100% coverage), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
 | **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
+| **Saves & Player Data** | Profile saves with BMP previews, SHA-256-verified `.cksave` export/import, collision-safe slots, recoverable deletion, plus editing of basic profile data and the in-game statistics page (results, military rating, preferences, resources, and unit records) |
 
 #### In-Game Screenshots (HD UI / 2K / 4K High-Resolution Support)
 
@@ -360,7 +388,7 @@ The unified toolkit uses a **single application pipeline** and **normalization l
 
 ### Safety Model: Zero Backups, Exact Reversal & Normalization
 
-This tool **does not create a `backup/` directory and never stores copies of game files**. Because this is a Steam-specific tool, Steam's built-in "Verify integrity of game files" serves as the definitive safety net.
+This tool **does not create a `backup/` directory or store copies of stock EXE/PAK/INI game files**. Because this is a Steam-specific tool, Steam's built-in "Verify integrity of game files" serves as the definitive safety net. User-requested `.cksave` exports and protected-deletion recovery archives contain only player `.adv` saves and previews, never stock game content.
 
 Backups are replaced by **Exact Reversal**:
 
@@ -388,7 +416,7 @@ Backups are replaced by **Exact Reversal**:
      ```cmd
      CKToolkit.exe
      ```
-  4. Five tabs: **Performance / Language / Trainer / Profiler / About**, with a Traditional Chinese / English toggle in the top-right corner.
+  4. Six tabs: **Performance / Language / Trainer / Saves / Profiler / About**, with a Traditional Chinese / Simplified Chinese / English toggle in the top-right corner.
   5. Select desired options (e.g. 2K 2560x1440 or 4K 3840x2160, Traditional Chinese language pack, Trainer options) and click "Apply".
   6. **Launch directly from Steam or standard shortcut** — 2K/4K and all patches are statically applied to game files, no background utility needed!
   7. Click "Restore" at any time to return all files to byte-exact vanilla.
@@ -479,6 +507,32 @@ CKToolkit.exe lang export-template --out .\my-language --template ENGLISH
 Click "📥 Import Pack..." in the Language tab, or via CLI:
 ```cmd
 CKToolkit.exe lang import --src .\my-language [--overwrite]
+```
+
+---
+
+### Save & Player-Data Management
+
+The Saves tab lists `profiles\<player>\*.adv` files with timestamps, sizes, and matching BMP previews.
+Each save can be exported as a `.cksave` archive with a manifest and SHA-256 checksums, then imported
+into any existing profile. Imports allocate a new numeric slot on collision and never overwrite a save.
+Protected deletion first writes and verifies a recovery archive under
+`%LocalAppData%\CKToolkit\SaveTrash`.
+
+The same tab edits the confirmed mirrored name, color, and nation fields in `player.ini`. Its
+"Edit game statistics…" dialog also controls the profile screen's single/multiplayer results,
+military rating (rank remains game-derived), time, favorite nation/unit, resources, kills/losses,
+ritual health, highest-level unit, and maximum units. Writes are refused while the game is running.
+See [`docs/save-management.md`](docs/save-management.md) for the exact format and safety boundaries.
+
+```cmd
+CKToolkit.exe save list --json
+CKToolkit.exe save export --profile noname --name 1 --out slot1.cksave
+CKToolkit.exe save import --profile noname --archive slot1.cksave
+CKToolkit.exe save delete --profile noname --name 1
+CKToolkit.exe save player set --profile noname --name Larax --color 6 --race 0
+CKToolkit.exe save stats get --profile noname --json
+CKToolkit.exe save stats set --profile noname --military-rating 50 --single-games 10 --single-wins 8
 ```
 
 ---
@@ -585,6 +639,7 @@ CKToolkit.exe verify  [--json]              Read-only verification (zero writes)
 CKToolkit.exe perf get|set ...              Performance & resolution settings
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
+CKToolkit.exe save list|export|import|delete|player|stats ...
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] Full diagnostics run
 CKToolkit.exe run [--plain|--watch|--attach] Launch or attach with diagnostics
 CKToolkit.exe --game <dir>                  Override game directory (global flag)

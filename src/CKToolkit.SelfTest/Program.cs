@@ -5,6 +5,7 @@ using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
 using CKToolkit.Core.Perf;
 using CKToolkit.Core.Runtime;
+using CKToolkit.Core.Saves;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
@@ -61,11 +62,13 @@ namespace CKToolkit.SelfTest;
 ///   34. 語系身分單一來源（pack.json gameLangFolder/gameLangKey 為唯一權威，verify 期望值與實際簽章必須對得上）
 ///       與 CVXVisible 32px 網格硬上限 (4096x2400) 之強制拒絕
 ///   35. 遊戲組建版本偵測：PE 編譯時間戳比對，不符只警告、仍照常套用且仍可逐位元組還原
+///   39. 存檔與玩家資料管理：清冊唯讀、封裝校驗、撞名匯入、保護性刪除、player.ini 基本／統計資料保留式更新與 CLI JSON
 /// </summary>
 internal static class Program
 {
     private static int _failures;
 
+    [STAThread]
     private static int Main(string[] args)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -129,6 +132,7 @@ internal static class Program
         RunGroup("36. CrashCandidateTracking", TestCrashCandidateTracking);
         RunGroup("37. AddressSpaceUnavailable", TestAddressSpaceUnavailable);
         RunGroup("38. StabilityProductOptions", TestStabilityProductOptions);
+        RunGroup("39. SaveManager", () => SaveManagerSelfTests.Run(Check));
 
         Console.WriteLine();
         if (_failures == 0)

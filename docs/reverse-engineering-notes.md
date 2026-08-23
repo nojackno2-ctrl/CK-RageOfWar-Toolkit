@@ -1870,6 +1870,41 @@ eight real game instructions and disable the subsystem on any mismatch.
 The source of the contaminated high word remains unknown. This is a narrow repair of a store that
 Windows has already proved invalid, not a claim that the producer-side lifetime bug is solved.
 
+## 2026-08-23: profile statistics page and `player.ini [gameN]`
+
+The profile statistics screen is not reading one cached summary. `0x005B7F30` enumerates contiguous
+`[game0]`, `[game1]`, ... sections, calls `0x005B68D0` to parse each record, and aggregates the exact
+values later formatted by `0x006599B0`. The live one-game profile and the in-game screen match:
+
+| Screen value | Per-game source and aggregate |
+|---|---|
+| Single / multiplayer games | count `multi == 0` / `multi != 0` |
+| Win percentage | `lost == 0` count times 100 divided by the relevant game count |
+| Game time | sum `duration`, divided by 3,600,000 ms for integer hours |
+| Favorite nation | most frequent `race` 0/1/2 = Gaul/Roman/random; percentage is its count / total |
+| Favorite unit | most frequent non-empty `favorite` class ID |
+| Resources | 64-bit sums of `gold` and `food` |
+| Units eliminated / lost | 64-bit sums of `units_killed` / `units_lost` |
+| Ritual health | 64-bit sum of `health_sacr` |
+| Most experienced unit | `level_max_unit` from the record with greatest `level_max` |
+| Maximum units | greatest `units_max` |
+
+Military rating is not `poser_score`. At `0x005B8233..0x005B8269` the game calculates each record as
+
+```text
+100 * (damage_inflicted + kill_healths / 2 + 1000)
+    / (damage_taken + die_healths / 2 + 10000)
+```
+
+using 32-bit unsigned integer division, sums the per-game ratings in 64 bits, then displays their
+average at `0x00659CEA..0x00659D78`. With all four source fields zero, the result is exactly 10,
+matching the field screenshot. The rank name is selected by the game from that average rating.
+
+The loader also builds an internal rolling value seeded with `0x48564849`; `0x005B8AB0` finalizes
+steps while temporary strings are released. This value is not compared with `[Player] hash` in the
+statistics load path. Editing must nevertheless preserve the persisted `hash`, all unrelated Player
+keys, and unknown keys in every retained `[gameN]` section.
+
 ## 2026-08-23: per-EIP scratch still hangs across VM opcodes
 
 The first field run with `vmlvalue.cpp` prevented all previously fatal assignment stores, then

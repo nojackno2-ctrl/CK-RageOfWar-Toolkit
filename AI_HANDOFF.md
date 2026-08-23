@@ -14,7 +14,112 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 當前狀態：v1.0.2 版本發布準備 (2026-08-23)
+## 當前目標：加入遊戲存檔管理 (2026-08-23)
+
+### 使用者釐清的玩家資料範圍（2026-08-23，最新目標）
+
+使用者附上遊戲內 profile 統計頁截圖，明確表示「玩家資料修改」是要修改：階級／軍事評價、
+單人與多人場數及勝率、遊戲時間、最愛國家與比例、最愛單位、消耗金錢／食物、消滅／損失
+單位、儀式消耗生命、最高經驗單位與等級、單位數量上限。先前只有名稱／顏色／種族的實作
+太窄，需保留但不得當成需求已完成。
+
+### profile 統計逆向證據
+
+- 真實 `player.ini [game0]` 與截圖逐項吻合：`multi=0`、`lost=1` → 單人 1 場／0% 勝；
+  `duration=36000` → 0 小時；`race=1` → 羅馬 100%；`gold=0`、`food=7`；
+  `units_killed=0`、`units_lost=0`、`health_sacr=0`、`level_max_unit=Mule`、
+  `level_max=1`、`units_max=0`。
+- 每場記錄讀取／彙總在 Steam EXE `0x005B7F30`；讀單筆 `[gameN]` 在 `0x005B68D0`；
+  profile 統計頁格式化在 `0x006599B0`。單／多人勝率為 `wins * 100 / games`，時間以
+  `3,600,000 ms` 換算整數小時，資源／擊殺／損失／儀式生命為 64-bit 加總，最高等級與
+  單位上限取最大值，最愛國家由 `race 0/1/2`（Gaul/Roman/random）出現次數決定。
+- 軍事評價不是 `poser_score`。每場公式為
+  `100 * (damage_inflicted + kill_healths / 2 + 1000) /
+  (damage_taken + die_healths / 2 + 10000)`（32-bit 無號整數除法），profile 顯示全部場次平均。
+  真實樣本四項皆 0，因此評價正好是 10，與截圖完全一致；階級名稱由遊戲再依評價換算。
+- `[Player] hash` 是另一組 profile 欄位；統計載入器自己從 game 記錄建立暫時計算值，沒有
+  以該欄位拒絕統計。統計編輯仍應保留 `hash` 與所有未知欄位原樣。
+
+### 已取得的本機實證
+
+- Steam 安裝目錄內的玩家存檔實際位於 `profiles\<玩家>\*.adv`；目前實機樣本為
+  `profiles\noname\1.adv`（6,117,097 bytes），檔頭為 `LZIS`。
+- 遊戲預覽圖與存檔成對，命名為 `<存檔>.adv.bmp`；實機樣本為 `1.adv.bmp`。
+- `profiles\profiles.ini` 的 `default=profiles/noname` 指出預設玩家；玩家資料夾另有
+  `player.ini`，但它是玩家／對戰設定，不屬於單一存檔，不應隨單一存檔匯出或刪除。
+- 根目錄 `currentadv.bfhp` 是目前冒險執行狀態，原廠 `Adventures\*.bfhp` 與
+  `Scenarios\*.bfhp` 是遊戲內容。第一版存檔管理只管理 profile 內的 `.adv` 與同名 BMP，
+  **不得**碰這三類檔案。
+
+### 安全設計邊界
+
+- 這項功能是使用者明確要求管理「玩家資料」，不屬於 §2 的原廠遊戲檔修補備份；仍不得在
+  遊戲目錄建立 `backup/`。匯出採可攜 `.cksave`（ZIP + manifest + SHA-256）封裝。
+- 匯入只允許寫入既有 profile，封裝需驗證路徑、大小與 SHA-256；撞名時配置新的數字存檔槽，
+  不覆寫既有存檔。
+- 刪除採保護性刪除：先在 `%LocalAppData%\CKToolkit\SaveTrash` 產生並驗證 `.cksave`，
+  成功後才移除 `.adv`／`.bmp`；該封裝可由匯入功能復原。
+- 遊戲執行中只允許唯讀列舉；匯出、匯入、刪除全部拒絕，以免讀到半寫入存檔或與遊戲競寫。
+- GUI 必須新增可見的「存檔」分頁與預覽；CLI 提供非互動 `save list/export/import/delete --json`。
+- 第一版已編輯 `[Player]` 與 `[Player 0]` 互為鏡像的名稱、顏色（0..7）、種族；
+  最新目標需再加入上述 `[gameN]` 統計摘要編輯器，且保留仍存在之 game section 的未知欄位。
+- `.adv` 是多區塊 LZIS；現有 `tools/trainer/lzis_decompress.py` 只驗證過 config.ini 且只解
+  第一區塊，專案也沒有可驗證的重壓縮器。因此不得猜位址修改存檔內金錢、單位或地圖狀態；
+  等取得完整格式與解壓→重封→遊戲讀取的實機證據後再擴充。
+
+### 目前實作里程碑（程式與合成流程完成，待真實遊戲寫入驗收）
+
+- 已新增 `Core/Saves/SaveManager.cs`：唯讀清冊、`.cksave` 匯出／SHA-256 驗證匯入、
+  撞名配置下一個數字槽、先封裝再刪除、player.ini 三項資料的原子更新。
+- 已新增 `Gui/SavePage.cs` 並整合到 `MainForm` 的可見「存檔」分頁：玩家選擇、名稱／顏色／
+  種族編輯、存檔表格、BMP 預覽、匯入／匯出／保護性刪除。
+- 已新增 `Cli/CliHost.Saves.cs` 與 `save list/export/import/delete/player get/player set`；所有路徑
+  可輸出穩定 JSON 封套。
+- 三語字串目前各 448 鍵，JSON 可解析且鍵數一致。
+- `dotnet build CKToolkit.sln --no-restore`：**成功，0 warning / 0 error**。
+- `dotnet run --project src/CKToolkit.SelfTest --no-build`：**39 組全部通過**。第 39 組涵蓋
+  清冊唯讀、manifest／SHA-256、篡改拒絕零寫入、撞名匯入、逐位元組一致、保護性刪除後
+  復原、player.ini 未知欄位保留與鏡像同步、CLI camelCase JSON、SavePage／MainForm 控制項建立。
+- 真實 Steam 目錄唯讀 CLI 已通過：`profileCount=1`、`saveCount=1`、`1.adv`、BMP 預覽；
+  `player get` 回報 `noname / color 0 / race 1 / games 1`，操作前後 profile 全檔案名稱、大小與
+  時間戳完全一致（`readonly=True`）。
+- 三語各 448 鍵，鍵集一致，所有 `{n}` 佔位符序列一致；`git diff --check` 無內容錯誤
+  （只有 Git 提示工作樹 LF 日後會依設定轉 CRLF）。
+- 尚待真實遊戲寫入驗收：GUI 實際畫面、真實 `.adv` 匯出→匯入→進遊戲載入、保護性刪除
+  復原、player.ini 修改後遊戲顯示。未經使用者允許不得為測試改寫現有玩家資料；此階段
+  應標示為「程式與合成驗證完成，待實機驗收」，不可宣稱已在遊戲內完成。
+
+### 統計編輯器進度
+
+- 已新增 `Core/Saves/PlayerStatistics.cs` 第一版，依上述遊戲公式讀取彙總、配置 game records、
+  分配總量並原子寫回；尚未接 GUI/CLI 或通過測試。
+- 首次建置失敗：`PlayerStatistics.cs:375 CS9176`，原因是無目標型別的集合運算式直接接
+  `.Where()`。這是 C# 語法問題，需改成 `new[] { 0, 1, 2 }` 後重建；不可把此階段標為完成。
+- 統計核心修正後可建置；接上 `PlayerStatisticsDialog` 的首次建置又因屬性 `Update` 遮蔽
+  `Control.Update()` 觸發 `CS0108`（TreatWarningsAsErrors）。應改名 `ProposedUpdate`，不要用
+  `new` 隱藏框架成員。
+- 兩個編譯問題均已修正。統計摘要核心、`save stats get/set` JSON CLI、GUI「編輯遊戲統計」
+  對話框已接入；三語目前各 448 鍵。`dotnet build CKToolkit.sln --no-restore` 已重新通過
+  （0 warning / 0 error）。尚未補統計 SelfTest 或做真實 profile 唯讀公式對照。
+- 統計 SelfTest 已加入且核心案例全通過：真實截圖數值重現、軍事評價 10 公式、五場彙總、
+  增減 game section、局部 CLI 更新保留 duration、hash／未知欄位保留與錯誤零寫入。整套目前
+  唯一失敗是 `PlayerStatisticsDialog.CreateControl()` 未建立獨立 Form handle；需改成讀取
+  `statsDialog.Handle` 強制建立後再重跑，尚不可宣稱全綠。
+- 對話框測試已改用 `Handle` 並重新跑完全套：`dotnet build` 0 warning / 0 error，39 組
+  SelfTest 全部通過。第 39 組已涵蓋統計讀取唯讀、實機截圖值、軍事評價、5 場建立、2 場
+  縮減、勝場錯誤零寫入、hash／未知欄位保留、CLI stats get/set camelCase JSON 與 GUI handle。
+- 真實 Steam `noname/player.ini` 的 `save stats get --json` 已唯讀驗證：1 場單人、0 勝／0%、
+  多人 0、0 小時、軍事評價 10、羅馬 100%、食物 7、Mule 等級 1、其他截圖項目皆 0；
+  執行前後 SHA-256／長度／時間戳一致（`readonly=True`）。
+- 最新三語字串各 448 鍵，placeholder parity 為 0 mismatch，`git diff --check` 無內容錯誤
+  （僅 LF→CRLF 提示）。尚待使用者自行用真實 profile 寫入後進遊戲查看；不可標示為已實機
+  寫入驗收。
+- `AGENTS.md`、README、`docs/save-management.md` 與 reverse-engineering notes 已同步最新
+  統計範圍、公式、CLI 與歷史 section 刪除確認規則。最終再跑建置與 39 組 SelfTest 全綠；
+  真實 profile 最終唯讀對照仍為 `1/0/0%`、rating 10、Roman 100%、food 7、Mule level 1，
+  且 `readonly=True`。本次沒有改寫使用者真實 `player.ini`。
+
+## 前一狀態：v1.0.2 版本發布準備 (2026-08-23)
 
 1. **穩定性防護與產品化分流**：
    - 效能頁提供「已驗證的穩定性保護（建議，窄 guard）」與「實驗性極端負載腳本保護（VEH / 腳本修復）」。
