@@ -1657,7 +1657,16 @@ internal static class Program
             Check($"{id} gameLangKey 非空", !string.IsNullOrWhiteSpace(p.Meta.GameLangKey));
             Check($"{id} 載入翻譯詞彙數 > 0", p.Translations.PhraseCount > 0);
             Check($"{id} 載入說明文件段落數 > 0", p.Translations.Help.Count > 0);
+            Check($"{id} 包含全部 7 個戰役/劇本定義", p.Meta.Files.Campaigns?.Count == 7);
         }
+
+        var extraTemplates = ExtraCampaignTemplates.GetTemplates();
+        Check("ExtraCampaignTemplates 載入全部 118 個額外戰役/劇本模板檔案", extraTemplates.Count == 118);
+        Check("ExtraCampaignTemplates 涵蓋 Return to the Throne (82 檔)", extraTemplates.Count(t => t.PakPrefix.Contains("RETURN TO THE THRONE")) == 82);
+        Check("ExtraCampaignTemplates 涵蓋 Defenders (10 檔)", extraTemplates.Count(t => t.PakPrefix.Contains("DEFENDERS")) == 10);
+        Check("ExtraCampaignTemplates 涵蓋 Invaders (8 檔)", extraTemplates.Count(t => t.PakPrefix.Contains("INVADERS")) == 8);
+        Check("ExtraCampaignTemplates 涵蓋 The Fall of Avalon (10 檔)", extraTemplates.Count(t => t.PakPrefix.Contains("THE FALL OF AVALON")) == 10);
+        Check("ExtraCampaignTemplates 涵蓋 Ascendency (8 檔)", extraTemplates.Count(t => t.PakPrefix.Contains("ASCENDENCY")) == 8);
 
         var discovered = PackLoader.DiscoverAll();
         Check("DiscoverAll 成功探索並包含全部 6 個內建語言包", allBuiltInIds.All(id => discovered.ContainsKey(id)));
@@ -1774,6 +1783,11 @@ internal static class Program
         Check("安裝後 local.pak 包含 CHINESE\\LOCAL.LOC.XML", localPak.Contains(@"CHINESE\LOCAL.LOC.XML"));
         Check("安裝後 local.pak 包含 CHINESE\\HELP.XML", localPak.Contains(@"CHINESE\HELP.XML"));
         Check("安裝後 local.pak 包含 CHINESE\\CREDITS.TXT", localPak.Contains(@"CHINESE\CREDITS.TXT"));
+        Check("安裝後 local.pak 包含 Return to the Throne 戰役檔案", localPak.Contains(@"ADVENTURES\RETURN TO THE THRONE\CHINESE\ADVENTURE.LOC.XML"));
+        Check("安裝後 local.pak 包含 Defenders 戰役檔案", localPak.Contains(@"ADVENTURES\DEFENDERS\CHINESE\ADVENTURE.LOC.XML"));
+        Check("安裝後 local.pak 包含 Invaders 戰役檔案", localPak.Contains(@"ADVENTURES\INVADERS\CHINESE\ADVENTURE.LOC.XML"));
+        Check("安裝後 local.pak 包含 The Fall of Avalon 劇本檔案", localPak.Contains(@"SCENARIOS\THE FALL OF AVALON\CHINESE\ADVENTURE.LOC.XML"));
+        Check("安裝後 local.pak 包含 Ascendency 劇本檔案", localPak.Contains(@"SCENARIOS\ASCENDENCY\CHINESE\ADVENTURE.LOC.XML"));
         Check("PatchState.Inspect 判定為 PatchedByUs", PatchState.Inspect(GameFile.LocalPak, installedBytes).IsPatched);
 
         // 1b. 危險情境：語系目錄還在，但字型清冊被外力刪除。

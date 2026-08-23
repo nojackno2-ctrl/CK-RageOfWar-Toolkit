@@ -122,6 +122,22 @@ public static class LangInstaller
             addedEntries.Add(newName);
         }
 
+        // 1.5 產生額外戰役/劇本 XML 檔案 (Return to the Throne, Defenders, Invaders, The Fall of Avalon, Ascendency)
+        foreach (var (pakPrefix, relPath, templateData) in ExtraCampaignTemplates.GetTemplates())
+        {
+            string newName = $"{pakPrefix}\\{targetLang}\\{relPath}";
+            byte[] data = templateData;
+            if (newName.EndsWith(".XML", StringComparison.OrdinalIgnoreCase) && LocXml.IsTranslationTable(data))
+            {
+                data = LocXml.Rebuild(data, pack.Translations.Lookup, out int d, out int t);
+                doneTotal += d;
+                entryTotal += t;
+            }
+
+            localPak.Write(newName, data);
+            addedEntries.Add(newName);
+        }
+
         log?.Invoke($"  文字條目：{doneTotal}/{entryTotal} 已翻譯（其餘保留英文）");
 
         // 2. 說明文件 HELP.XML (以 ENGLISH\HELP.XML 為原文底本)

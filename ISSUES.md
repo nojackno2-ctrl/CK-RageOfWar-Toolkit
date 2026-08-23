@@ -39,6 +39,7 @@
 | [ISSUE-022](#issue-022-分析器直接把所有產物散落在使用者選擇的根目錄) | **根資料夾、日期與每場記錄分類** | 在 GUI 選擇桌面後啟動兩場分析。 | 桌面只出現一個 `CKToolkit 分析紀錄`根資料夾；內部依日期與每場執行分開，同一場的完整證據鏈仍在同一資料夾。 |
 | [ISSUE-002](#issue-002-分析器遊戲加速器預設倍率防呆與連動) | **分析器遊戲加速器 10x 與主控台加速** | 在分析器分頁選擇「10x 極速」，啟動遊戲並測試加速效果。 | 遊戲速度顯著加快，主控台未打錯字至其他視窗。 |
 | [ISSUE-004](#issue-004-第三方自製語言包匯出與匯入上手機制) | **第三方語言包範本匯出與匯入** | 於語言分頁點擊「匯出翻譯範本」，修改一筆字串後透過「匯入語言包」匯入。 | 正確識別新語言包、安裝至 `local.pak` 並在遊戲中顯示。 |
+| [ISSUE-028](#issue-028-未被翻譯之額外戰役與劇本補全與-localpak-注入) | **未翻譯戰役與劇本補全注入** | 安裝繁中/簡中等語言包後進入自訂戰役或劇本（如 Return to the Throne、Defenders 等）。 | 戰役對話、任務目標與劇情簡介 100% 完整中文化；反安裝後 local.pak 100% 逐位元組還原。 |
 
 ---
 
@@ -65,6 +66,33 @@
 - **實機驗證需求**:
   - 以修改器頁各跑一次「已驗證保護」、「實驗性保護」、「完全停用」，核對啟動 log 與 `ckrun-config.txt` 的選項完全符合效能頁設定，並確認遊戲可正常進入與退出。
   - 分析器頁再啟動一場，確認完整 profiler／dump 工作流程仍維持獨立且不受日常啟動簡化影響。
+
+---
+
+### ISSUE-028: 未被翻譯之額外戰役與劇本補全與 local.pak 注入
+- **問題編號**: `ISSUE-028`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 使用者回報「檢查所有戰役，有戰役沒有被翻譯到」。
+  - 經逆向稽核 Steam 原廠目錄，發現遊戲本體包含以下 3 個戰役與 2 個劇本未被先前的中文化模組納入：
+    1. `Adventures\Return to the Throne.bfhp` (378 條文字，82 個 XML 檔)
+    2. `Adventures\Defenders.bfhp` (40 條文字，10 個 XML 檔)
+    3. `Adventures\Invaders.bfhp` (3 條文字，8 個 XML 檔)
+    4. `Scenarios\The fall of Avalon.bfhp` (41 條文字，10 個 XML 檔)
+    5. `Scenarios\Ascendency.bfhp` (5 條文字，8 個 XML 檔)
+  - 這些檔案在原廠以 HPFS (High Performance File System) 格式打包在獨立 `.bfhp` 中，遊戲引擎虛擬檔案系統 (VFS) 優先從 `local.pak` 的 `ADVENTURES\<戰役>\<LANG>\` 與 `SCENARIOS\<劇本>\<LANG>\` 讀取在地化文字。因 `local.pak` 原本僅含教學與主戰役，導致先前 `LangInstaller` 漏掉此 5 套戰役/劇本。
+- **修復實作 (2026-08-23)**:
+  - 逆向分析 HPFS 格式並提取出全部 118 個原始 XML 模板檔案，內嵌至 `Core/Lang/ExtraCampaignTemplates.cs`。
+  - 全面完成 5 套戰役/劇本共 467 條文字在全 6 種語言包 (`zh-TW`, `zh-CN`, `ja-JP`, `es-ES`, `it-IT`, `ru-RU`) 的 100% 高品質翻譯與對齊。
+  - 更新 6 大語言包之 `pack.json` 宣告所有 7 套戰役檔。
+  - `LangInstaller.Install` 支援自 `ExtraCampaignTemplates` 注入額外戰役/劇本至 `local.pak`，並將新增路徑完全登記於 `manifest.AddedEntries` (`FONTS\.patch_marker.json`)。
+  - `LangInstaller.Uninstall` 自動清除所有注入條目，達成 100% 逐位元組原版無損反轉 (Byte-for-byte reversal)。
+- **本地驗證**:
+  - `dotnet build CKToolkit.sln`：成功，0 warning / 0 error。
+  - `dotnet run --project src/CKToolkit.SelfTest`：全部測試通過 (含 118 個模板檢驗、7 套戰役宣告檢驗、6 大語言包安裝後反安裝逐位元組 100% 還原驗證)。
+- **實機驗證需求**:
+  - 於真實遊戲中安裝語言包，載入《Return to the Throne》、《Defenders》、《Invaders》、《The fall of Avalon》、《Ascendency》，確認劇情簡介、對話、任務目標與選項均完整顯示中文化字串。
 
 ---
 

@@ -14,6 +14,26 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
+## 最新進度：全戰役與劇本在地化補全與 local.pak 注入 (2026-08-23)
+
+### 使用者需求
+使用者回報：「檢查所有戰役，有戰役沒有被翻譯到」並要求「全部解決掉」。
+
+### 逆向工程與根因發現
+1. **未翻譯檔案清單**：
+   - 戰役：`Adventures\Return to the Throne.bfhp` (378 條文字，82 個 XML 檔)
+   - 戰役：`Adventures\Defenders.bfhp` (40 條文字，10 個 XML 檔)
+   - 戰役：`Adventures\Invaders.bfhp` (3 條文字，8 個 XML 檔)
+   - 劇本：`Scenarios\The fall of Avalon.bfhp` (41 條文字，10 個 XML 檔)
+   - 劇本：`Scenarios\Ascendency.bfhp` (5 條文字，8 個 XML 檔)
+2. **根因**：原廠將額外戰役/劇本以 HPFS 封裝於獨立 `.bfhp` 檔案。遊戲 VFS 優先尋找 `local.pak` 中的 `ADVENTURES\<戰役>\<LANG>\` 與 `SCENARIOS\<劇本>\<LANG>\`。原 `LangInstaller` 僅走訪 `local.pak` 原有檔案，故遺漏此 5 套戰役/劇本。
+3. **解決方案**：
+   - 逆向分析 HPFS 檔案格式，自 `.bfhp` 提取出全部 118 個原始 XML 模板並內嵌至 `ExtraCampaignTemplates.cs`。
+   - 完成 5 套戰役/劇本全 467 條文字在 6 大語言包 (`zh-TW`, `zh-CN`, `ja-JP`, `es-ES`, `it-IT`, `ru-RU`) 的 100% 翻譯。
+   - `LangInstaller.Install` 重建所有模板並寫入 `local.pak`，路徑完全納入 `FontPatchManifest.AddedEntries`。
+   - `LangInstaller.Uninstall` 自動移除所有注入條目，維持 100% 逐位元組原版無損反轉 (Byte-for-byte reversal)。
+   - `SelfTest` 新增 118 模板檢驗與 7 套戰役宣告檢驗，39 組測試全部通過。
+
 ## 當前目標：加入遊戲存檔管理 (2026-08-23)
 
 ### 使用者釐清的玩家資料範圍（2026-08-23，最新目標）

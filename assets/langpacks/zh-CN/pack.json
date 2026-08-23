@@ -1,4 +1,4 @@
-﻿{
+{
   "id": "zh-CN",
   "name": "Simplified Chinese",
   "nativeName": "简体中文",
@@ -33,7 +33,12 @@
     "help": "help.json",
     "campaigns": [
       "campaign-tutorial.json",
-      "campaign-celtic-kings-adventure.json"
+      "campaign-celtic-kings-adventure.json",
+      "campaign-return-to-the-throne.json",
+      "campaign-defenders.json",
+      "campaign-invaders.json",
+      "campaign-the-fall-of-avalon.json",
+      "campaign-ascendency.json"
     ]
   }
 }

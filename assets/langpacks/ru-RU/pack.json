@@ -25,7 +25,12 @@
     "help": "help.json",
     "campaigns": [
       "campaign-tutorial.json",
-      "campaign-celtic-kings-adventure.json"
+      "campaign-celtic-kings-adventure.json",
+      "campaign-return-to-the-throne.json",
+      "campaign-defenders.json",
+      "campaign-invaders.json",
+      "campaign-the-fall-of-avalon.json",
+      "campaign-ascendency.json"
     ]
   }
 }
