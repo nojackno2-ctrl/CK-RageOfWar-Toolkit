@@ -346,6 +346,32 @@ internal static class Program
 
         byte[] restoredPeBytes = pe.ToBytes();
         Check("移除附加節區後 PE 位元組與初始原版完全一致 (逐位元組比對)", syntheticPe.SequenceEqual(restoredPeBytes));
+
+        // scoped Tweak 的 .cktw 會同時含設定表與 x86 thunk，是有 raw payload 的 executable
+        // section。移除 header 不夠，必須把新增時的 file-alignment padding 與 payload 一起截掉。
+        var rawPe = PeFile.Parse(syntheticPe);
+        byte[] rawPayload = Enumerable.Range(0, 173).Select(i => (byte)(i * 37)).ToArray();
+        PeSection rawSection = rawPe.AddSection(".cktw", (uint)rawPayload.Length,
+            PeFile.ImageScnCntCode | PeFile.ImageScnCntInitializedData |
+            PeFile.ImageScnMemExecute | PeFile.ImageScnMemRead,
+            rawPayload);
+
+        Check("成功附加含 raw payload 的 .cktw executable section",
+            rawSection.SizeOfRawData >= rawPayload.Length &&
+            (rawSection.Characteristics & PeFile.ImageScnMemExecute) != 0);
+        Check(".cktw raw payload 可由 RVA 精確讀回",
+            rawPe.ReadBytes(rawPe.RvaToFileOffset(rawSection.VirtualAddress), rawPayload.Length)
+                .SequenceEqual(rawPayload));
+
+        bool refusedUnsafeTruncate = false;
+        try { rawPe.RemoveSection(".cktw", truncateToLength: 1); }
+        catch (InvalidOperationException) { refusedUnsafeTruncate = true; }
+        Check("RemoveSection 拒絕截斷仍保留的原版節區", refusedUnsafeTruncate);
+
+        bool rawRemoved = rawPe.RemoveSection(".cktw", truncateToLength: syntheticPe.Length);
+        Check("成功移除 .cktw 並截掉 raw payload", rawRemoved && rawPe.FindSection(".cktw") == -1);
+        Check("含 raw payload 的附加節區反轉後逐位元組等於原版",
+            rawPe.ToBytes().SequenceEqual(syntheticPe));
     }
 
     // --- 4. HmmPak 合成往返測試 ---------------------------------------------
@@ -2496,6 +2522,290 @@ internal static class Program
         Check("spawn_item 產生 DefItemHolder 與 AddItem 腳本", itemScript.Contains("Place(&quot;DefItemHolder&quot;", StringComparison.Ordinal) && itemScript.Contains("o.AddItem(item)", StringComparison.Ordinal));
         Check("cycle_item 借用 spawn_item 之 items 參數", itemScript.Contains("King's Belt", StringComparison.Ordinal) && itemScript.Contains("Boar teeth", StringComparison.Ordinal));
 
+        // 永久 scoped Tweak 的 command helper：驗證 .cktw 格式、真實位址 hook、
+        // 多人 fail-closed／owner／command 旗標與設定位址、重設值、冪等、
+        // 混合狀態拒絕，以及含 raw payload 的精確反轉。
+        byte[] scopedVanilla = CreateSyntheticExe32();
+        Check("ScopedTweakPatch 初始 synthetic EXE 為原版", ScopedTweakPatch.IsOriginal(scopedVanilla));
+
+        var commandSettings = new ScopedTweakPatch.CommandSettings(
+            2u << 16, 1u << 16,
+            3u << 16, 1u << 16,
+            2500, 7000);
+        var productionSettings = new ScopedTweakPatch.ProductionSettings(
+            48, 30, 24, 20,
+            40, 50, 20, 25);
+        var populationSettings = new ScopedTweakPatch.PopulationSettings(
+            2, 3, 1, 4,
+            10_000, 15_000, 20_000, 25_000,
+            5, 10, 15, 20,
+            8_000, 6_000, 4_000, 2_000);
+        var capacitySettings = new ScopedTweakPatch.CapacitySettings(
+            true,
+            200_000, 10_000, 100_000, 5_000,
+            180_000, 12_000, 90_000, 6_000,
+            200, 40, 100, 20);
+        var initialGoldSettings = new ScopedTweakPatch.InitialGoldSettings(
+            true, 5_000, 500, 2_500, 100);
+        byte[] scopedPatched = ScopedTweakPatch.Apply(
+            scopedVanilla, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings);
+        var scopedInfo = ScopedTweakPatch.ReadInfo(scopedPatched);
+        var scopedPe = PeFile.Parse(scopedPatched);
+        byte[] scopedHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.CommandDelaySiteVa,
+            ScopedTweakPatch.CommandDelayOriginal.Length);
+        int helperDisplacement = BitConverter.ToInt32(scopedHook, 1);
+        uint helperTarget = (uint)(ScopedTweakPatch.CommandDelaySiteVa + 5 + helperDisplacement);
+        byte[] goldHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.GoldProductionSiteVa,
+            ScopedTweakPatch.GoldProductionOriginal.Length);
+        byte[] foodHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.FoodProductionSiteVa,
+            ScopedTweakPatch.FoodProductionOriginal.Length);
+        uint goldHelperTarget = (uint)(ScopedTweakPatch.GoldProductionSiteVa + 5 + BitConverter.ToInt32(goldHook, 1));
+        uint foodHelperTarget = (uint)(ScopedTweakPatch.FoodProductionSiteVa + 5 + BitConverter.ToInt32(foodHook, 1));
+        byte[] growthAmountHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.PopulationGrowthAmountSiteVa,
+            ScopedTweakPatch.PopulationGrowthAmountOriginal.Length);
+        byte[] growthIntervalHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.PopulationGrowthIntervalSiteVa,
+            ScopedTweakPatch.PopulationGrowthIntervalOriginal.Length);
+        byte[] lossPercentHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.PopulationLossPercentSiteVa,
+            ScopedTweakPatch.PopulationLossPercentOriginal.Length);
+        byte[] lossIntervalHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.PopulationLossIntervalSiteVa,
+            ScopedTweakPatch.PopulationLossIntervalOriginal.Length);
+        uint growthAmountTarget = (uint)(ScopedTweakPatch.PopulationGrowthAmountSiteVa + 5 + BitConverter.ToInt32(growthAmountHook, 1));
+        uint growthIntervalTarget = (uint)(ScopedTweakPatch.PopulationGrowthIntervalSiteVa + 5 + BitConverter.ToInt32(growthIntervalHook, 1));
+        uint lossPercentTarget = (uint)(ScopedTweakPatch.PopulationLossPercentSiteVa + 5 + BitConverter.ToInt32(lossPercentHook, 1));
+        uint lossIntervalTarget = (uint)(ScopedTweakPatch.PopulationLossIntervalSiteVa + 5 + BitConverter.ToInt32(lossIntervalHook, 1));
+        byte[] initialGoldHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.InitialGoldSiteVa, ScopedTweakPatch.InitialGoldOriginal.Length);
+        uint initialGoldTarget = (uint)(ScopedTweakPatch.InitialGoldSiteVa + 5 + BitConverter.ToInt32(initialGoldHook, 1));
+        byte[] scopedHelper = scopedPe.ReadBytesAtVa(scopedInfo.HelperVa, checked((int)scopedInfo.HelperSize));
+        byte[] scopedGoldHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.GoldHelperVa, checked((int)scopedInfo.GoldHelperSize));
+        byte[] scopedFoodHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.FoodHelperVa, checked((int)scopedInfo.FoodHelperSize));
+        byte[] scopedGrowthAmountHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.PopulationGrowthAmountHelperVa,
+            checked((int)scopedInfo.PopulationGrowthAmountHelperSize));
+        byte[] scopedGrowthIntervalHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.PopulationGrowthIntervalHelperVa,
+            checked((int)scopedInfo.PopulationGrowthIntervalHelperSize));
+        byte[] scopedLossPercentHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.PopulationLossPercentHelperVa,
+            checked((int)scopedInfo.PopulationLossPercentHelperSize));
+        byte[] scopedLossIntervalHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.PopulationLossIntervalHelperVa,
+            checked((int)scopedInfo.PopulationLossIntervalHelperSize));
+        byte[] scopedInitialGoldHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.InitialGoldHelperVa, checked((int)scopedInfo.InitialGoldHelperSize));
+
+        Check("ScopedTweakPatch 建立版本化 .cktw 與單人限定 manifest",
+            ScopedTweakPatch.IsApplied(scopedPatched) &&
+            scopedPe.FindSection(ScopedTweakPatch.SectionName) >= 0 &&
+            scopedInfo.Flags == ScopedTweakPatch.FlagSinglePlayerOnly &&
+            scopedInfo.Hooks == 8);
+        Check("ScopedTweakPatch command hook CALL 指向 .cktw helper",
+            scopedHook[0] == 0xE8 && scopedHook[^1] == 0x90 &&
+            helperTarget == scopedInfo.HelperVa);
+        Check("ScopedTweakPatch settlement 金錢/食物 hook 指向各自 helper",
+            goldHook[0] == 0xE8 && goldHook[^1] == 0x90 &&
+            foodHook[0] == 0xE8 &&
+            goldHelperTarget == scopedInfo.GoldHelperVa &&
+            foodHelperTarget == scopedInfo.FoodHelperVa);
+        Check("ScopedTweakPatch 人口四 hook 指向各自 helper",
+            growthAmountHook[0] == 0xE8 && growthAmountHook[^1] == 0x90 &&
+            growthIntervalHook[0] == 0xE8 && growthIntervalHook[^1] == 0x90 &&
+            lossPercentHook[0] == 0xE8 && lossPercentHook[^1] == 0x90 &&
+            lossIntervalHook[0] == 0xE8 && lossIntervalHook[^1] == 0x90 &&
+            growthAmountTarget == scopedInfo.PopulationGrowthAmountHelperVa &&
+            growthIntervalTarget == scopedInfo.PopulationGrowthIntervalHelperVa &&
+            lossPercentTarget == scopedInfo.PopulationLossPercentHelperVa &&
+            lossIntervalTarget == scopedInfo.PopulationLossIntervalHelperVa);
+        Check("ScopedTweakPatch 初始金錢 fallback hook 指向專用 helper",
+            initialGoldHook[0] == 0xE8 && initialGoldHook[^1] == 0x90 &&
+            initialGoldTarget == scopedInfo.InitialGoldHelperVa);
+        Check("ScopedTweakPatch helper 保存旗標/暫存器並回復後 RET",
+            scopedHelper.AsSpan(0, 7).SequenceEqual(new byte[] { 0x9C, 0x51, 0x52, 0x53, 0x56, 0x57, 0x55 }) &&
+            scopedHelper.AsSpan(scopedHelper.Length - 8).SequenceEqual(new byte[] { 0x5D, 0x5F, 0x5E, 0x5B, 0x5A, 0x59, 0x9D, 0xC3 }));
+        Check("ScopedTweakPatch helper 內含多人 fail-closed 與本機玩家來源",
+            ContainsSequence(scopedHelper, [0x8B, 0x0D, 0x8C, 0x1C, 0x8C, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x80, 0xB9, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x8B, 0x0D, 0xC8, 0xA6, 0x8A, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x8B, 0x89, 0xD0, 0x0C, 0x00, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x39, 0x8E, 0x6E, 0x00, 0x00, 0x00]));
+        Check("ScopedTweakPatch helper 以 definition CF/D0 分類 train/research",
+            ContainsSequence(scopedHelper, [0x80, 0xBA, 0xCF, 0x00, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x80, 0xBA, 0xD0, 0x00, 0x00, 0x00, 0x00]));
+        Check("ScopedTweakPatch command 設定表完整往返",
+            scopedInfo.Settings == commandSettings);
+        Check("ScopedTweakPatch 要塞/村莊敵我金錢與食物八 scope 完整往返",
+            scopedInfo.Production == productionSettings);
+        Check("ScopedTweakPatch 人口四參數各四 scope 完整往返",
+            scopedInfo.Population == populationSettings);
+        Check("ScopedTweakPatch 容量 enable 與金錢/食物/人口上限十二 scope 完整往返",
+            scopedInfo.Capacity == capacitySettings);
+        Check("ScopedTweakPatch 初始金錢 enable 與四 scope 完整往返",
+            scopedInfo.InitialGold == initialGoldSettings);
+        Check("ScopedTweakPatch settlement helper 保留原呼叫端堆疊/條件旗標語意",
+            scopedGoldHelper.AsSpan(scopedGoldHelper.Length - 9)
+                .SequenceEqual(new byte[] { 0x5D, 0x5F, 0x5E, 0x5B, 0x5A, 0x58, 0xC2, 0x04, 0x00 }) &&
+            scopedFoodHelper.AsSpan(scopedFoodHelper.Length - 9)
+                .SequenceEqual(new byte[] { 0x5D, 0x5F, 0x5E, 0x5B, 0x5A, 0x59, 0x85, 0xC0, 0xC3 }));
+        Check("ScopedTweakPatch settlement helper 以原版 32/36 欄位分要塞/村莊並用 +90 owner",
+            ContainsSequence(scopedGoldHelper, [0x8B, 0x56, 0x32, 0x85, 0xD2]) &&
+            ContainsSequence(scopedGoldHelper, [0x8B, 0x56, 0x36, 0x85, 0xD2]) &&
+            ContainsSequence(scopedGoldHelper, [0x39, 0x96, 0x90, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedFoodHelper, [0x39, 0x8E, 0x90, 0x00, 0x00, 0x00]));
+        Check("ScopedTweakPatch gold tick 以 owner*2+type 索引更新三種容量",
+            ContainsSequence(scopedGoldHelper, [0x8D, 0x1C, 0x5F]) &&
+            ContainsSequence(scopedGoldHelper, [0x89, 0x50, 0x0C]) &&
+            ContainsSequence(scopedGoldHelper, [0x89, 0x50, 0x10]) &&
+            ContainsSequence(scopedGoldHelper, [0x89, 0x56, 0x3A]));
+        Check("ScopedTweakPatch 初始金錢 helper 只取 constructor owner slot 並保留 class fallback",
+            ContainsSequence(scopedInitialGoldHelper, [0x8B, 0x8D, 0xEC, 0x03, 0x00, 0x00]) &&
+            ContainsSequence(scopedInitialGoldHelper, [0x8B, 0x5C, 0x24, 0x2C]) &&
+            ContainsSequence(scopedInitialGoldHelper, [0x69, 0xDB, 0x54, 0x02, 0x00, 0x00]) &&
+            ContainsSequence(scopedInitialGoldHelper, [0x8D, 0x9C, 0x18, 0xD4, 0x0C, 0x00, 0x00]) &&
+            scopedInitialGoldHelper.AsSpan(scopedInitialGoldHelper.Length - 5)
+                .SequenceEqual(new byte[] { 0x5B, 0x5A, 0x58, 0x9D, 0xC3 }));
+        Check("ScopedTweakPatch 人口 load helper 保存原 MOV 的旗標契約",
+            scopedGrowthAmountHelper.AsSpan(0, 4).SequenceEqual(new byte[] { 0x9C, 0x50, 0x53, 0x55 }) &&
+            scopedGrowthAmountHelper.AsSpan(scopedGrowthAmountHelper.Length - 5)
+                .SequenceEqual(new byte[] { 0x5D, 0x5B, 0x58, 0x9D, 0xC3 }) &&
+            scopedGrowthIntervalHelper.AsSpan(scopedGrowthIntervalHelper.Length - 5)
+                .SequenceEqual(new byte[] { 0x5D, 0x5B, 0x58, 0x9D, 0xC3 }) &&
+            scopedLossIntervalHelper.AsSpan(scopedLossIntervalHelper.Length - 5)
+                .SequenceEqual(new byte[] { 0x5D, 0x5B, 0x58, 0x9D, 0xC3 }));
+        Check("ScopedTweakPatch 人口流失比例重做原版 IMUL EDX,selectedPercent",
+            scopedLossPercentHelper.AsSpan(scopedLossPercentHelper.Length - 9)
+                .SequenceEqual(new byte[] { 0x0F, 0xAF, 0xD7, 0x5D, 0x5F, 0x5E, 0x5B, 0x58, 0xC3 }));
+        Check("ScopedTweakPatch 人口 helper 內含多人/type/owner 共用 scope 判定",
+            ContainsSequence(scopedGrowthAmountHelper, [0x80, 0xB8, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x39, 0x81, 0x90, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x41, 0x32, 0x85, 0xC0]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x41, 0x36, 0x85, 0xC0]));
+
+        byte[] scopedReapplied = ScopedTweakPatch.Apply(
+            scopedPatched, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings);
+        Check("ScopedTweakPatch 重複套用完全冪等", scopedReapplied.SequenceEqual(scopedPatched));
+
+        var updatedCommandSettings = commandSettings with
+        {
+            SelfTrainSpeedQ16 = 4u << 16,
+            EnemyResearchSpeedQ16 = 2u << 16
+        };
+        var updatedProductionSettings = productionSettings with
+        {
+            SelfTownhallGold = 96,
+            EnemyVillageFood = 10
+        };
+        var updatedPopulationSettings = populationSettings with
+        {
+            SelfTownhallGrowthAmount = 8,
+            EnemyVillageLossInterval = 12_000
+        };
+        var updatedCapacitySettings = capacitySettings with
+        {
+            SelfVillageMaxGold = 15_000,
+            EnemyTownhallMaxPopulation = 150
+        };
+        var updatedInitialGoldSettings = initialGoldSettings with
+        {
+            SelfTownhall = 7_500,
+            EnemyVillage = 250
+        };
+        byte[] scopedUpdated = ScopedTweakPatch.Apply(
+            scopedPatched, updatedCommandSettings, updatedProductionSettings,
+            updatedPopulationSettings, updatedCapacitySettings, updatedInitialGoldSettings);
+        Check("ScopedTweakPatch 已套用狀態可原地更新設定且 hook 不變",
+            !scopedUpdated.SequenceEqual(scopedPatched) &&
+            ScopedTweakPatch.ReadInfo(scopedUpdated).Settings == updatedCommandSettings &&
+            ScopedTweakPatch.ReadInfo(scopedUpdated).Production == updatedProductionSettings &&
+            ScopedTweakPatch.ReadInfo(scopedUpdated).Population == updatedPopulationSettings &&
+            ScopedTweakPatch.ReadInfo(scopedUpdated).Capacity == updatedCapacitySettings &&
+            ScopedTweakPatch.ReadInfo(scopedUpdated).InitialGold == updatedInitialGoldSettings &&
+            PeFile.Parse(scopedUpdated).ReadBytesAtVa(
+                ScopedTweakPatch.CommandDelaySiteVa,
+                ScopedTweakPatch.CommandDelayOriginal.Length).SequenceEqual(scopedHook));
+        Check("ScopedTweakPatch 更新後重套仍完全冪等",
+            ScopedTweakPatch.Apply(
+                scopedUpdated, updatedCommandSettings, updatedProductionSettings,
+                updatedPopulationSettings, updatedCapacitySettings, updatedInitialGoldSettings)
+                .SequenceEqual(scopedUpdated));
+
+        bool zeroSpeedRejected = false;
+        try { _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings with { SelfTrainSpeedQ16 = 0 }); }
+        catch (ArgumentOutOfRangeException) { zeroSpeedRejected = true; }
+        Check("ScopedTweakPatch 拒絕零速 Q16.16 避免除以零", zeroSpeedRejected);
+
+        bool unsafePopulationRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings with { SelfVillageGrowthInterval = 99 });
+        }
+        catch (ArgumentOutOfRangeException) { unsafePopulationRejected = true; }
+        Check("ScopedTweakPatch 拒絕低於安全下限的人口週期", unsafePopulationRejected);
+
+        bool unsafeCapacityRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings, capacitySettings with { SelfVillageMaxPopulation = 0 }, initialGoldSettings);
+        }
+        catch (ArgumentOutOfRangeException) { unsafeCapacityRejected = true; }
+        Check("ScopedTweakPatch 拒絕零人口容量", unsafeCapacityRejected);
+
+        byte[] capacityDisabledPatched = ScopedTweakPatch.Apply(
+            scopedVanilla, commandSettings, productionSettings, populationSettings,
+            ScopedTweakPatch.CapacitySettings.Disabled, ScopedTweakPatch.InitialGoldSettings.Disabled);
+        Check("ScopedTweakPatch 容量 disabled 明確保留地圖 instance 值",
+            !ScopedTweakPatch.ReadInfo(capacityDisabledPatched).Capacity.Enabled);
+
+        bool unsafeInitialGoldRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings, capacitySettings,
+                initialGoldSettings with { EnemyTownhall = 100_000_001 });
+        }
+        catch (ArgumentOutOfRangeException) { unsafeInitialGoldRejected = true; }
+        Check("ScopedTweakPatch 拒絕超限初始金錢", unsafeInitialGoldRejected);
+
+        byte[] scopedMixed = (byte[])scopedPatched.Clone();
+        PeFile scopedMixedPe = PeFile.Parse(scopedMixed);
+        scopedMixedPe.WriteBytesAtVa(ScopedTweakPatch.CommandDelaySiteVa, [0x90]);
+        bool scopedMixedRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(scopedMixedPe.ToBytes()); }
+        catch (InvalidOperationException) { scopedMixedRejected = true; }
+        Check("ScopedTweakPatch 拒絕遭修改的混合 hook 狀態", scopedMixedRejected);
+
+        byte[] populationHookMixed = (byte[])scopedPatched.Clone();
+        PeFile populationHookMixedPe = PeFile.Parse(populationHookMixed);
+        populationHookMixedPe.WriteBytesAtVa(ScopedTweakPatch.PopulationLossIntervalSiteVa, [0x90]);
+        bool populationHookMixedRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(populationHookMixedPe.ToBytes()); }
+        catch (InvalidOperationException) { populationHookMixedRejected = true; }
+        Check("ScopedTweakPatch 拒絕遭修改的人口 hook 狀態", populationHookMixedRejected);
+
+        byte[] scopedHelperTampered = (byte[])scopedPatched.Clone();
+        PeFile helperTamperedPe = PeFile.Parse(scopedHelperTampered);
+        helperTamperedPe.WriteBytesAtVa(scopedInfo.HelperVa, [0x90]);
+        bool helperTamperRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(helperTamperedPe.ToBytes()); }
+        catch (InvalidOperationException) { helperTamperRejected = true; }
+        Check("ScopedTweakPatch 拒絕遭修改的 helper payload", helperTamperRejected);
+
+        byte[] scopedRestored = ScopedTweakPatch.Reverse(scopedPatched);
+        Check("ScopedTweakPatch 反轉後逐位元組等於原版",
+            scopedRestored.SequenceEqual(scopedVanilla) && ScopedTweakPatch.IsOriginal(scopedRestored));
+
         Check("四種 Tweak 型別均已移植",
             Tweaks.All.Any(t => t is AttrTweak) &&
             Tweaks.All.Any(t => t is IniTweak) &&
@@ -3093,6 +3403,9 @@ internal static class Program
 
     #region Fixture Helpers
 
+    private static bool ContainsSequence(byte[] haystack, byte[] needle) =>
+        haystack.AsSpan().IndexOf(needle) >= 0;
+
     /// <summary>
     /// 建立結構完整、具備真實位址映射之合成 32 位元 Celtic kings.exe 檔案。
     /// </summary>
@@ -3181,6 +3494,32 @@ internal static class Program
             binding.Prefix.CopyTo(pe.AsSpan(binding.ImmOffset - binding.Prefix.Length, binding.Prefix.Length));
             BitConverter.TryWriteBytes(pe.AsSpan(binding.ImmOffset, 4), binding.Vanilla);
         }
+
+        // E. Scoped Tweak command-delay scheduler 原版指令
+        int scopedDelayOff = (int)(ScopedTweakPatch.CommandDelaySiteVa - 0x00400000);
+        ScopedTweakPatch.CommandDelayOriginal.CopyTo(
+            pe.AsSpan(scopedDelayOff, ScopedTweakPatch.CommandDelayOriginal.Length));
+        int scopedGoldOff = (int)(ScopedTweakPatch.GoldProductionSiteVa - 0x00400000);
+        ScopedTweakPatch.GoldProductionOriginal.CopyTo(
+            pe.AsSpan(scopedGoldOff, ScopedTweakPatch.GoldProductionOriginal.Length));
+        int scopedFoodOff = (int)(ScopedTweakPatch.FoodProductionSiteVa - 0x00400000);
+        ScopedTweakPatch.FoodProductionOriginal.CopyTo(
+            pe.AsSpan(scopedFoodOff, ScopedTweakPatch.FoodProductionOriginal.Length));
+        int scopedGrowthAmountOff = (int)(ScopedTweakPatch.PopulationGrowthAmountSiteVa - 0x00400000);
+        ScopedTweakPatch.PopulationGrowthAmountOriginal.CopyTo(
+            pe.AsSpan(scopedGrowthAmountOff, ScopedTweakPatch.PopulationGrowthAmountOriginal.Length));
+        int scopedGrowthIntervalOff = (int)(ScopedTweakPatch.PopulationGrowthIntervalSiteVa - 0x00400000);
+        ScopedTweakPatch.PopulationGrowthIntervalOriginal.CopyTo(
+            pe.AsSpan(scopedGrowthIntervalOff, ScopedTweakPatch.PopulationGrowthIntervalOriginal.Length));
+        int scopedLossPercentOff = (int)(ScopedTweakPatch.PopulationLossPercentSiteVa - 0x00400000);
+        ScopedTweakPatch.PopulationLossPercentOriginal.CopyTo(
+            pe.AsSpan(scopedLossPercentOff, ScopedTweakPatch.PopulationLossPercentOriginal.Length));
+        int scopedLossIntervalOff = (int)(ScopedTweakPatch.PopulationLossIntervalSiteVa - 0x00400000);
+        ScopedTweakPatch.PopulationLossIntervalOriginal.CopyTo(
+            pe.AsSpan(scopedLossIntervalOff, ScopedTweakPatch.PopulationLossIntervalOriginal.Length));
+        int scopedInitialGoldOff = (int)(ScopedTweakPatch.InitialGoldSiteVa - 0x00400000);
+        ScopedTweakPatch.InitialGoldOriginal.CopyTo(
+            pe.AsSpan(scopedInitialGoldOff, ScopedTweakPatch.InitialGoldOriginal.Length));
 
         return pe;
     }

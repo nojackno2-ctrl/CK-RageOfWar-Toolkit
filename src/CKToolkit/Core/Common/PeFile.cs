@@ -34,7 +34,10 @@ public sealed class PeSection
 public sealed class PeFile
 {
     public const ushort ImageFileLargeAddressAware = 0x0020;
+    public const uint ImageScnCntCode = 0x00000020;
+    public const uint ImageScnCntInitializedData = 0x00000040;
     public const uint ImageScnCntUninitializedData = 0x00000080;
+    public const uint ImageScnMemExecute = 0x20000000;
     public const uint ImageScnMemRead = 0x40000000;
     public const uint ImageScnMemWrite = 0x80000000;
 
@@ -356,10 +359,36 @@ public sealed class PeFile
     /// <summary>
     /// 移除指定名稱之節區（供 HiRes .ckhr 節區還原使用）。
     /// </summary>
-    public bool RemoveSection(string name)
+    public bool RemoveSection(string name, int? truncateToLength = null)
     {
         int index = FindSection(name);
         if (index < 0) return false;
+
+        if (truncateToLength is int requestedLength)
+        {
+            if (requestedLength < 0 || requestedLength > _data.Length)
+                throw new ArgumentOutOfRangeException(nameof(truncateToLength));
+
+            // 截尾只能移除附加在原檔尾端的 raw payload／對齊 padding；不得切到任何仍保留
+            // 的節區。這是 .cktw 之類含機器碼 raw section 能精確反轉的必要保護。
+            foreach (PeSection section in _sections)
+            {
+                if (ReferenceEquals(section, _sections[index]) || section.SizeOfRawData == 0)
+                    continue;
+
+                ulong rawEnd = (ulong)section.PointerToRawData + section.SizeOfRawData;
+                if (rawEnd > (ulong)requestedLength)
+                    throw new InvalidOperationException(
+                        $"無法把 PE 截短至 {requestedLength} 位元組：仍保留的節區 {section.Name} raw data 結束於 {rawEnd}。"
+                    );
+            }
+
+            PeSection removed = _sections[index];
+            if (removed.SizeOfRawData > 0 && removed.PointerToRawData < (uint)requestedLength)
+                throw new InvalidOperationException(
+                    $"無法把 PE 截短至 {requestedLength} 位元組：節區 {removed.Name} 的 raw data 並非附加在原檔尾端。"
+                );
+        }
 
         // 將目標 Section Header (40 位元組) 清零
         int h = _sections[index].HeaderOffset;
@@ -392,6 +421,9 @@ public sealed class PeFile
             if (top > maxRvaTop) maxRvaTop = top;
         }
         BitConverter.TryWriteBytes(_data.AsSpan(SizeOfImageOffset, 4), maxRvaTop);
+
+        if (truncateToLength is int originalLength && originalLength != _data.Length)
+            Array.Resize(ref _data, originalLength);
 
         // 重新解析快取
         Parse();

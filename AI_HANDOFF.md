@@ -14,13 +14,49 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 最新進度：10× 原廠數值對照實機通過，揭露 manifest／verify 假相符 (2026-08-24)
+## 最新進度：釐清永久 Tweak 的敵我／聚落分流需求（2026-08-24）
+
+- 使用者要拆分的是「遊戲設定」寫入 `data.pak` 的永久 Tweak，不是按鍵作弊 `production_boost`；先前針對熱鍵層的未提交嘗試已完整撤回，未留在程式碼 diff。
+- 現有永久 Tweak 分成全域 `VXCONST.INI` 常數、全域 `COMMANDS.XML` 指令與敵我共用的 `CLASSES/*.SC.XML` 類別資料。只增加 GUI／設定欄位無法讓敵我或要塞／村莊真正讀到不同值。
+- 若只拆永久金錢／食物生產率，需要對 EXE 的聚落收入計算路徑做版本專屬修補，依 settlement 類型與 owner 選值；若要求全部永久 Tweak 都分敵我，則是多個不同引擎 hook 的大型逆向工程，兩者範圍不可混為一談，待使用者確認目標。
+- 使用者已確認選擇完整範圍：「全部都分開」。已登記 `ISSUE-049`（🔴 逆向工程中）。
+- 外部委派額度檢查結果：Codex 需 account authentication、AGY 無法取得 language-server CSRF token、Claude usage endpoint 連線失敗；三者均為 unavailable，依 <=10%／unavailable 禁用規則，本輪未啟動任何外部 agent 或付費 API fallback。
+- 初步 Steam EXE 證據：聚落生產率是每實例 `Settlement+0x32/+0x36`（建構寫入點 `0x00501256/0x0050126B`）；人口成長／流失 `0x00502690/0x005026E0` 執行時已有 `Settlement*`，這兩類可 owner-aware。英雄／戰鬥屬性／command delay 需各自 hook；每單位 VS behavior 因高物件數腳本負擔已排除。
+- 第二輪證據已寫入 `docs/scoped-tweaks-design.md`：`0x004F1070` 把 class 血量／視野／攻防複製到 instance；owner 核心 `0x004F4760` 的建築／聚落子物件／單位英雄呼叫點為 `0x004D6070`、`0x00503005`、`0x0050CD1D`，可用少量 owner-change hook 重算大部分永久屬性。英雄 `max_army` 是 class `+0x288` → instance `+0x198`。
+- command parser 已定位 `traincommand 0x005514C0`、`researchcommand 0x0055152B`、`execdelay 0x005518B0`；真正 owner-aware 排程讀取點尚未定位，所以目前沒有寫入 EXE、沒有新增 GUI 假欄位，也未更動真實遊戲目錄。
+- 使用者新增硬需求：多人遊戲整組禁用 scoped 永久 Tweak。已定位原廠 `IsMultiplayer` handler `0x005983D0`，判斷資料為 `[[0x008C1C8C]+0x50]+0x108` 連線玩家 bitmask；多人時所有 scoped helper 必須 no-op 並走原版，不提供 fixed-player 例外。這也代表 scoped 模式不能再把差異值全域寫入 data.pak。
+- 續作逆向已定位 command 真正排程點：`0x004FB6A8` 由 command instance `+0x1C` 取得 definition，`0x004FB6AB` 讀 `definition+0xF4 (execdelay)`；此時 `ESI` 為發令物件，原廠接著把 `now`／`now+delay` 寫入 `ESI+0xDC/+0xE0`。訓練與研究可由單一 owner-aware hook 分流，不需改共享 `COMMANDS.XML`。
+- `.cktw` 需要 raw executable section；原 `PeFile.RemoveSection()` 只移除 header，無法截掉 raw payload。已擴充可選 `truncateToLength` 的安全截尾，拒絕切到任何保留節區，並在 SelfTest Group 3 加入 `.cktw` raw payload 套用／危險截尾拒絕／逐位元組反轉測試。
+- 上述 `.cktw` 可逆底座已驗證：`dotnet build CKToolkit.sln --no-restore` 0 warning / 0 error；完整 SelfTest 39 組全綠，新加入 5 項 raw executable section 檢查均通過。
+- 新發現 `ISSUE-050`：`wagon_build_time` 目前是 no-op。`WagonBuildTime` 只存在 VXCONST／marker，EXE 與所有 VS 腳本沒有讀取；`0x00517430/0x00517630 -> 0x00517010` 直接建立騾車，四個 create-mule command 也沒有 execdelay。scoped command hook 必須提供真實路徑或移除此項。
+- 已新增 `ScopedTweakPatch.cs` 第一階段 scaffold（尚未接入正式 Pipeline／GUI）：格式 v1 `.cktw` header 保存原始檔長度、payload/helper/config 位移、hook manifest 與 single-player-only flag；`0x004FB6AB` 改為 CALL `.cktw` helper，helper 目前仍是語意等價的 `mov eax,[edx+F4]; ret`。設定表含 self/enemy train/research Q16.16 速度及 wagon 毫秒。
+- SelfTest Group 32 新增 7 項：原版辨識、版本化 manifest、CALL 目標、設定表往返、重套冪等、混合 hook 拒絕、逐位元組反轉。`dotnet build CKToolkit.sln --no-restore` 0 warning / 0 error；完整 SelfTest 39 組全綠。Steam 遊戲目錄仍零寫入。
+- command parser/finalize 的 stack 位移已逐指令對齊：definition `+0xCF=traincommand`、`+0xD0=researchcommand`、`+0xD1=immediate`，不需維護 65 筆名稱表。
+- `.cktw` command helper 已由語意 no-op 升級：保存 EFLAGS/非 EAX 暫存器，先讀原版 delay；game/session/local-player 缺失、multiplayer mask 非零或非 train/research 時 fail-closed 返回原值；單人時用 `ESI+0x6E` 對本機玩家分 self/enemy，再以 64-bit numerator 的 Q16.16 除法縮放，含 overflow clamp、零倍率拒絕與最小 1 tick。
+- 已套用 `.cktw` 可只更新 config 而不重建 section/hook；`IsApplied`/Reverse 會重建並逐位元組驗證 helper，payload 遭改時拒絕猜測還原。`dotnet build CKToolkit.sln --no-restore` 0 warning / 0 error；完整 SelfTest 39 組全綠，Group 32 新增多人/owner/flag、設定更新、零倍率與 helper tamper 檢查。仍未接入 TrainerModule／Pipeline／GUI，Steam 遊戲目錄零寫入。
+- 下一步：實作要塞／村莊的金錢與食物四 scope settlement production hook，再處理人口、英雄／單位屬性、騾車真實 delay 等剩餘永久 Tweak；全部完成前不得接入 TrainerModule。
+- 要塞／村莊 production 已完成 `.cktw` 合成層：原版 `BaseTownhall` 為 gold=1/food=0、`BaseVillage` 為 gold=0/food=1；保留 instance `+0x32/+0x36` 作穩定分型，不寫入物件。`0x00502750` gold hook 以 helper `ret 4` 保留原 `add esp,4`，`0x00502828` food hook 返回前重做 `test eax,eax`。兩者以 `Settlement+0x90` 對 local-player pointer 分敵我，multiplayer/缺指標/非兩型皆用原值；佔領後下一 income tick 自然切 scope。
+- `.cktw` manifest 現有 3 hooks，config 14 欄（command 6 + self/enemy × townhall/village × gold/food 8）。合成測試驗證三個 CALL target、呼叫端 stack/flags 契約、scope 位移、設定更新、tamper 拒絕與逐位元組反轉；另將三段 helper（242/192/188 bytes）交由 `rz-asm` 完整解碼，所有相對跳轉皆落在合法指令邊界。最新 build 0 warning/0 error、SelfTest 39 組全綠；仍未接入 Pipeline/GUI、未寫 Steam 目錄。
+- 下一步改為人口成長／流失、聚落容量／初始值，再依序處理英雄與單位屬性、騾車真實 delay；全部完成前不得接入 TrainerModule。
+- 真實 Steam EXE 亦已做純記憶體 Apply/Reverse：原檔 3,516,344 bytes、套用後 3,522,560 bytes，反轉後 byte-exact，SHA-256 前後均 `E27066F82510DA7B400FB341906B86B5CFFF1795BA1C2D76CFF48D07C070C440`；沒有寫回遊戲目錄。
+- 人口四項精確全域讀取點已定位：growth amount `0x005026B6`、growth interval `0x005026C7`、loss percent `0x005026EF`、loss interval `0x00502716`。四處皆仍持有 `ECX=Settlement*`，可沿用 production 的 multiplayer/type/owner scope 判定。
+- 人口四項已實作進 `.cktw`：每項皆為 self/enemy × townhall/village 四 scope，共新增 16 config；manifest 現為 7 hooks／30 config。growth amount/兩個 interval helper 保存原 MOV 的 EFLAGS 並回傳 ESI/EDX；loss percent helper 最後執行等價 `imul edx,edi`。所有 helper 在多人／缺指標／非 townhall-village 時用原全域值。
+- 新增人口範圍驗證、四 CALL targets、30 欄 roundtrip/config-update、MOV flags、IMUL、人口 hook tamper 與 byte-exact reverse 測試；四段人口 helper（187/187/192/187 bytes）已由 `rz-asm` 完整解碼。build 0 warning/0 error、SelfTest 39 組全綠。
+- 真實 Steam EXE 以 7 hooks／30 config 再做純記憶體 Apply/Reverse：3,516,344 → 3,522,560 bytes，反轉 byte-exact，SHA-256 仍為 `E27066F82510DA7B400FB341906B86B5CFFF1795BA1C2D76CFF48D07C070C440`，磁碟零寫入。
+- 下一步：聚落容量／初始資源／人口上限的 instance 路徑，之後處理英雄與單位屬性、騾車真實 delay；全部完成前仍不得接入 TrainerModule／Pipeline／GUI。
+- 聚落容量已加入既有 gold income helper：resource object `+0x0C/+0x10` 是 max_gold/max_food，中央建築 `+0x3A` 是 max_population；capacity enable 時依 owner*2+type 索引更新，disabled 完全不寫，保留地圖 instance override。容量共 enable+12 config，owner capture 後下一 income tick 切換。
+- 初始金錢安全 hook 為 `0x0050132E` 的 class fallback `mov ecx,[ebp+0x3EC]`；只在 map/save current-gold override 為 `-1` 時到達，因此不重設讀檔或地圖明確金錢。helper 取 caller owner slot，按 `base+0xCD4+slot*0x254` 取得 owner pointer，再分四 scope；invalid slot／multiplayer 走 class 原值。
+- `.cktw` 現為 8 hooks／48 config。gold+capacity helper 182 bytes、initial-gold helper 158 bytes，均由 `rz-asm` 完整解碼；新增 enable/roundtrip/update/range/stack-formula 測試。build 0 warning/0 error、SelfTest 39 組全綠。
+- 真實 Steam EXE 以 8 hooks／48 config 純記憶體 Apply/Reverse：3,516,344 → 3,522,560 bytes，反轉 byte-exact，SHA-256 `E27066F82510DA7B400FB341906B86B5CFFF1795BA1C2D76CFF48D07C070C440`，磁碟零寫入。
+- 下一步：英雄與單位 instance 血量／視野／攻防、英雄 max_army，再處理仍由 class 即時讀取的 speed/feeds 與騾車真實 delay；全部完成前仍不接 Pipeline/GUI。
+
+## 歷史進度：10× 原廠數值對照實機通過，揭露 manifest／verify 假相符 (2026-08-24)
 
 - 使用者以分析器 10× 完成兩場單人遊戲並正常結束：`16-08-18_launch` 177 秒／峰值 8,187 物件，`16-28-53_launch` 503 秒／峰值 9,770 物件；兩場均無遊戲碼 AV、無 ckcrash，物件 born/died 與 frames 持續前進。
 - 直接解析 Steam `data.pak\CKTRAINER.TXT` 確認真實遊戲為 `tweaks: {}`、唯一作弊 `diagnose`；`SCDEBUG.XML` 只有 F10 診斷與原廠速度鍵。這兩場確實是原廠數值對照組。
 - `ckrun-config.txt` 卻錯列極端 tweak／不存在的作弊；磁碟設定同樣與真實 PAK 不同，但 `verify --json` 仍回 `allMatchesConfig=true`。根因是 `RunManifest` 印設定物件、`verify` 只比較 `trainer_marker` 名稱，不比較 `TrainerMarker.Cheats/Tweaks` payload。已登記 `ISSUE-048` 為 🔴。
 - 上一場 843 次 first-chance 例外耗盡 20 份外部快照、真正致命 `0x00553180` 無外部 JSON 的取證缺口，已登記 `ISSUE-047` 為 🔴。
-- `ISSUE-002`、`ISSUE-022`、`ISSUE-026` 已依真實遊戲 log 升為 🟢 實機驗收；`ISSUE-017` 因本次未觸發 VM 修復，仍維持 🟡。
+- `ISSUE-002`、`ISSUE-022`、`ISSUE-026` 已依真實遊戲 log 升為 ✅ 實機驗收；`ISSUE-017` 因本次未觸發 VM 修復，仍維持 ⏳。
 
 ## 歷史進度：分析器完整記憶體預設開啟 (2026-08-24)
 
@@ -70,7 +106,7 @@
 - **資產完整性與測試覆蓋**：
   - `ISSUE-031` / `ISSUE-033` / `ISSUE-043`：`.gitignore` 排除 `*.cksave`；`SelfTest` 新增各項邊界回歸測試與 `ckperf.dll` SHA256 完整性斷言。
   - Release managed build 0 warning / 0 error，SelfTest 39 組全綠通過。
-  - 18 項問題全數標記為 `🟡 已修碼 · 待實測` 並登記於 `ISSUES.md` 待實測看板。
+  - 18 項問題全數標記為 `⏳ 已修碼 · 待實測` 並登記於 `ISSUES.md` 待實測看板。
 
 ## 歷史進度：完整專案稽核進行中，發現未知組建仍可寫入 (2026-08-23)
 
@@ -1709,7 +1745,7 @@ py -3 tools/perf/find_vm_lvalue_stores.py                            # 掃「解
 
 ## 同一天的修復輪：先把診斷層自己的洞補起來（2026-08-22 21:5x）
 
-上一節列的順序照做了。**四項已修碼、建置全過，但一律只能標 🟡 待實測——這一輪沒有
+上一節列的順序照做了。**四項已修碼、建置全過，但一律只能標 ⏳ 待實測——這一輪沒有
 任何實機測試。** 唯一還開著的是 ISSUE-017（腳本 VM 左值），那是止血都還沒做的。
 
 | 項目 | 檔案 | 做了什麼 |
@@ -1838,7 +1874,7 @@ pid 27096 存活 200.2 秒，最高 35,764 個物件；08:57:30.757–08:57:32.4
    EIP 0／`ckperf.dll+0x23FE`；最高編號 `ckcrash` 必須完整。
 3. 外部摘要必須指向退出前最後候選，並保留「候選／需完整序列判讀」措辭。
 
-依 ISSUES 規則三項均標為 🟡 已修碼、待實測；未 commit/push。
+依 ISSUES 規則三項均標為 ⏳ 已修碼、待實測；未 commit/push。
 
 ### 使用者追問「3 萬是不是物件上限、能不能提高」
 
@@ -1984,7 +2020,7 @@ use-after-free，所以不能把引擎生命週期 bug 全歸因於修改器。�
 - 分析器保留獨立入口，主要按鈕移到頁首並明寫「帶分析器啟動遊戲」；附加／等待模式顯示對應文字。完整 profiler／dump 工作流沒有與日常啟動混在一起。
 - 新增 `TrainerRisk.cs`、`PerfConfig.stabilityProtection/experimentalStability`、三種診斷 guard 清單與 `RunManifest` 記錄。三語鍵集均為 310。
 - 最終本地驗證：Managed build 0 warning / 0 error，SelfTest 38 組全綠；實際 GUI 小視窗目視檢查通過。沒有在版面檢查時啟動遊戲。
-- `ISSUE-027` 已登記為 🟡：仍須在真實遊戲分別驗證已驗證／實驗性／停用三種日常啟動，並再確認分析器完整流程。尚未 push；提交狀態以 Git history 為準。
+- `ISSUE-027` 已登記為 ⏳：仍須在真實遊戲分別驗證已驗證／實驗性／停用三種日常啟動，並再確認分析器完整流程。尚未 push；提交狀態以 Git history 為準。
 
 
 ## 2026-08-24 10× 原廠數值對照組實機結果
