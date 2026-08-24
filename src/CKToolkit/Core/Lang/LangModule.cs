@@ -62,7 +62,10 @@ public sealed class LangModule : IPatchModule
         if (pack is not null)
         {
             LangInstaller.Install(pak, pack, config.Lang.FontFace);
+            return;
         }
+
+        throw new InvalidOperationException($"Language pack '{packId}' was not found or is invalid.");
     }
 
     /// <summary>

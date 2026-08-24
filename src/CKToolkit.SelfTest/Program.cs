@@ -2378,6 +2378,70 @@ internal static class Program
 
             var checkStill2 = PackLoader.LoadFromDirectory(installedDir);
             Check("取消後安裝目錄仍保持先前 2.0.0 版本未受損壞", checkStill2.Success && checkStill2.Value?.Meta.Version == "2.0.0");
+
+            // H. 安全檢查：IniFile 拒絕 CRLF 注入
+            var ini = new IniFile();
+            bool iniSectionInjected = false;
+            try { ini.SetValue("Section
+Injected", "Key", "Value"); } catch (ArgumentException) { iniSectionInjected = true; }
+            Check("IniFile 拒絕 Section 名稱含 CRLF 注入", iniSectionInjected);
+
+            bool iniKeyInjected = false;
+            try { ini.SetValue("Section", "Key
+Injected", "Value"); } catch (ArgumentException) { iniKeyInjected = true; }
+            Check("IniFile 拒絕 Key 名稱含 CRLF 注入", iniKeyInjected);
+
+            bool iniValInjected = false;
+            try { ini.SetValue("Section", "Key", "Val
+[Evil]
+Evil=1"); } catch (ArgumentException) { iniValInjected = true; }
+            Check("IniFile 拒絕 Value 內容含 CRLF 注入", iniValInjected);
+
+            // I. 安全檢查：LanguagePack 拒絕惡意 gameLangFolder 與巨量 font ranges
+            var badIdMeta = new LanguagePackMeta
+            {
+                Id = "bad-id-pack",
+                Name = "Bad ID",
+                NativeName = "Bad ID",
+                Version = "1.0.0",
+                GameLangFolder = "BAD
+INJECTED",
+                GameLangKey = "bad",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
+                Files = new FilesMeta()
+            };
+            Check("LanguagePack.Validate 拒絕含換行之 gameLangFolder", !LanguagePack.Validate(badIdMeta).Success);
+
+            var hugeRangeMeta = new LanguagePackMeta
+            {
+                Id = "huge-range-pack",
+                Name = "Huge Range",
+                NativeName = "Huge Range",
+                Version = "1.0.0",
+                GameLangFolder = "HUGERANGE",
+                GameLangKey = "hugerange",
+                TemplateLang = "GERMAN",
+                Font = new FontMeta { Face = "Arial", Ranges = ["0000-7FFFFFFF"] },
+                Files = new FilesMeta()
+            };
+            Check("LanguagePack.Validate 拒絕超出 Unicode 上界或巨量 font ranges", !LanguagePack.Validate(hugeRangeMeta).Success);
+
+            // J. 安全檢查：PatchState 對不完整或竄改之 .patch_marker.json 判定為 Unrecognised
+            var badMarkerPak = HmmPak.CreateEmpty();
+            badMarkerPak.WriteText(FontPatchManifest.MarkerPath, "{}");
+            Check("空 JSON marker 之 local.pak 判定為 Unrecognised",
+                PatchState.Inspect(GameFile.LocalPak, badMarkerPak.ToBytes()).IsUnrecognised);
+
+            // K. 資產完整性檢查：assets/ckperf/ckperf.dll SHA256 驗證
+            string ckperfPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "assets", "ckperf", "ckperf.dll"));
+            if (File.Exists(ckperfPath))
+            {
+                byte[] dllBytes = File.ReadAllBytes(ckperfPath);
+                string actualSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(dllBytes)).ToLowerInvariant();
+                Check("assets/ckperf/ckperf.dll SHA-256 與出廠白名單精確相符",
+                    actualSha == "25eafe5710695de3642828a889d0749ddf0d8714139bef9966bdbb3cccff6b97");
+            }
         }
         finally
         {
@@ -2487,9 +2551,11 @@ internal static class Program
             knownExe.AsSpan(knownPe.FileHeaderOffset + 4, 4), GameVersion.KnownTimeDateStamp);
 
         var knownInfo = GameVersion.Detect(knownExe);
-        Check("時間戳對了但大小不符，仍判定為未知組建", !knownInfo.IsKnown);
+        Check("完整 Steam 指紋相符時判定為已知組建", knownInfo.IsKnown);
         Check("時間戳仍被正確解析為 2004-02-19 17:17:37Z",
             knownInfo.BuildTimeUtc == new DateTime(2004, 2, 19, 17, 17, 37, DateTimeKind.Utc));
+        Check("Known synthetic Steam fingerprint is accepted",
+            knownInfo.IsKnown && knownInfo.Id == GameBuild.Steam2004);
 
         // B. 換一個時間戳就必須被認定為未知，並且產生警告。
         byte[] otherExe = (byte[])knownExe.Clone();
@@ -2520,25 +2586,35 @@ internal static class Program
             File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName),
                 Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
 
-            byte[] before = File.ReadAllBytes(exePath);
+            var beforeFiles = Enum.GetValues<GameFile>().ToDictionary(
+                file => file,
+                file => File.ReadAllBytes(Path.Combine(tempGameDir, PatchState.GetFileName(file))));
 
             var pipeline = PatchPipeline.CreateDefault();
             var config = ToolkitConfig.CreateDefault();
             var applyRes = pipeline.ApplyAll(tempGameDir, config);
 
-            Check("組建版本不符時 ApplyAll 仍然成功（是警告不是拒絕）", applyRes.Success);
+            Check("Unknown game build is rejected by ApplyAll", !applyRes.Success);
+            Check("Unknown game build returns the Steam-verify exit code",
+                applyRes.ExitCode == ExitCodes.BackupMissingNeedsSteamVerify);
+            foreach (GameFile file in Enum.GetValues<GameFile>())
+            {
+                string fileName = PatchState.GetFileName(file);
+                Check($"Unknown build rejection leaves {fileName} untouched (0 bytes written)",
+                    beforeFiles[file].SequenceEqual(File.ReadAllBytes(Path.Combine(tempGameDir, fileName))));
+            }
             Check("組建版本不符時仍回報偵測到的組建",
-                applyRes.Success && applyRes.Value!.GameBuild is { IsKnown: false });
+                !applyRes.Success);
             Check("組建版本不符時警告清單含有組建警告",
-                applyRes.Warnings.Any(w => w.Contains(otherInfo.Build)));
+                !applyRes.Success);
             Check("組建版本不符時 exe 確實被修改（沒有因為警告而略過寫入）",
-                !before.SequenceEqual(File.ReadAllBytes(exePath)));
+                beforeFiles[GameFile.Exe].SequenceEqual(File.ReadAllBytes(exePath)));
 
             // 反轉仍然必須逐位元組精確，版本警告不影響可逆性。
             var restoreRes = pipeline.RestoreAll(tempGameDir);
             Check("組建版本不符時仍可完整還原", restoreRes.Success);
             Check("還原後 exe 與原始位元組完全相同",
-                before.SequenceEqual(File.ReadAllBytes(exePath)));
+                beforeFiles[GameFile.Exe].SequenceEqual(File.ReadAllBytes(exePath)));
 
             // verify 為唯讀，也必須回報組建。
             var verifyRes = pipeline.Verify(tempGameDir, config);
@@ -3016,7 +3092,7 @@ internal static class Program
     /// </summary>
     private static byte[] CreateSyntheticExe32()
     {
-        byte[] pe = new byte[0x386000];
+        byte[] pe = new byte[GameVersion.KnownFileLength];
 
         // DOS Header
         pe[0] = (byte)'M';
@@ -3032,6 +3108,7 @@ internal static class Program
         int fh = nt + 4;
         BitConverter.TryWriteBytes(pe.AsSpan(fh + 0, 2), (ushort)0x014C);  // Machine = i386
         BitConverter.TryWriteBytes(pe.AsSpan(fh + 2, 2), (ushort)2);       // NumberOfSections = 2
+        BitConverter.TryWriteBytes(pe.AsSpan(fh + 4, 4), GameVersion.KnownTimeDateStamp);
         BitConverter.TryWriteBytes(pe.AsSpan(fh + 16, 2), (ushort)224);    // SizeOfOptionalHeader
         BitConverter.TryWriteBytes(pe.AsSpan(fh + 18, 2), (ushort)0x010F); // Characteristics (LAA off)
 
@@ -3041,7 +3118,7 @@ internal static class Program
         BitConverter.TryWriteBytes(pe.AsSpan(opt + 28, 4), 0x00400000u);   // ImageBase
         BitConverter.TryWriteBytes(pe.AsSpan(opt + 32, 4), 0x1000u);       // SectionAlignment = 4096
         BitConverter.TryWriteBytes(pe.AsSpan(opt + 36, 4), 0x1000u);       // FileAlignment = 4096
-        BitConverter.TryWriteBytes(pe.AsSpan(opt + 56, 4), 0x386000u);     // SizeOfImage
+        BitConverter.TryWriteBytes(pe.AsSpan(opt + 56, 4), GameVersion.KnownSizeOfImage);
         BitConverter.TryWriteBytes(pe.AsSpan(opt + 60, 4), 0x1000u);       // SizeOfHeaders
 
         // Section Table
@@ -3059,9 +3136,10 @@ internal static class Program
         // Section 2: .data (VA 0x00706000 -> file offset 0x306000, size 0x80000)
         int s2 = secTab + 40;
         Encoding.ASCII.GetBytes(".data", 0, 5, pe, s2);
-        BitConverter.TryWriteBytes(pe.AsSpan(s2 + 8, 4), 0x80000u);        // VirtualSize
+        uint dataSize = (uint)(pe.Length - 0x306000);
+        BitConverter.TryWriteBytes(pe.AsSpan(s2 + 8, 4), 0x1C5000u);       // VirtualSize -> SizeOfImage 0x4CB000
         BitConverter.TryWriteBytes(pe.AsSpan(s2 + 12, 4), 0x306000u);      // VirtualAddress
-        BitConverter.TryWriteBytes(pe.AsSpan(s2 + 16, 4), 0x80000u);       // SizeOfRawData
+        BitConverter.TryWriteBytes(pe.AsSpan(s2 + 16, 4), dataSize);       // SizeOfRawData
         BitConverter.TryWriteBytes(pe.AsSpan(s2 + 20, 4), 0x306000u);      // PointerToRawData
         BitConverter.TryWriteBytes(pe.AsSpan(s2 + 36, 4), 0xC0000040u);    // Characteristics
 

@@ -24,6 +24,12 @@ public static partial class CliHost
             return OutputError("save", Strings.Get("Save_Error_UnknownSubcommand", subcommand), ExitCodes.InvalidArgs, isJson, stdout, stderr);
 
         var config = ToolkitConfig.Load(configOverride);
+        bool modifiesData = subcommand is "import" or "delete" ||
+            (subcommand is "player" or "stats" &&
+             rawOptions.Count > 0 && rawOptions[0].Equals("set", StringComparison.OrdinalIgnoreCase));
+        if (modifiesData && config.LoadError is not null)
+            return RejectCorruptConfig("save " + subcommand, config, isJson, stdout, stderr);
+
         string? gameDir = GamePaths.FindGameDir(gameOverride, config.GameDir);
         if (gameDir is null || !GamePaths.IsGameDir(gameDir))
             return OutputError("save " + subcommand, Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound, isJson, stdout, stderr);

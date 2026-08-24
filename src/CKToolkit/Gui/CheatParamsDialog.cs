@@ -48,7 +48,7 @@ public sealed class CheatParamsDialog : Form
 
     private void InitializeUi()
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         string cheatTitle = isZh ? _cheat.Name : _cheat.Id;
         Text = Strings.Get("Gui_Trainer_DialogTitle", cheatTitle);
         StartPosition = FormStartPosition.CenterParent;
@@ -132,7 +132,7 @@ public sealed class CheatParamsDialog : Form
 
     private Control BuildGenericContent()
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -202,7 +202,7 @@ public sealed class CheatParamsDialog : Form
 
     private Control BuildSpawnUnitContent()
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -412,7 +412,7 @@ public sealed class CheatParamsDialog : Form
 
     private Control BuildSpawnItemContent()
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,

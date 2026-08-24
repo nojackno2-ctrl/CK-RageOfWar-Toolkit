@@ -33,6 +33,10 @@ public sealed class JsonEnvelope
 
     [JsonPropertyName("errors")]
     public List<string> Errors { get; set; } = [];
+
+    [JsonPropertyName("error")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Error { get; set; }
 }
 
 /// <summary>
@@ -59,6 +63,11 @@ public static partial class CliHost
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    private static readonly JsonSerializerOptions JsonLineOptions = new(JsonEnvelopeOptions)
+    {
+        WriteIndented = false
+    };
+
     /// <summary>
     /// CLI 主進入點。設定無 BOM UTF-8 編碼並執行指令。
     /// </summary>
@@ -78,7 +87,14 @@ public static partial class CliHost
         Console.SetOut(stdout);
         Console.SetError(stderr);
 
-        return Execute(args, stdout, stderr);
+        try
+        {
+            return Execute(args, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            return OutputUnhandled(args, ex, stdout, stderr);
+        }
     }
 
     private static void EnsureConsole()
@@ -93,6 +109,18 @@ public static partial class CliHost
     /// 執行 CLI 指令並輸出至指定 TextWriter（便於單元測試與自我測試）。
     /// </summary>
     public static int Execute(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        try
+        {
+            return ExecuteCore(args, stdout, stderr);
+        }
+        catch (Exception ex)
+        {
+            return OutputUnhandled(args, ex, stdout, stderr);
+        }
+    }
+
+    private static int ExecuteCore(string[] args, TextWriter stdout, TextWriter stderr)
     {
         bool isJson = false;
         string? gameDirOverride = null;
@@ -402,6 +430,8 @@ public static partial class CliHost
     private static int HandleApply(string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr, string commandName = "apply")
     {
         var config = ToolkitConfig.Load(configOverride);
+        if (config.LoadError is not null)
+            return RejectCorruptConfig(commandName, config, isJson, stdout, stderr);
         string? gameDir = GamePaths.FindGameDir(gameOverride, config.GameDir);
 
         if (gameDir is null || !GamePaths.IsGameDir(gameDir))
@@ -737,6 +767,8 @@ public static partial class CliHost
         }
 
         var config = ToolkitConfig.Load(configOverride);
+        if (config.LoadError is not null)
+            return RejectCorruptConfig("perf set", config, isJson, stdout, stderr);
         if (!string.IsNullOrWhiteSpace(gameOverride))
         {
             config.GameDir = gameOverride;
@@ -1003,7 +1035,8 @@ public static partial class CliHost
                 Ok = false,
                 Command = command,
                 Warnings = warnings ?? [],
-                Errors = [message]
+                Errors = [message],
+                Error = message
             };
             stdout.WriteLine(JsonSerializer.Serialize(envelope, JsonEnvelopeOptions));
         }
@@ -1017,6 +1050,49 @@ public static partial class CliHost
             }
         }
         return exitCode;
+    }
+
+    public static int ReportUnhandled(string[] args, Exception exception) =>
+        OutputUnhandled(args, exception, Console.Out, Console.Error);
+
+    private static int OutputUnhandled(string[] args, Exception exception, TextWriter stdout, TextWriter stderr)
+    {
+        bool isJson = args.Any(a => a.Equals("--json", StringComparison.OrdinalIgnoreCase));
+        string command = args.FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal)) ?? "cli";
+        string message = exception.Message;
+
+        if (isJson)
+        {
+            stdout.WriteLine(JsonSerializer.Serialize(new JsonEnvelope
+            {
+                Ok = false,
+                Command = command,
+                Error = message,
+                Errors = [message]
+            }, JsonEnvelopeOptions));
+        }
+        else
+        {
+            stderr.WriteLine(message);
+        }
+
+        return ExitCodes.GeneralFailure;
+    }
+
+    private static int RejectCorruptConfig(
+        string command,
+        ToolkitConfig config,
+        bool isJson,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        return OutputError(
+            command,
+            config.LoadError ?? Strings.Get("Error_InvalidConfig"),
+            ExitCodes.InvalidArgs,
+            isJson,
+            stdout,
+            stderr);
     }
 
     private static int HandleLangList(string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
@@ -1114,6 +1190,8 @@ public static partial class CliHost
         }
 
         var config = ToolkitConfig.Load(configOverride);
+        if (config.LoadError is not null)
+            return RejectCorruptConfig("lang install", config, isJson, stdout, stderr);
         if (!string.IsNullOrWhiteSpace(gameOverride))
         {
             config.GameDir = gameOverride;
@@ -1171,6 +1249,8 @@ public static partial class CliHost
     private static int HandleLangUninstall(string? gameOverride, string? configOverride, bool isJson, TextWriter stdout, TextWriter stderr)
     {
         var config = ToolkitConfig.Load(configOverride);
+        if (config.LoadError is not null)
+            return RejectCorruptConfig("lang uninstall", config, isJson, stdout, stderr);
         if (!string.IsNullOrWhiteSpace(gameOverride))
         {
             config.GameDir = gameOverride;
@@ -1528,6 +1608,8 @@ public static partial class CliHost
         }
 
         var config = ToolkitConfig.Load(configOverride);
+        if (config.LoadError is not null)
+            return RejectCorruptConfig("trainer set", config, isJson, stdout, stderr);
         if (!string.IsNullOrWhiteSpace(gameOverride))
         {
             config.GameDir = gameOverride;
@@ -2463,11 +2545,50 @@ public static partial class CliHost
             Console.CancelKeyPress += onCancel;
             try
             {
-                GameRunner.WatchForever(diag, cts.Token, m => stdout.WriteLine($"  {m}"));
+                GameRunner.WatchForever(diag, cts.Token, m =>
+                {
+                    if (isJson)
+                    {
+                        stdout.WriteLine(JsonSerializer.Serialize(new JsonEnvelope
+                        {
+                            Ok = true,
+                            Command = "run",
+                            Data = new
+                            {
+                                eventType = "progress",
+                                message = m,
+                                gameDir,
+                                outputDirectory = diagOutDir,
+                                configManifest = manifestPath
+                            }
+                        }, JsonLineOptions));
+                    }
+                    else
+                    {
+                        stdout.WriteLine($"  {m}");
+                    }
+                });
             }
             finally
             {
                 Console.CancelKeyPress -= onCancel;
+            }
+
+            if (isJson)
+            {
+                stdout.WriteLine(JsonSerializer.Serialize(new JsonEnvelope
+                {
+                    Ok = true,
+                    Command = "run",
+                    Data = new
+                    {
+                        eventType = "completed",
+                        cancelled = cts.IsCancellationRequested,
+                        gameDir,
+                        outputDirectory = diagOutDir,
+                        configManifest = manifestPath
+                    }
+                }, JsonLineOptions));
             }
             return ExitCodes.Success;
         }

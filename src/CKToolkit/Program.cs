@@ -22,6 +22,13 @@ internal static class Program
             return 0;
         }
 
-        return CliHost.Run(args);
+        try
+        {
+            return CliHost.Run(args);
+        }
+        catch (Exception ex)
+        {
+            return CliHost.ReportUnhandled(args, ex);
+        }
     }
 }

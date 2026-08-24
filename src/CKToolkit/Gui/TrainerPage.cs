@@ -628,18 +628,18 @@ public sealed class TrainerPage : UserControl
     private void CheatsCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _cheats.Rows[e.RowIndex].Tag is Cheat cheat)
-            e.ToolTipText = Strings.EffectiveLanguage == "zh-TW" ? cheat.Description : cheat.Id;
+            e.ToolTipText = Strings.IsChinese ? cheat.Description : cheat.Id;
     }
 
     private void TweaksCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _tweaks.Rows[e.RowIndex].Tag is Tweak tweak)
-            e.ToolTipText = Strings.EffectiveLanguage == "zh-TW" ? tweak.Description : tweak.Id;
+            e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
     }
 
     private static string FormatSummary(Cheat cheat, IReadOnlyDictionary<string, string> parameters)
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         var visibleParams = cheat.Parameters.Where(p => !p.Hidden).ToList();
         if (visibleParams.Count == 0)
             return Strings.Get("Gui_Trainer_NoParams");
@@ -723,12 +723,12 @@ public sealed class TrainerPage : UserControl
     private static string FormatDecimal(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string DisplayCheatName(Cheat cheat) =>
-        Strings.EffectiveLanguage == "zh-TW" ? cheat.Name : Humanize(cheat.Id);
+        Strings.IsChinese ? cheat.Name : Humanize(cheat.Id);
 
     private static string DisplayTweakName(Tweak tweak) =>
-        Strings.EffectiveLanguage == "zh-TW" ? tweak.Label : Humanize(tweak.Id);
+        Strings.IsChinese ? tweak.Label : Humanize(tweak.Id);
 
-    private static string DisplayGroup(string group) => Strings.EffectiveLanguage == "zh-TW" ? group : group switch
+    private static string DisplayGroup(string group) => Strings.IsChinese ? group : group switch
     {
         Tweaks.GroupHero => "Hero",
         Tweaks.GroupTown => "Settlements",

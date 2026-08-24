@@ -368,10 +368,12 @@ public static class PatchState
             try
             {
                 var manifest = JsonSerializer.Deserialize<FontPatchManifest>(pak.ReadText(LangInstaller.MarkerPath));
-                if (manifest?.Fonts.Count > 0)
+                if (!IsValidLocalPakManifest(pak, manifest))
                 {
-                    hasPatchedFonts = true;
+                    return FileState.Unrecognised();
                 }
+
+                hasPatchedFonts = true;
             }
             catch
             {
@@ -407,6 +409,36 @@ public static class PatchState
         }
 
         return FileState.Vanilla();
+    }
+
+    private static bool IsValidLocalPakManifest(HmmPak pak, FontPatchManifest? manifest)
+    {
+        if (manifest is null ||
+            manifest.Version != 1 ||
+            string.IsNullOrWhiteSpace(manifest.PackId) ||
+            manifest.Fonts is null ||
+            manifest.Fonts.Count == 0 ||
+            manifest.AddedEntries is null)
+        {
+            return false;
+        }
+
+        foreach (var (fontPath, record) in manifest.Fonts)
+        {
+            if (record is null || string.IsNullOrWhiteSpace(fontPath))
+                return false;
+
+            string normalized = fontPath.Trim().Replace('/', '\\');
+            if (!normalized.StartsWith(@"FONTS\", StringComparison.OrdinalIgnoreCase) ||
+                !normalized.EndsWith(".APF", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Count(c => c == '\\') != 1 ||
+                !pak.Contains(normalized))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static Result<byte[]> NormaliseLocalPak(byte[] liveBytes)

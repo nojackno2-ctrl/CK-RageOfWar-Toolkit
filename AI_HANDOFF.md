@@ -14,7 +14,32 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 最新進度：完整專案稽核進行中，發現未知組建仍可寫入 (2026-08-23)
+## 最新進度：18 項已知問題修復與回歸驗證完成，全數進入待實測看板 (2026-08-24)
+
+- **管線安全與原子性**：
+  - `ISSUE-029`：`GameVersion.cs` 與 `PatchPipeline.cs` 對非 Steam 2004-02-19 之未知組建嚴格硬性拒絕（ExitCode 4, 零磁碟寫入）。
+  - `ISSUE-034`：`PatchPipeline.cs` 與 `PerfModule.cs` 核心層強制執行解析度與網格上限 `<= 4096x2400`。
+  - `ISSUE-035` / `ISSUE-046`：`ApplyAllStaged` 與 `RestoreAllStaged` 實作兩階段記憶體暫存與跨檔原子寫入；`Program.cs` 加上最外層例外邊界防護。
+  - `ISSUE-036`：設定檔載入錯誤（`LoadError != null`）一律 Fail-Closed 拒絕寫入。
+  - `ISSUE-040`：語言包設定在套用前驗證存在性，不存在則整批拒絕且 5 檔零寫入。
+  - `ISSUE-045`：CLI `--game` 路徑無效時 Fail-Closed 報 `GameNotFound`，不靜默退回自動偵測。
+  - `ISSUE-041`：`run --watch --json` 輸出合規結構化 JSON 事件。
+- **中繼資料與在地化資料品質**：
+  - `ISSUE-037`：`IniFile.cs` 嚴格拒絕 Section/Key/Value 中的 CRLF 注入；`LanguagePack.cs` 嚴格檢查 `GameLangFolder` 與 Unicode scalar 範圍及跨度上限（65536）。
+  - `ISSUE-038`：`PatchState.cs` 嚴格驗證 `.patch_marker.json` 結構，損壞/空 marker 判定為 `Unrecognised`。
+  - `ISSUE-030`：自官方西語版 `local.pak` 提取官方原文字串，替換西班牙語主戰役 876 筆繁中殘留（CJK 污染歸零）。
+  - `ISSUE-032`：日文主戰役與教學關卡 156 筆字面換行控制序列正規化。
+- **存檔與玩家統計**：
+  - `ISSUE-044`：`PlayerStatistics.cs` 最愛國家分配演算法修正為 `(count + 4) / 3`，保證最愛國家場次嚴格大於其餘各國，消除平手偏差。
+  - `ISSUE-039`：保留未滿 1 小時之精確毫秒，存檔讀寫加入並行檔案鎖保護。
+- **UI 與三語在地化**：
+  - `ISSUE-042`：`TrainerPage.cs`、`CheatParamsDialog.cs` 支援 `Strings.IsChinese`，三語 `strings.*.json` 鍵集與佔位符 100% 嚴格一致。
+- **資產完整性與測試覆蓋**：
+  - `ISSUE-031` / `ISSUE-033` / `ISSUE-043`：`.gitignore` 排除 `*.cksave`；`SelfTest` 新增各項邊界回歸測試與 `ckperf.dll` SHA256 完整性斷言。
+  - Release managed build 0 warning / 0 error，SelfTest 39 組全綠通過。
+  - 18 項問題全數標記為 `🟡 已修碼 · 待實測` 並登記於 `ISSUES.md` 待實測看板。
+
+## 歷史進度：完整專案稽核進行中，發現未知組建仍可寫入 (2026-08-23)
 
 - Release managed build：成功，0 warning / 0 error；39 組 SelfTest 全綠。
 - CKPerf `Release|Win32`：成功；重建 DLL 與簽入資產同為 167,936 bytes，SHA-256 完全一致。

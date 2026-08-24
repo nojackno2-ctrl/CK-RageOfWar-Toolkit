@@ -194,7 +194,430 @@ public sealed class PatchPipeline
     /// 執行完整修補套用流程。
     /// 每個目標檔案：檢查狀態 -> 若無法辨識則拒絕並終止 -> 正規化 -> 疊加修改 -> 若內容改變則原子寫入。
     /// </summary>
-    public Result<ApplyReport> ApplyAll(string gameDir, ToolkitConfig config)
+    public Result<ApplyReport> ApplyAll(string gameDir, ToolkitConfig config) =>
+        ApplyAllStaged(gameDir, config);
+
+    private Result<ApplyReport> ApplyAllStaged(string gameDir, ToolkitConfig config)
+    {
+        if (GamePaths.IsGameRunning(gameDir))
+            return Result<ApplyReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
+
+        if (!GamePaths.IsGameDir(gameDir))
+            return Result<ApplyReport>.Fail(Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound);
+
+        var readResult = ReadAndInspectTargets(gameDir);
+        if (!readResult.Success)
+            return Result<ApplyReport>.Fail(readResult.ErrorMessage!, readResult.ExitCode);
+
+        Dictionary<GameFile, byte[]> rawFiles = readResult.Value!;
+        Result<byte[]> normalisedExe;
+        try
+        {
+            normalisedExe = PatchState.Normalise(GameFile.Exe, rawFiles[GameFile.Exe]);
+        }
+        catch (Exception ex)
+        {
+            return Result<ApplyReport>.Fail(
+                Strings.Get("Error_PipelineTransformFailed", GamePaths.ExeFileName, ex.Message),
+                ExitCodes.GeneralFailure);
+        }
+        if (!normalisedExe.Success)
+            return Result<ApplyReport>.Fail(normalisedExe.ErrorMessage!, normalisedExe.ExitCode);
+
+        GameBuildInfo build = GameVersion.Detect(normalisedExe.Value!);
+        if (build.Id == GameBuild.Unknown)
+        {
+            return Result<ApplyReport>.Fail(
+                Strings.Get(
+                    "Error_UnknownGameBuild",
+                    build.Build,
+                    $"{DateTimeOffset.FromUnixTimeSeconds(GameVersion.KnownTimeDateStamp).UtcDateTime:yyyy-MM-dd HH:mm:ss}Z (0x{GameVersion.KnownTimeDateStamp:X8})"),
+                ExitCodes.BackupMissingNeedsSteamVerify);
+        }
+
+        Result configValidation = ValidateApplyConfig(config);
+        if (!configValidation.Success)
+            return Result<ApplyReport>.Fail(configValidation.ErrorMessage!, configValidation.ExitCode);
+
+        var normalisedFiles = new Dictionary<GameFile, byte[]>();
+        foreach (GameFile file in Enum.GetValues<GameFile>())
+        {
+            Result<byte[]> normalised;
+            try
+            {
+                normalised = PatchState.Normalise(file, rawFiles[file]);
+            }
+            catch (Exception ex)
+            {
+                return Result<ApplyReport>.Fail(
+                    Strings.Get("Error_PipelineTransformFailed", PatchState.GetFileName(file), ex.Message),
+                    ExitCodes.GeneralFailure);
+            }
+
+            if (!normalised.Success)
+                return Result<ApplyReport>.Fail(normalised.ErrorMessage!, normalised.ExitCode);
+
+            normalisedFiles[file] = normalised.Value!;
+        }
+
+        var warnings = new List<string>();
+        var stagedFiles = new Dictionary<GameFile, byte[]>(normalisedFiles);
+        var layered = new Dictionary<GameFile, List<string>>
+        {
+            [GameFile.Exe] = [],
+            [GameFile.Launcher] = [],
+            [GameFile.DataPak] = [],
+            [GameFile.LocalPak] = [],
+            [GameFile.VxSettings] = []
+        };
+
+        byte[] exeBytes = stagedFiles[GameFile.Exe];
+        if (config.Perf.Laa) layered[GameFile.Exe].Add("laa");
+        if (config.Perf.VideoFix) layered[GameFile.Exe].Add("video_fix");
+        if (config.Perf.Hires >= 1600) layered[GameFile.Exe].Add($"hires_zoom ({config.Perf.Hires})");
+        if (config.Perf.KeepRes) layered[GameFile.Exe].Add("res_writeback");
+        if (config.Trainer.Enabled && config.Trainer.NumpadKeys) layered[GameFile.Exe].Add("key_map");
+        foreach (IPatchModule module in _modules)
+        {
+            try
+            {
+                module.ApplyExe(ref exeBytes, config);
+            }
+            catch (Exception ex)
+            {
+                return ModuleFailure<ApplyReport>(module, GamePaths.ExeFileName, ex);
+            }
+        }
+        stagedFiles[GameFile.Exe] = exeBytes;
+
+        byte[] launcherBytes = stagedFiles[GameFile.Launcher];
+        if (config.Perf.DesktopMode.Equals("suppress", StringComparison.OrdinalIgnoreCase))
+            layered[GameFile.Launcher].Add("launcher_display");
+        else if (config.Perf.DesktopMode.Equals("autoSwitch", StringComparison.OrdinalIgnoreCase))
+            layered[GameFile.Launcher].Add($"launcher_mode_table ({config.Perf.Resolution})");
+        foreach (IPatchModule module in _modules)
+        {
+            try
+            {
+                module.ApplyLauncher(ref launcherBytes, config);
+            }
+            catch (Exception ex)
+            {
+                return ModuleFailure<ApplyReport>(module, GamePaths.LauncherFileName, ex);
+            }
+        }
+        stagedFiles[GameFile.Launcher] = launcherBytes;
+
+        HmmPak dataPak;
+        try
+        {
+            dataPak = HmmPak.FromBytes(stagedFiles[GameFile.DataPak]);
+        }
+        catch (Exception ex)
+        {
+            return Result<ApplyReport>.Fail(
+                Strings.Get("Error_PipelineTransformFailed", GamePaths.DataPakFileName, ex.Message),
+                ExitCodes.GeneralFailure);
+        }
+
+        bool hasCustomRes =
+            (config.Perf.Hires >= 1600 &&
+             !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) ||
+            config.Perf.AddRes.Count > 0;
+        if (hasCustomRes) layered[GameFile.DataPak].Add("resolutions_append");
+        if (TrainerHasPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
+        foreach (IPatchModule module in _modules)
+        {
+            try
+            {
+                module.ApplyDataPak(dataPak, config, warnings);
+            }
+            catch (Exception ex)
+            {
+                return ModuleFailure<ApplyReport>(module, GamePaths.DataPakFileName, ex);
+            }
+        }
+        IReadOnlyList<string> availableResolutions = Resolutions.GetAvailableResolutionsList(dataPak);
+        try
+        {
+            stagedFiles[GameFile.DataPak] = dataPak.ToBytes();
+        }
+        catch (Exception ex)
+        {
+            return Result<ApplyReport>.Fail(
+                Strings.Get("Error_PipelineTransformFailed", GamePaths.DataPakFileName, ex.Message),
+                ExitCodes.GeneralFailure);
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+        {
+            layered[GameFile.LocalPak].Add($"langpack ({config.Lang.Pack})");
+            HmmPak localPak;
+            try
+            {
+                localPak = HmmPak.FromBytes(stagedFiles[GameFile.LocalPak]);
+            }
+            catch (Exception ex)
+            {
+                return Result<ApplyReport>.Fail(
+                    Strings.Get("Error_PipelineTransformFailed", GamePaths.LocalPakFileName, ex.Message),
+                    ExitCodes.GeneralFailure);
+            }
+
+            foreach (IPatchModule module in _modules)
+            {
+                try
+                {
+                    module.ApplyLocalPak(localPak, config);
+                }
+                catch (Exception ex)
+                {
+                    return ModuleFailure<ApplyReport>(module, GamePaths.LocalPakFileName, ex);
+                }
+            }
+
+            try
+            {
+                stagedFiles[GameFile.LocalPak] = localPak.ToBytes();
+            }
+            catch (Exception ex)
+            {
+                return Result<ApplyReport>.Fail(
+                    Strings.Get("Error_PipelineTransformFailed", GamePaths.LocalPakFileName, ex.Message),
+                    ExitCodes.GeneralFailure);
+            }
+        }
+
+        IniFile ini;
+        try
+        {
+            ini = IniFile.FromText(IniEncoding.GetString(stagedFiles[GameFile.VxSettings]));
+        }
+        catch (Exception ex)
+        {
+            return Result<ApplyReport>.Fail(
+                Strings.Get("Error_PipelineTransformFailed", GamePaths.VxSettingsFileName, ex.Message),
+                ExitCodes.GeneralFailure);
+        }
+
+        if (config.Perf.NoObjectAnimations) layered[GameFile.VxSettings].Add("no_object_animations");
+        if (config.Perf.NoWaterAnimation) layered[GameFile.VxSettings].Add("no_water_animation");
+        layered[GameFile.VxSettings].Add($"resolution ({config.Perf.Resolution})");
+        if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+            layered[GameFile.VxSettings].Add($"lang_default ({PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Key})");
+        foreach (IPatchModule module in _modules)
+        {
+            try
+            {
+                module.ApplyVxSettings(ini, config, availableResolutions, warnings);
+            }
+            catch (Exception ex)
+            {
+                return ModuleFailure<ApplyReport>(module, GamePaths.VxSettingsFileName, ex);
+            }
+        }
+        stagedFiles[GameFile.VxSettings] = IniEncoding.GetBytes(ini.ToText());
+
+        var report = new ApplyReport { GameDir = gameDir, GameBuild = build };
+        foreach (GameFile file in Enum.GetValues<GameFile>())
+        {
+            string fileName = PatchState.GetFileName(file);
+            bool changed = !stagedFiles[file].AsSpan().SequenceEqual(rawFiles[file]);
+            report.Files[fileName] = new FileApplyResult
+            {
+                File = fileName,
+                Written = false,
+                Layered = layered[file]
+            };
+
+            if (!changed) continue;
+
+            Result writeResult = WriteAtomic(Path.Combine(gameDir, fileName), stagedFiles[file], fileName);
+            if (!writeResult.Success)
+            {
+                string error = report.FilesWritten.Count == 0
+                    ? writeResult.ErrorMessage!
+                    : Strings.Get("Error_ApplyPartialFailure", fileName, string.Join(", ", report.FilesWritten));
+                return Result<ApplyReport>.Fail(error, writeResult.ExitCode);
+            }
+
+            report.Files[fileName].Written = true;
+            report.FilesWritten.Add(fileName);
+        }
+
+        return Result<ApplyReport>.Ok(report, warnings);
+    }
+
+    private static Result<Dictionary<GameFile, byte[]>> ReadAndInspectTargets(string gameDir)
+    {
+        var files = new Dictionary<GameFile, byte[]>();
+        foreach (GameFile file in Enum.GetValues<GameFile>())
+        {
+            string fileName = PatchState.GetFileName(file);
+            string path = Path.Combine(gameDir, fileName);
+            if (!File.Exists(path))
+            {
+                return Result<Dictionary<GameFile, byte[]>>.Fail(
+                    Strings.Get("Error_GameNotFound") + $" ({path})",
+                    ExitCodes.GameNotFound);
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(path);
+            }
+            catch (Exception ex)
+            {
+                return Result<Dictionary<GameFile, byte[]>>.Fail(
+                    Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
+                    ExitCodes.FileLocked);
+            }
+
+            FileState state;
+            try
+            {
+                state = PatchState.Inspect(file, bytes);
+            }
+            catch (Exception ex)
+            {
+                return Result<Dictionary<GameFile, byte[]>>.Fail(
+                    Strings.Get("Error_PipelineTransformFailed", fileName, ex.Message),
+                    ExitCodes.GeneralFailure);
+            }
+
+            if (state.IsUnrecognised)
+            {
+                return Result<Dictionary<GameFile, byte[]>>.Fail(
+                    Strings.Get("Error_UnrecognisedFileNeedsSteamVerify", fileName),
+                    ExitCodes.BackupMissingNeedsSteamVerify);
+            }
+
+            files[file] = bytes;
+        }
+
+        return Result<Dictionary<GameFile, byte[]>>.Ok(files);
+    }
+
+    private static Result ValidateApplyConfig(ToolkitConfig config)
+    {
+        if (config.LoadError is not null)
+            return Result.Fail(config.LoadError, ExitCodes.InvalidArgs);
+        if (config.Perf is null || config.Lang is null || config.Trainer is null)
+            return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
+
+        Result resolutionResult = ValidateSurface(config.Perf.Resolution);
+        if (!resolutionResult.Success) return resolutionResult;
+
+        var (_, surfaceHeight) = PerfModule.ParseDimensions(config.Perf.Resolution, 0, 0);
+        if (config.Perf.Hires != 0)
+        {
+            if (config.Perf.Hires < 1600 ||
+                !CellGridPatch.IsSurfaceSupported(config.Perf.Hires, surfaceHeight))
+            {
+                return Result.Fail(
+                    Strings.Get(
+                        "Error_ResolutionExceedsGridCeiling",
+                        config.Perf.Hires,
+                        CellGridPatch.MaxSurfaceWidth,
+                        CellGridPatch.MaxSurfaceHeight),
+                    ExitCodes.InvalidArgs);
+            }
+        }
+
+        if (config.Perf.AddRes is null)
+            return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
+        foreach (string resolution in config.Perf.AddRes)
+        {
+            Result extraResult = ValidateSurface(resolution);
+            if (!extraResult.Success) return extraResult;
+        }
+
+        if (string.IsNullOrWhiteSpace(config.Perf.DesktopMode) ||
+            (!config.Perf.DesktopMode.Equals("suppress", StringComparison.OrdinalIgnoreCase) &&
+             !config.Perf.DesktopMode.Equals("autoSwitch", StringComparison.OrdinalIgnoreCase) &&
+             !config.Perf.DesktopMode.Equals("stock", StringComparison.OrdinalIgnoreCase)))
+        {
+            return Result.Fail(
+                Strings.Get("Error_InvalidDesktopMode", config.Perf.DesktopMode ?? string.Empty),
+                ExitCodes.InvalidArgs);
+        }
+
+        if (config.Trainer.Cheats is null || config.Trainer.Tweaks is null)
+            return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
+
+        foreach (CheatConfig cheat in config.Trainer.Cheats)
+        {
+            if (cheat is null || !Cheats.ById.ContainsKey(cheat.Id))
+            {
+                return Result.Fail(
+                    Strings.Get("Error_TrainerUnknownCheat", cheat?.Id ?? string.Empty),
+                    ExitCodes.InvalidArgs);
+            }
+        }
+
+        foreach ((string id, decimal value) in config.Trainer.Tweaks)
+        {
+            if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
+                return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
+            if (value < tweak.Minimum || value > tweak.Maximum)
+            {
+                return Result.Fail(
+                    Strings.Get("Error_TrainerTweakOutOfRange", id, value, tweak.Minimum, tweak.Maximum),
+                    ExitCodes.InvalidArgs);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
+        {
+            string packId = config.Lang.Pack.Trim();
+            if (packId.Equals("chinese", StringComparison.OrdinalIgnoreCase)) packId = "zh-TW";
+
+            try
+            {
+                Dictionary<string, LanguagePack> packs = PackLoader.DiscoverAll();
+                if (!packs.ContainsKey(packId))
+                {
+                    Result<LanguagePack> embedded = PackLoader.LoadEmbeddedPack(packId);
+                    if (!embedded.Success || embedded.Value is null)
+                    {
+                        return Result.Fail(
+                            Strings.Get("Error_LanguagePackUnavailable", packId),
+                            ExitCodes.InvalidArgs);
+                    }
+                }
+            }
+            catch
+            {
+                return Result.Fail(
+                    Strings.Get("Error_LanguagePackUnavailable", packId),
+                    ExitCodes.InvalidArgs);
+            }
+        }
+
+        return Result.Ok();
+    }
+
+    private static Result ValidateSurface(string? value)
+    {
+        var (width, height) = PerfModule.ParseDimensions(value ?? string.Empty, 0, 0);
+        if (CellGridPatch.IsSurfaceSupported(width, height)) return Result.Ok();
+
+        return Result.Fail(
+            Strings.Get(
+                "Error_ResolutionExceedsGridCeiling",
+                value ?? string.Empty,
+                CellGridPatch.MaxSurfaceWidth,
+                CellGridPatch.MaxSurfaceHeight),
+            ExitCodes.InvalidArgs);
+    }
+
+    private static Result<T> ModuleFailure<T>(IPatchModule module, string fileName, Exception exception) =>
+        Result<T>.Fail(
+            Strings.Get("Error_ModuleApplyFailed", module.ModuleId, fileName, exception.Message),
+            ExitCodes.GeneralFailure);
+
+    private Result<ApplyReport> ApplyAllLegacy(string gameDir, ToolkitConfig config)
     {
         if (GamePaths.IsGameRunning(gameDir))
         {
@@ -504,7 +927,69 @@ public sealed class PatchPipeline
     /// 將所有目標檔案正規化反轉回原版 (Vanilla)。
     /// 報告各檔案是否被還原；若任何檔案無法辨識則回傳失敗並要求 Steam 驗證。
     /// </summary>
-    public Result<RestoreReport> RestoreAll(string gameDir)
+    public Result<RestoreReport> RestoreAll(string gameDir) =>
+        RestoreAllStaged(gameDir);
+
+    private static Result<RestoreReport> RestoreAllStaged(string gameDir)
+    {
+        if (GamePaths.IsGameRunning(gameDir))
+            return Result<RestoreReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
+
+        if (!GamePaths.IsGameDir(gameDir))
+            return Result<RestoreReport>.Fail(Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound);
+
+        var readResult = ReadAndInspectTargets(gameDir);
+        if (!readResult.Success)
+            return Result<RestoreReport>.Fail(readResult.ErrorMessage!, readResult.ExitCode);
+
+        Dictionary<GameFile, byte[]> rawFiles = readResult.Value!;
+        var stagedFiles = new Dictionary<GameFile, byte[]>();
+        foreach (GameFile file in Enum.GetValues<GameFile>())
+        {
+            Result<byte[]> normalised;
+            try
+            {
+                normalised = PatchState.Normalise(file, rawFiles[file]);
+            }
+            catch (Exception ex)
+            {
+                return Result<RestoreReport>.Fail(
+                    Strings.Get("Error_PipelineTransformFailed", PatchState.GetFileName(file), ex.Message),
+                    ExitCodes.GeneralFailure);
+            }
+
+            if (!normalised.Success)
+                return Result<RestoreReport>.Fail(normalised.ErrorMessage!, normalised.ExitCode);
+
+            stagedFiles[file] = normalised.Value!;
+        }
+
+        var report = new RestoreReport { GameDir = gameDir };
+        foreach (GameFile file in Enum.GetValues<GameFile>())
+        {
+            string fileName = PatchState.GetFileName(file);
+            bool changed = !stagedFiles[file].AsSpan().SequenceEqual(rawFiles[file]);
+            report.Files[fileName] = new FileRestoreResult
+            {
+                File = fileName,
+                Restored = false,
+                State = "vanilla"
+            };
+
+            if (!changed) continue;
+
+            Result writeResult = WriteAtomic(Path.Combine(gameDir, fileName), stagedFiles[file], fileName);
+            if (!writeResult.Success)
+                return Result<RestoreReport>.Fail(writeResult.ErrorMessage!, writeResult.ExitCode);
+
+            report.Files[fileName].Restored = true;
+            report.RestoredFiles.Add(fileName);
+        }
+
+        return Result<RestoreReport>.Ok(report);
+    }
+
+    private Result<RestoreReport> RestoreAllLegacy(string gameDir)
     {
         if (GamePaths.IsGameRunning(gameDir))
         {

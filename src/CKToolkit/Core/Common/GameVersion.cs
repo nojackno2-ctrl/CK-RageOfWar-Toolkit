@@ -2,6 +2,12 @@ using System.Text.Json.Serialization;
 
 namespace CKToolkit.Core.Common;
 
+public enum GameBuild
+{
+    Unknown = 0,
+    Steam2004 = 1
+}
+
 /// <summary>
 /// 從 <c>Celtic kings.exe</c> 讀出的組建指紋。
 /// </summary>
@@ -17,6 +23,9 @@ public sealed record GameBuildInfo(
     int FileLength,
     bool IsKnown)
 {
+    [JsonPropertyName("id")]
+    public GameBuild Id => IsKnown ? GameBuild.Steam2004 : GameBuild.Unknown;
+
     /// <summary>供 CLI --json 輸出使用的簡短描述，例如 "2004-02-19 17:17:37Z (0x4034EFB1)"。</summary>
     [JsonPropertyName("build")]
     public string Build => $"{BuildTimeUtc:yyyy-MM-dd HH:mm:ss}Z (0x{TimeDateStamp:X8})";

@@ -217,7 +217,8 @@ internal static class SaveManagerSelfTests
             };
             Result<PlayerStatisticsSummary> reduced = PlayerStatistics.Update(gameDir, "noname", reducedRequest);
             string reducedText = File.ReadAllText(Path.Combine(profileDir, "player.ini"), Encoding.GetEncoding(1252));
-            check("減少場數後摘要為 2 場且軍事評價正確", reduced.Value is { GameCount: 2, MilitaryRating: 25, FavoriteNation: 0, FavoriteNationPercent: 50 }, reduced.ErrorMessage);
+            check("減少場數後摘要為 2 場且軍事評價正確", reduced.Value is { GameCount: 2, MilitaryRating: 25, FavoriteNation: 0, FavoriteNationPercent: 100 }, reduced.ErrorMessage);
+            check("減少場數產生比例自動向上校正警告", reduced.Warnings.Count > 0, null);
             check("減少場數移除 game2 以後 section", !reducedText.Contains("[game2]", StringComparison.Ordinal) && reducedText.Contains("[game1]", StringComparison.Ordinal), null);
             check("減少場數仍保留 game0 未知欄位與 Player hash", reducedText.Contains("custom_game_unknown=keep-game", StringComparison.Ordinal) && reducedText.Contains("hash=12345", StringComparison.Ordinal), null);
 

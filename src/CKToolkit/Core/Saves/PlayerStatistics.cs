@@ -363,7 +363,9 @@ public static class PlayerStatistics
         if (favoriteNation < 0)
             return new NationAllocation(Enumerable.Repeat(3, count).ToArray(), -1, 100);
 
-        int minimumFavorite = (count + 2) / 3;
+        // 嚴格多數保證：為確保遊戲引擎的兩兩比較邏輯 (nationCounts[0] < nationCounts[1] ...)
+        // 不會因平手而誤判，最愛國家場數必須嚴格大於其餘各國分配到的最大場數。
+        int minimumFavorite = (count + 4) / 3;
         int favoriteCount = Enumerable.Range(minimumFavorite, count - minimumFavorite + 1)
             .OrderBy(candidate => Math.Abs(candidate * 100 / count - requestedPercent))
             .ThenByDescending(candidate => candidate)
