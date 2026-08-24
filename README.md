@@ -17,7 +17,7 @@ An all-in-one performance, localization, trainer, and save-management toolkit fo
 | 模組 | 功能特色 |
 |---|---|
 | **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動；CVXVisible 32px 網格上限 4096x2400，超過一律拒絕寫入）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
-| **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,458 條詞彙 100% 覆蓋）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
+| **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,925 條詞彙 100% 覆蓋，含全部 7 套戰役與劇本）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
 | **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
 | **存檔與玩家資料** | 列舉 profile 存檔與預覽圖、SHA-256 驗證的 `.cksave` 匯出／匯入、撞名不覆寫、可復原的保護性刪除，以及玩家基本資料與遊戲統計頁（戰績、軍事評價、偏好、資源、單位紀錄）編輯 |
 
@@ -211,7 +211,7 @@ CKToolkit.exe save stats set --profile noname --military-rating 50 --single-game
 - **戰鬥與部隊**：部隊完全治療、全軍戰鬥增益、修復建築物、天譴敵軍。
 - **視野與探索**：地圖全開、迷霧開關。
 - **單位與物品生成**：
-  - **滑鼠生成單位 (`spawn_unit`)**：在游標位置叫出指定部隊，可設定生成數量、等級（Lv.1~100）及攜帶裝備。
+  - **滑鼠生成單位 (`spawn_unit`)**：在游標位置叫出指定部隊，可設定生成數量、等級（Lv.1~1000）及攜帶裝備。
   - **切換生成單位 (`cycle_unit`)**：熱鍵循環切換當前生成兵種。
   - **滑鼠生成物品 (`spawn_item`)**：在游標位置生成地面皮袋，收錄全遊戲 23 種可穿戴物品／神器。
   - **切換生成物品 (`cycle_item`)**：熱鍵循環切換當前生成物品。
@@ -351,7 +351,7 @@ An all-in-one modernization toolkit for *Celtic Kings: Rage of War* (2004, Steam
 | Module | Features |
 |---|---|
 | **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam; the CVXVisible 32px grid tops out at 4096x2400 and anything larger is refused), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
-| **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,458 entries each, 100% coverage), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
+| **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,925 entries each, 100% coverage, covering all 7 campaigns and scenarios), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
 | **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
 | **Saves & Player Data** | Profile saves with BMP previews, SHA-256-verified `.cksave` export/import, collision-safe slots, recoverable deletion, plus editing of basic profile data and the in-game statistics page (results, military rating, preferences, resources, and unit records) |
 
@@ -545,7 +545,7 @@ Supports 17 cheats and dozens of gameplay balance tweaks:
 - **Combat & Armies**: Heal Army, Buff Army, Repair Buildings, Smite Enemies.
 - **Vision**: Reveal Map, Toggle Fog.
 - **Unit & Item Spawning**:
-  - **Spawn Unit (`spawn_unit`)**: Spawn chosen units at cursor with custom count, level (1–100), and equipment loadout.
+  - **Spawn Unit (`spawn_unit`)**: Spawn chosen units at cursor with custom count, level (1–1000), and equipment loadout.
   - **Cycle Unit (`cycle_unit`)**: Hotkey to cycle through available unit types.
   - **Spawn Item (`spawn_item`)**: Spawn item bags at cursor containing any of the 23 game items / artifacts.
   - **Cycle Item (`cycle_item`)**: Hotkey to cycle through available items.

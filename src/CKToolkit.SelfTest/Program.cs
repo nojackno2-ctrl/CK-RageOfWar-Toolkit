@@ -2382,19 +2382,15 @@ internal static class Program
             // H. 安全檢查：IniFile 拒絕 CRLF 注入
             var ini = new IniFile();
             bool iniSectionInjected = false;
-            try { ini.SetValue("Section
-Injected", "Key", "Value"); } catch (ArgumentException) { iniSectionInjected = true; }
+            try { ini.SetValue("Section\r\nInjected", "Key", "Value"); } catch (ArgumentException) { iniSectionInjected = true; }
             Check("IniFile 拒絕 Section 名稱含 CRLF 注入", iniSectionInjected);
 
             bool iniKeyInjected = false;
-            try { ini.SetValue("Section", "Key
-Injected", "Value"); } catch (ArgumentException) { iniKeyInjected = true; }
+            try { ini.SetValue("Section", "Key\r\nInjected", "Value"); } catch (ArgumentException) { iniKeyInjected = true; }
             Check("IniFile 拒絕 Key 名稱含 CRLF 注入", iniKeyInjected);
 
             bool iniValInjected = false;
-            try { ini.SetValue("Section", "Key", "Val
-[Evil]
-Evil=1"); } catch (ArgumentException) { iniValInjected = true; }
+            try { ini.SetValue("Section", "Key", "Val\r\n[Evil]\r\nEvil=1"); } catch (ArgumentException) { iniValInjected = true; }
             Check("IniFile 拒絕 Value 內容含 CRLF 注入", iniValInjected);
 
             // I. 安全檢查：LanguagePack 拒絕惡意 gameLangFolder 與巨量 font ranges
@@ -2404,14 +2400,13 @@ Evil=1"); } catch (ArgumentException) { iniValInjected = true; }
                 Name = "Bad ID",
                 NativeName = "Bad ID",
                 Version = "1.0.0",
-                GameLangFolder = "BAD
-INJECTED",
+                GameLangFolder = "BAD\r\nINJECTED",
                 GameLangKey = "bad",
                 TemplateLang = "GERMAN",
                 Font = new FontMeta { Face = "Arial", Ranges = ["0020-007F"] },
                 Files = new FilesMeta()
             };
-            Check("LanguagePack.Validate 拒絕含換行之 gameLangFolder", !LanguagePack.Validate(badIdMeta).Success);
+            Check("LanguagePack.Validate 拒絕含換行之 gameLangFolder", !LanguagePack.ValidateMeta(badIdMeta).Success);
 
             var hugeRangeMeta = new LanguagePackMeta
             {
@@ -2425,11 +2420,11 @@ INJECTED",
                 Font = new FontMeta { Face = "Arial", Ranges = ["0000-7FFFFFFF"] },
                 Files = new FilesMeta()
             };
-            Check("LanguagePack.Validate 拒絕超出 Unicode 上界或巨量 font ranges", !LanguagePack.Validate(hugeRangeMeta).Success);
+            Check("LanguagePack.Validate 拒絕超出 Unicode 上界或巨量 font ranges", !LanguagePack.ValidateMeta(hugeRangeMeta).Success);
 
             // J. 安全檢查：PatchState 對不完整或竄改之 .patch_marker.json 判定為 Unrecognised
             var badMarkerPak = HmmPak.CreateEmpty();
-            badMarkerPak.WriteText(FontPatchManifest.MarkerPath, "{}");
+            badMarkerPak.WriteText(LangInstaller.MarkerPath, "{}");
             Check("空 JSON marker 之 local.pak 判定為 Unrecognised",
                 PatchState.Inspect(GameFile.LocalPak, badMarkerPak.ToBytes()).IsUnrecognised);
 

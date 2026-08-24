@@ -14,7 +14,25 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 最新進度：18 項已知問題修復與回歸驗證完成，全數進入待實測看板 (2026-08-24)
+## 最新進度：v1.0.3 版本升級、版本識別同步與發布準備 (2026-08-24)
+
+- **版本與發布升級 (v1.0.3)**：
+  - 版本號全面升級至 **1.0.3**（涵蓋 `CKToolkit.csproj`、`CliHost.cs`、三語 `strings.*.json` 視窗標題與 CLI 版本輸出）。
+  - 同步更新 `README.md` 中英文版多國語言包詞彙數量（3,925 條）與生成單位等級上限（Lv.1~1000）。
+  - 修復 `SelfTest` 測試腳本語法與中繼資料驗證呼叫，Release managed build 0 warning / 0 error，39 組測試（593+ 檢查點）全數綠燈通過。
+  - 本地單檔發布驗證通過：framework-dependent (~4.1 MB) 與 self-contained (~53 MB) 均正確產出。
+  - 準備提交 commit、建立 `v1.0.3` tag 並推送到 GitHub 觸發自動化 Release 構建。
+
+## 歷史進度：README.md 與實況全面同步、SelfTest 語法修正與 39 組全綠通過 (2026-08-24)
+
+- **文件同步**：
+  - `README.md` 中英文版同步更新多國語言包詞彙數量至 **3,925 條**（涵蓋 7 套戰役與劇本，符合 ISSUE-028 擴充實況）。
+  - `README.md` 中英文版同步修正修改器滑鼠生成單位初始等級上限為 **Lv.1~1000**（與 `set_selected_level` 及 `CheatParamsDialog.cs` 實況一致）。
+- **測試套件維護**：
+  - 修正 `src/CKToolkit.SelfTest/Program.cs` 字串逸出與 `ValidateMeta` / `LangInstaller.MarkerPath` 呼叫。
+  - Release managed build：0 warning / 0 error；SelfTest 39 組測試（593+ 檢查點）全部綠燈通過。
+
+## 歷史進度：18 項已知問題修復與回歸驗證完成，全數進入待實測看板 (2026-08-24)
 
 - **管線安全與原子性**：
   - `ISSUE-029`：`GameVersion.cs` 與 `PatchPipeline.cs` 對非 Steam 2004-02-19 之未知組建嚴格硬性拒絕（ExitCode 4, 零磁碟寫入）。
