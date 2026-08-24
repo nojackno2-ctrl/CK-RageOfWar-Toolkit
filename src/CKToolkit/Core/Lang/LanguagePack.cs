@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using CKToolkit.Core.Common;
 
 namespace CKToolkit.Core.Lang;
@@ -73,6 +74,18 @@ public sealed class LanguagePackMeta
 /// </summary>
 public sealed class LanguagePack
 {
+    private const int MaxGameLanguageIdentifierLength = 32;
+    private const int MaxDeclaredRangeSpan = 65_536;
+    private const int MaxDeclaredCodepoints = 100_000;
+
+    private static readonly Regex SafeGameLanguageIdentifier = new(
+        @"\A[A-Za-z0-9_-]+\z",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex CodepointRangePattern = new(
+        @"\A([0-9A-Fa-f]+)(?:\s*[-–—]\s*([0-9A-Fa-f]+))?\z",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -131,6 +144,22 @@ public sealed class LanguagePack
         if (string.IsNullOrWhiteSpace(meta.GameLangKey))
             return Result.Fail("缺少必要欄位 'gameLangKey' (Missing required field 'gameLangKey' in pack.json)", ExitCodes.InvalidArgs);
 
+        if (!IsSafeGameLanguageIdentifier(meta.GameLangFolder))
+        {
+            return Result.Fail(
+                $"'gameLangFolder' 必須是 1–{MaxGameLanguageIdentifierLength} 個 ASCII 英數字、底線或連字號"
+                + " ('gameLangFolder' must contain only ASCII letters, digits, underscore, or hyphen)",
+                ExitCodes.InvalidArgs);
+        }
+
+        if (!IsSafeGameLanguageIdentifier(meta.GameLangKey))
+        {
+            return Result.Fail(
+                $"'gameLangKey' 必須是 1–{MaxGameLanguageIdentifierLength} 個 ASCII 英數字、底線或連字號"
+                + " ('gameLangKey' must contain only ASCII letters, digits, underscore, or hyphen)",
+                ExitCodes.InvalidArgs);
+        }
+
         // 語系資料夾不得與遊戲原廠語系撞名。撞名的話安裝會覆蓋原廠 XML，
         // 而反安裝依清冊移除時會把原廠檔案一併刪掉——這個語言包就不可逆了，
         // 違反 AGENTS.md §2.3，使用者也永久失去遊戲的官方翻譯。
@@ -156,6 +185,15 @@ public sealed class LanguagePack
         if (meta.Font.Ranges is null || meta.Font.Ranges.Count == 0)
             return Result.Fail("缺少必要欄位 'font.ranges' (Missing required field 'font.ranges' in pack.json)", ExitCodes.InvalidArgs);
 
+        try
+        {
+            _ = BuildDeclaredCodepoints(meta.Font.Ranges);
+        }
+        catch (InvalidDataException ex)
+        {
+            return Result.Fail($"'font.ranges' 無效：{ex.Message} (Invalid 'font.ranges')", ExitCodes.InvalidArgs);
+        }
+
         if (meta.Files is null)
             return Result.Fail("缺少必要欄位 'files' (Missing required field 'files' in pack.json)", ExitCodes.InvalidArgs);
 
@@ -170,39 +208,73 @@ public sealed class LanguagePack
     /// </summary>
     public HashSet<int> GetDeclaredCodepoints()
     {
+        if (Meta.Font?.Ranges is null)
+            throw new InvalidDataException("font.ranges 不得為 null。");
+
+        return BuildDeclaredCodepoints(Meta.Font.Ranges);
+    }
+
+    private static bool IsSafeGameLanguageIdentifier(string value)
+    {
+        return value.Length <= MaxGameLanguageIdentifierLength
+            && SafeGameLanguageIdentifier.IsMatch(value);
+    }
+
+    private static HashSet<int> BuildDeclaredCodepoints(IEnumerable<string> ranges)
+    {
         var result = new HashSet<int>();
-        if (Meta.Font.Ranges is null) return result;
+        long declaredTotal = 0;
 
-        foreach (string rawRange in Meta.Font.Ranges)
+        foreach (string? rawRange in ranges)
         {
-            string range = rawRange.Trim();
-            if (string.IsNullOrEmpty(range)) continue;
-
-            if (range.Contains('-'))
+            string range = rawRange?.Trim() ?? string.Empty;
+            Match match = CodepointRangePattern.Match(range);
+            if (!match.Success)
             {
-                var parts = range.Split(['-', '–', '—'], StringSplitOptions.RemoveEmptyEntries);
-                if (parts.Length == 2 &&
-                    int.TryParse(parts[0].Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int start) &&
-                    int.TryParse(parts[1].Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int end))
-                {
-                    int min = Math.Min(start, end);
-                    int max = Math.Max(start, end);
-                    for (int cp = min; cp <= max; cp++)
-                    {
-                        result.Add(cp);
-                    }
-                }
+                throw new InvalidDataException($"無法解析 Unicode 範圍 '{range}'。");
             }
-            else
+
+            if (!uint.TryParse(match.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint first) ||
+                !uint.TryParse(match.Groups[2].Success ? match.Groups[2].Value : match.Groups[1].Value,
+                    NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint last))
             {
-                if (int.TryParse(range, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int single))
-                {
-                    result.Add(single);
-                }
+                throw new InvalidDataException($"Unicode 範圍 '{range}' 超出可解析範圍。");
+            }
+
+            uint min = Math.Min(first, last);
+            uint max = Math.Max(first, last);
+            if (!IsUnicodeScalar(min) || !IsUnicodeScalar(max) ||
+                (min <= 0xDFFF && max >= 0xD800))
+            {
+                throw new InvalidDataException($"Unicode 範圍 '{range}' 包含無效 scalar 或代理字元。");
+            }
+
+            long span = (long)max - min + 1;
+            if (span > MaxDeclaredRangeSpan)
+            {
+                throw new InvalidDataException(
+                    $"Unicode 範圍 '{range}' 含 {span} 個碼位，超過單一範圍上限 {MaxDeclaredRangeSpan}。");
+            }
+
+            declaredTotal += span;
+            if (declaredTotal > MaxDeclaredCodepoints)
+            {
+                throw new InvalidDataException(
+                    $"宣告碼位總數 {declaredTotal} 超過上限 {MaxDeclaredCodepoints}。");
+            }
+
+            for (uint cp = min; cp <= max; cp++)
+            {
+                result.Add((int)cp);
             }
         }
 
         return result;
+    }
+
+    private static bool IsUnicodeScalar(uint codepoint)
+    {
+        return codepoint <= 0x10FFFF && (codepoint < 0xD800 || codepoint > 0xDFFF);
     }
 
     /// <summary>

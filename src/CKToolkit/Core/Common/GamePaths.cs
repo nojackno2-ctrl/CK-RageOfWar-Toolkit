@@ -61,10 +61,22 @@ public static partial class GamePaths
     /// <returns>找到之遊戲完整路徑；找不到則回傳 null</returns>
     public static string? FindGameDir(string? explicitDir = null, string? rememberedDir = null)
     {
-        var candidates = new List<string>();
-
         if (!string.IsNullOrWhiteSpace(explicitDir))
-            candidates.Add(explicitDir.Trim());
+        {
+            string candidate = explicitDir.Trim();
+            if (!IsGameDir(candidate)) return null;
+
+            try
+            {
+                return Path.GetFullPath(candidate);
+            }
+            catch
+            {
+                return candidate;
+            }
+        }
+
+        var candidates = new List<string>();
 
         if (!string.IsNullOrWhiteSpace(rememberedDir))
             candidates.Add(rememberedDir.Trim());

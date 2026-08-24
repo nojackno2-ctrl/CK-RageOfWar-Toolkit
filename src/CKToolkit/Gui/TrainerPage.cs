@@ -91,8 +91,8 @@ public sealed class TrainerPage : UserControl
         _riskBanner.Margin = new Padding(6, 6, 6, 4);
         root.Controls.Add(_riskBanner, 0, 1);
 
-        // 直接把「啟動遊戲」放在修改器頁裡：調整完作弊/數值不必再跑到最下面的全域列，
-        // 一鍵套用現在的設定並帶診斷層啟動，馬上就能測。
+        // 「啟動遊戲」放在作弊／數值設定的下方：先完成調整，再一鍵套用現在的設定並
+        // 帶診斷層啟動，操作順序由上而下。
         var launchRow = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
@@ -112,13 +112,12 @@ public sealed class TrainerPage : UserControl
         _launchHint.ForeColor = Color.FromArgb(100, 116, 139);
         _launchHint.Margin = new Padding(0, 10, 0, 0);
         launchRow.Controls.AddRange([_launchGame, _launchHint]);
-        root.Controls.Add(launchRow, 0, 2);
 
         _hint.AutoSize = true;
         _hint.MaximumSize = new Size(1000, 0);
         _hint.ForeColor = Color.FromArgb(71, 85, 105);
         _hint.Padding = new Padding(8, 6, 8, 8);
-        root.Controls.Add(_hint, 0, 3);
+        root.Controls.Add(_hint, 0, 2);
 
         _subTabs.Dock = DockStyle.Top;
         _subTabs.Height = 440;
@@ -126,7 +125,8 @@ public sealed class TrainerPage : UserControl
         _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
-        root.Controls.Add(_subTabs, 0, 4);
+        root.Controls.Add(_subTabs, 0, 3);
+        root.Controls.Add(launchRow, 0, 4);
         Controls.Add(root);
     }
 
@@ -628,18 +628,18 @@ public sealed class TrainerPage : UserControl
     private void CheatsCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _cheats.Rows[e.RowIndex].Tag is Cheat cheat)
-            e.ToolTipText = Strings.EffectiveLanguage == "zh-TW" ? cheat.Description : cheat.Id;
+            e.ToolTipText = Strings.IsChinese ? cheat.Description : cheat.Id;
     }
 
     private void TweaksCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _tweaks.Rows[e.RowIndex].Tag is Tweak tweak)
-            e.ToolTipText = Strings.EffectiveLanguage == "zh-TW" ? tweak.Description : tweak.Id;
+            e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
     }
 
     private static string FormatSummary(Cheat cheat, IReadOnlyDictionary<string, string> parameters)
     {
-        bool isZh = Strings.EffectiveLanguage == "zh-TW";
+        bool isZh = Strings.IsChinese;
         var visibleParams = cheat.Parameters.Where(p => !p.Hidden).ToList();
         if (visibleParams.Count == 0)
             return Strings.Get("Gui_Trainer_NoParams");
@@ -723,12 +723,12 @@ public sealed class TrainerPage : UserControl
     private static string FormatDecimal(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string DisplayCheatName(Cheat cheat) =>
-        Strings.EffectiveLanguage == "zh-TW" ? cheat.Name : Humanize(cheat.Id);
+        Strings.IsChinese ? cheat.Name : Humanize(cheat.Id);
 
     private static string DisplayTweakName(Tweak tweak) =>
-        Strings.EffectiveLanguage == "zh-TW" ? tweak.Label : Humanize(tweak.Id);
+        Strings.IsChinese ? tweak.Label : Humanize(tweak.Id);
 
-    private static string DisplayGroup(string group) => Strings.EffectiveLanguage == "zh-TW" ? group : group switch
+    private static string DisplayGroup(string group) => Strings.IsChinese ? group : group switch
     {
         Tweaks.GroupHero => "Hero",
         Tweaks.GroupTown => "Settlements",

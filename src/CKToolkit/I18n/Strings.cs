@@ -66,6 +66,11 @@ public static class Strings
         }
     }
 
+    /// <summary>
+    /// 判定當前生效語系是否為中文（繁體 zh-TW 或簡體 zh-CN）。
+    /// </summary>
+    public static bool IsChinese => EffectiveLanguage is "zh-TW" or "zh-CN";
+
     public static string Get(string key)
     {
         Dictionary<string, string> dict;

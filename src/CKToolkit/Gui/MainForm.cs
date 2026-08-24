@@ -28,11 +28,13 @@ public sealed class MainForm : Form
     private readonly TabPage _perfTab = new();
     private readonly TabPage _langTab = new();
     private readonly TabPage _trainerTab = new();
+    private readonly TabPage _saveTab = new();
     private readonly TabPage _profilerTab = new();
     private readonly TabPage _aboutTab = new();
     private readonly PerformancePage _performancePage = new();
     private readonly LanguagePage _languagePage = new();
     private readonly TrainerPage _trainerPage = new();
+    private readonly SavePage _savePage = new();
     private readonly ProfilerPage _profilerPage = new();
     private readonly AboutPage _aboutPage = new();
     private readonly Button _apply = new();
@@ -46,6 +48,7 @@ public sealed class MainForm : Form
         Strings.Language = _config.UiLanguage;
         InitializeComponent();
         _languagePage.GameDirProvider = () => _gamePath.Text.Trim();
+        _savePage.GameDirProvider = () => _gamePath.Text.Trim();
         // 分析器分頁現在是唯一的診斷入口，所以它需要自己拿得到遊戲目錄與當下設定：
         // 前者用來啟動遊戲，後者寫進執行清單，事後看故障報告才知道當時掛了什麼。
         _profilerPage.GameDirProvider = () => _gamePath.Text.Trim();
@@ -144,19 +147,24 @@ public sealed class MainForm : Form
     {
         _tabs.Dock = DockStyle.Fill;
         _tabs.Padding = new Point(18, 7);
-        _tabs.Controls.AddRange([_perfTab, _langTab, _trainerTab, _profilerTab, _aboutTab]);
+        _tabs.Controls.AddRange([_perfTab, _langTab, _trainerTab, _saveTab, _profilerTab, _aboutTab]);
         _performancePage.Dock = DockStyle.Fill;
         _languagePage.Dock = DockStyle.Fill;
         _trainerPage.Dock = DockStyle.Fill;
+        _savePage.Dock = DockStyle.Fill;
         _profilerPage.Dock = DockStyle.Fill;
         _aboutPage.Dock = DockStyle.Fill;
         _perfTab.Controls.Add(_performancePage);
         _langTab.Controls.Add(_languagePage);
         _trainerTab.Controls.Add(_trainerPage);
+        _saveTab.Controls.Add(_savePage);
         _profilerTab.Controls.Add(_profilerPage);
         _aboutTab.Controls.Add(_aboutPage);
         _profilerPage.BusyChanged += busy => SetBusy(busy, profilerOwnsBusy: true);
         _profilerPage.LogMessage += message => AppendLog(message);
+        _savePage.BusyChanged += busy => SetBusy(busy, profilerOwnsBusy: true);
+        _savePage.LogMessage += message => AppendLog(message);
+        _tabs.Selected += (_, e) => { if (e.TabPage == _saveTab) _savePage.RefreshCatalog(); };
         _trainerPage.LaunchGameRequested += async () => await ApplyThenLaunchAsync();
         return _tabs;
     }
@@ -250,6 +258,7 @@ public sealed class MainForm : Form
         _perfTab.Text = Strings.Get("Gui_Tab_Performance");
         _langTab.Text = Strings.Get("Gui_Tab_Language");
         _trainerTab.Text = Strings.Get("Gui_Tab_Trainer");
+        _saveTab.Text = Strings.Get("Gui_Tab_Saves");
         _profilerTab.Text = Strings.Get("Gui_Tab_Profiler");
         _aboutTab.Text = Strings.Get("Gui_Tab_About");
         _apply.Text = Strings.Get("Gui_Apply");
@@ -258,6 +267,7 @@ public sealed class MainForm : Form
         _performancePage.ApplyLanguage();
         _languagePage.ApplyLanguage();
         _trainerPage.ApplyLanguage();
+        _savePage.ApplyLanguage();
         _profilerPage.ApplyLanguage();
         _aboutPage.ApplyLanguage();
         RefreshPathStatus();

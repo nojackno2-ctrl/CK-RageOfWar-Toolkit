@@ -213,6 +213,10 @@ public sealed class IniFile
 
     public void SetValue(string? section, string key, string value)
     {
+        EnsureSingleLine(section, nameof(section));
+        EnsureSingleLine(key, nameof(key));
+        EnsureSingleLine(value, nameof(value));
+
         string sec = (section ?? string.Empty).Trim();
         string k = key.Trim();
 
@@ -244,12 +248,22 @@ public sealed class IniFile
     /// </summary>
     public void AppendToListSection(string section, string key, string value)
     {
+        EnsureSingleLine(section, nameof(section));
+        EnsureSingleLine(key, nameof(key));
+        EnsureSingleLine(value, nameof(value));
+
         string sec = section.Trim();
         InsertKeyIntoSection(sec, key.Trim(), value);
     }
 
     private void InsertKeyIntoSection(string section, string key, string value)
     {
+        // 此方法是所有新節區／鍵值的共同寫入邊界。即使未來新增呼叫端，
+        // 也不能讓外部字串藉由 CR/LF 逸出目前行並注入另一個 INI 節區或鍵。
+        EnsureSingleLine(section, nameof(section));
+        EnsureSingleLine(key, nameof(key));
+        EnsureSingleLine(value, nameof(value));
+
         string separator = "=";
         var sampleLine = _lines.FirstOrDefault(l => l.Type == LineType.KeyValue && string.Equals(l.Section, section, StringComparison.OrdinalIgnoreCase))
                       ?? _lines.FirstOrDefault(l => l.Type == LineType.KeyValue);
@@ -357,6 +371,14 @@ public sealed class IniFile
                 EqualsSeparator = separator,
                 RawText = $"{key}{separator}{value}{_defaultLineEnding}"
             });
+        }
+    }
+
+    private static void EnsureSingleLine(string? text, string paramName)
+    {
+        if (text is not null && text.IndexOfAny(['\r', '\n']) >= 0)
+        {
+            throw new ArgumentException("INI 節區、鍵和值不得包含 CR 或 LF 字元。", paramName);
         }
     }
 

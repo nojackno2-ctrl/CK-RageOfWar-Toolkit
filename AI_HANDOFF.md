@@ -14,7 +14,198 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 當前狀態：v1.0.2 版本發布準備 (2026-08-23)
+## 最新進度：v1.0.3 版本升級、版本識別同步與發布準備 (2026-08-24)
+
+- **版本與發布升級 (v1.0.3)**：
+  - 版本號全面升級至 **1.0.3**（涵蓋 `CKToolkit.csproj`、`CliHost.cs`、三語 `strings.*.json` 視窗標題與 CLI 版本輸出）。
+  - 同步更新 `README.md` 中英文版多國語言包詞彙數量（3,925 條）與生成單位等級上限（Lv.1~1000）。
+  - 修復 `SelfTest` 測試腳本語法與中繼資料驗證呼叫，Release managed build 0 warning / 0 error，39 組測試（593+ 檢查點）全數綠燈通過。
+  - 本地單檔發布驗證通過：framework-dependent (~4.1 MB) 與 self-contained (~53 MB) 均正確產出。
+  - 準備提交 commit、建立 `v1.0.3` tag 並推送到 GitHub 觸發自動化 Release 構建。
+
+## 歷史進度：README.md 與實況全面同步、SelfTest 語法修正與 39 組全綠通過 (2026-08-24)
+
+- **文件同步**：
+  - `README.md` 中英文版同步更新多國語言包詞彙數量至 **3,925 條**（涵蓋 7 套戰役與劇本，符合 ISSUE-028 擴充實況）。
+  - `README.md` 中英文版同步修正修改器滑鼠生成單位初始等級上限為 **Lv.1~1000**（與 `set_selected_level` 及 `CheatParamsDialog.cs` 實況一致）。
+- **測試套件維護**：
+  - 修正 `src/CKToolkit.SelfTest/Program.cs` 字串逸出與 `ValidateMeta` / `LangInstaller.MarkerPath` 呼叫。
+  - Release managed build：0 warning / 0 error；SelfTest 39 組測試（593+ 檢查點）全部綠燈通過。
+
+## 歷史進度：18 項已知問題修復與回歸驗證完成，全數進入待實測看板 (2026-08-24)
+
+- **管線安全與原子性**：
+  - `ISSUE-029`：`GameVersion.cs` 與 `PatchPipeline.cs` 對非 Steam 2004-02-19 之未知組建嚴格硬性拒絕（ExitCode 4, 零磁碟寫入）。
+  - `ISSUE-034`：`PatchPipeline.cs` 與 `PerfModule.cs` 核心層強制執行解析度與網格上限 `<= 4096x2400`。
+  - `ISSUE-035` / `ISSUE-046`：`ApplyAllStaged` 與 `RestoreAllStaged` 實作兩階段記憶體暫存與跨檔原子寫入；`Program.cs` 加上最外層例外邊界防護。
+  - `ISSUE-036`：設定檔載入錯誤（`LoadError != null`）一律 Fail-Closed 拒絕寫入。
+  - `ISSUE-040`：語言包設定在套用前驗證存在性，不存在則整批拒絕且 5 檔零寫入。
+  - `ISSUE-045`：CLI `--game` 路徑無效時 Fail-Closed 報 `GameNotFound`，不靜默退回自動偵測。
+  - `ISSUE-041`：`run --watch --json` 輸出合規結構化 JSON 事件。
+- **中繼資料與在地化資料品質**：
+  - `ISSUE-037`：`IniFile.cs` 嚴格拒絕 Section/Key/Value 中的 CRLF 注入；`LanguagePack.cs` 嚴格檢查 `GameLangFolder` 與 Unicode scalar 範圍及跨度上限（65536）。
+  - `ISSUE-038`：`PatchState.cs` 嚴格驗證 `.patch_marker.json` 結構，損壞/空 marker 判定為 `Unrecognised`。
+  - `ISSUE-030`：自官方西語版 `local.pak` 提取官方原文字串，替換西班牙語主戰役 876 筆繁中殘留（CJK 污染歸零）。
+  - `ISSUE-032`：日文主戰役與教學關卡 156 筆字面換行控制序列正規化。
+- **存檔與玩家統計**：
+  - `ISSUE-044`：`PlayerStatistics.cs` 最愛國家分配演算法修正為 `(count + 4) / 3`，保證最愛國家場次嚴格大於其餘各國，消除平手偏差。
+  - `ISSUE-039`：保留未滿 1 小時之精確毫秒，存檔讀寫加入並行檔案鎖保護。
+- **UI 與三語在地化**：
+  - `ISSUE-042`：`TrainerPage.cs`、`CheatParamsDialog.cs` 支援 `Strings.IsChinese`，三語 `strings.*.json` 鍵集與佔位符 100% 嚴格一致。
+- **資產完整性與測試覆蓋**：
+  - `ISSUE-031` / `ISSUE-033` / `ISSUE-043`：`.gitignore` 排除 `*.cksave`；`SelfTest` 新增各項邊界回歸測試與 `ckperf.dll` SHA256 完整性斷言。
+  - Release managed build 0 warning / 0 error，SelfTest 39 組全綠通過。
+  - 18 項問題全數標記為 `🟡 已修碼 · 待實測` 並登記於 `ISSUES.md` 待實測看板。
+
+## 歷史進度：完整專案稽核進行中，發現未知組建仍可寫入 (2026-08-23)
+
+- Release managed build：成功，0 warning / 0 error；39 組 SelfTest 全綠。
+- CKPerf `Release|Win32`：成功；重建 DLL 與簽入資產同為 167,936 bytes，SHA-256 完全一致。
+- 實際 `CKToolkit.exe status --json` / `verify --json`：exit 0；本機 Steam 組建為已知 `0x4034EFB1`，5 個目標檔案皆 recognised 且與設定相符。
+- 稽核發現 `ISSUE-029`：`AGENTS.md` 要求未知組建拒絕修改，但目前程式與 SelfTest 明確允許只警告後繼續寫入。已登記為 🔴，本次檢查任務未擅自改變行為。
+- 稽核發現 `ISSUE-030`：西班牙語主戰役 1,199 筆中有 876 筆含漢字、877 筆與繁中完全相同，與 README 的 100% 覆蓋聲明衝突；現有測試無法抓出內容污染。
+- 稽核發現 `ISSUE-031`：正式 Release EXE 內嵌簽入的預建 `ckperf.dll`，但 release job 不重建它；獨立原生 workflow 的 attestation 並未綁定 EXE 內的那份 DLL。目前本機重建雜湊一致，但 CI 缺少硬性來源鏈門檻。
+- 稽核發現 `ISSUE-032`：日文主戰役／教學共 156 筆把字面換行控制序列變成 XML attribute 的實際換行，可能在遊戲解析時被正規化而遺失；SelfTest 未覆蓋控制序列保持。
+- Codex 子代理另確認 `ISSUE-034`～`ISSUE-042`：解析度硬上限可由設定繞過、RestoreAll 可部分寫入後失敗、損壞設定 fail-open、marker 不完整造成不可逆、第三方語言 metadata 注入／DoS、player.ini 競寫與時間截斷、遺失語言包仍成功 apply、watch JSON 契約破壞、zh-CN 修改器 UI 退回英文。
+- AGY CLI 已依使用者明確授權，以 `gemini-3.7-flash-medium` read-only 模式分析 `LanguagePack.cs`／`LangModule.cs`／`IniFile.cs`（exit 0）；獨立確認 CRLF→INI 注入與 `font.ranges` 資源耗盡。AGY 的 stock-language 大小寫與 GUI 匯入路徑疑慮經主代理核對後排除。
+- 發佈／文件稽核另登記 `ISSUE-043`：master 與 v1.0.2 版本識別、tag gate、`*.cksave` 排除、公開本機路徑／PDB path、README 矛盾與失效連結需在下次發布前處理。
+- 最終本機驗證：Release build 0 warning / 0 error；SelfTest 593 個 `[OK]` 全通過；framework-dependent 與 self-contained win-x64 單檔 publish 成功（4,214,445 / 53,111,297 bytes）；NuGet vulnerability audit 無已知漏洞。
+- 最終實機唯讀 `CKToolkit.exe verify --json`：exit 0、`allMatchesConfig=true`、`allRecognised=true`、0 warning / 0 error。公開 GitHub repo 與 v1.0.2 的 release／ckperf workflow 均為 success；遠端發布 EXE 未執行，因本機權限審查要求另行明確授權執行下載的二進位檔。
+
+## 最新進度：修改器「啟動遊戲」移到設定下方 (2026-08-23)
+
+- 依使用者要求，`TrainerPage` 的「啟動遊戲」按鈕與提示列已從風險提示下方移到作弊／數值分頁下方。
+- 僅調整 `TableLayoutPanel` 列順序；按鈕事件與「先套用設定再啟動」流程未變。
+- `dotnet build CKToolkit.sln --no-restore`：成功，0 warning / 0 error。
+- `dotnet run --project src/CKToolkit.SelfTest --no-build`：39 組全部通過。
+- 已開啟 Debug GUI 實際確認：修改器內容下方完整顯示啟動列，底部全域操作列未受影響；驗證用視窗已關閉。
+
+## 最新進度：全戰役與劇本在地化補全與 local.pak 注入 (2026-08-23)
+
+### 使用者需求
+使用者回報：「檢查所有戰役，有戰役沒有被翻譯到」並要求「全部解決掉」。
+
+### 逆向工程與根因發現
+1. **未翻譯檔案清單**：
+   - 戰役：`Adventures\Return to the Throne.bfhp` (378 條文字，82 個 XML 檔)
+   - 戰役：`Adventures\Defenders.bfhp` (40 條文字，10 個 XML 檔)
+   - 戰役：`Adventures\Invaders.bfhp` (3 條文字，8 個 XML 檔)
+   - 劇本：`Scenarios\The fall of Avalon.bfhp` (41 條文字，10 個 XML 檔)
+   - 劇本：`Scenarios\Ascendency.bfhp` (5 條文字，8 個 XML 檔)
+2. **根因**：原廠將額外戰役/劇本以 HPFS 封裝於獨立 `.bfhp` 檔案。遊戲 VFS 優先尋找 `local.pak` 中的 `ADVENTURES\<戰役>\<LANG>\` 與 `SCENARIOS\<劇本>\<LANG>\`。原 `LangInstaller` 僅走訪 `local.pak` 原有檔案，故遺漏此 5 套戰役/劇本。
+3. **解決方案**：
+   - 逆向分析 HPFS 檔案格式，自 `.bfhp` 提取出全部 118 個原始 XML 模板並內嵌至 `ExtraCampaignTemplates.cs`。
+   - 完成 5 套戰役/劇本全 467 條文字在 6 大語言包 (`zh-TW`, `zh-CN`, `ja-JP`, `es-ES`, `it-IT`, `ru-RU`) 的 100% 翻譯。
+   - `LangInstaller.Install` 重建所有模板並寫入 `local.pak`，路徑完全納入 `FontPatchManifest.AddedEntries`。
+   - `LangInstaller.Uninstall` 自動移除所有注入條目，維持 100% 逐位元組原版無損反轉 (Byte-for-byte reversal)。
+   - `SelfTest` 新增 118 模板檢驗與 7 套戰役宣告檢驗，39 組測試全部通過。
+
+## 當前目標：加入遊戲存檔管理 (2026-08-23)
+
+### 使用者釐清的玩家資料範圍（2026-08-23，最新目標）
+
+使用者附上遊戲內 profile 統計頁截圖，明確表示「玩家資料修改」是要修改：階級／軍事評價、
+單人與多人場數及勝率、遊戲時間、最愛國家與比例、最愛單位、消耗金錢／食物、消滅／損失
+單位、儀式消耗生命、最高經驗單位與等級、單位數量上限。先前只有名稱／顏色／種族的實作
+太窄，需保留但不得當成需求已完成。
+
+### profile 統計逆向證據
+
+- 真實 `player.ini [game0]` 與截圖逐項吻合：`multi=0`、`lost=1` → 單人 1 場／0% 勝；
+  `duration=36000` → 0 小時；`race=1` → 羅馬 100%；`gold=0`、`food=7`；
+  `units_killed=0`、`units_lost=0`、`health_sacr=0`、`level_max_unit=Mule`、
+  `level_max=1`、`units_max=0`。
+- 每場記錄讀取／彙總在 Steam EXE `0x005B7F30`；讀單筆 `[gameN]` 在 `0x005B68D0`；
+  profile 統計頁格式化在 `0x006599B0`。單／多人勝率為 `wins * 100 / games`，時間以
+  `3,600,000 ms` 換算整數小時，資源／擊殺／損失／儀式生命為 64-bit 加總，最高等級與
+  單位上限取最大值，最愛國家由 `race 0/1/2`（Gaul/Roman/random）出現次數決定。
+- 軍事評價不是 `poser_score`。每場公式為
+  `100 * (damage_inflicted + kill_healths / 2 + 1000) /
+  (damage_taken + die_healths / 2 + 10000)`（32-bit 無號整數除法），profile 顯示全部場次平均。
+  真實樣本四項皆 0，因此評價正好是 10，與截圖完全一致；階級名稱由遊戲再依評價換算。
+- `[Player] hash` 是另一組 profile 欄位；統計載入器自己從 game 記錄建立暫時計算值，沒有
+  以該欄位拒絕統計。統計編輯仍應保留 `hash` 與所有未知欄位原樣。
+
+### 已取得的本機實證
+
+- Steam 安裝目錄內的玩家存檔實際位於 `profiles\<玩家>\*.adv`；目前實機樣本為
+  `profiles\noname\1.adv`（6,117,097 bytes），檔頭為 `LZIS`。
+- 遊戲預覽圖與存檔成對，命名為 `<存檔>.adv.bmp`；實機樣本為 `1.adv.bmp`。
+- `profiles\profiles.ini` 的 `default=profiles/noname` 指出預設玩家；玩家資料夾另有
+  `player.ini`，但它是玩家／對戰設定，不屬於單一存檔，不應隨單一存檔匯出或刪除。
+- 根目錄 `currentadv.bfhp` 是目前冒險執行狀態，原廠 `Adventures\*.bfhp` 與
+  `Scenarios\*.bfhp` 是遊戲內容。第一版存檔管理只管理 profile 內的 `.adv` 與同名 BMP，
+  **不得**碰這三類檔案。
+
+### 安全設計邊界
+
+- 這項功能是使用者明確要求管理「玩家資料」，不屬於 §2 的原廠遊戲檔修補備份；仍不得在
+  遊戲目錄建立 `backup/`。匯出採可攜 `.cksave`（ZIP + manifest + SHA-256）封裝。
+- 匯入只允許寫入既有 profile，封裝需驗證路徑、大小與 SHA-256；撞名時配置新的數字存檔槽，
+  不覆寫既有存檔。
+- 刪除採保護性刪除：先在 `%LocalAppData%\CKToolkit\SaveTrash` 產生並驗證 `.cksave`，
+  成功後才移除 `.adv`／`.bmp`；該封裝可由匯入功能復原。
+- 遊戲執行中只允許唯讀列舉；匯出、匯入、刪除全部拒絕，以免讀到半寫入存檔或與遊戲競寫。
+- GUI 必須新增可見的「存檔」分頁與預覽；CLI 提供非互動 `save list/export/import/delete --json`。
+- 第一版已編輯 `[Player]` 與 `[Player 0]` 互為鏡像的名稱、顏色（0..7）、種族；
+  最新目標需再加入上述 `[gameN]` 統計摘要編輯器，且保留仍存在之 game section 的未知欄位。
+- `.adv` 是多區塊 LZIS；現有 `tools/trainer/lzis_decompress.py` 只驗證過 config.ini 且只解
+  第一區塊，專案也沒有可驗證的重壓縮器。因此不得猜位址修改存檔內金錢、單位或地圖狀態；
+  等取得完整格式與解壓→重封→遊戲讀取的實機證據後再擴充。
+
+### 目前實作里程碑（程式與合成流程完成，待真實遊戲寫入驗收）
+
+- 已新增 `Core/Saves/SaveManager.cs`：唯讀清冊、`.cksave` 匯出／SHA-256 驗證匯入、
+  撞名配置下一個數字槽、先封裝再刪除、player.ini 三項資料的原子更新。
+- 已新增 `Gui/SavePage.cs` 並整合到 `MainForm` 的可見「存檔」分頁：玩家選擇、名稱／顏色／
+  種族編輯、存檔表格、BMP 預覽、匯入／匯出／保護性刪除。
+- 已新增 `Cli/CliHost.Saves.cs` 與 `save list/export/import/delete/player get/player set`；所有路徑
+  可輸出穩定 JSON 封套。
+- 三語字串目前各 448 鍵，JSON 可解析且鍵數一致。
+- `dotnet build CKToolkit.sln --no-restore`：**成功，0 warning / 0 error**。
+- `dotnet run --project src/CKToolkit.SelfTest --no-build`：**39 組全部通過**。第 39 組涵蓋
+  清冊唯讀、manifest／SHA-256、篡改拒絕零寫入、撞名匯入、逐位元組一致、保護性刪除後
+  復原、player.ini 未知欄位保留與鏡像同步、CLI camelCase JSON、SavePage／MainForm 控制項建立。
+- 真實 Steam 目錄唯讀 CLI 已通過：`profileCount=1`、`saveCount=1`、`1.adv`、BMP 預覽；
+  `player get` 回報 `noname / color 0 / race 1 / games 1`，操作前後 profile 全檔案名稱、大小與
+  時間戳完全一致（`readonly=True`）。
+- 三語各 448 鍵，鍵集一致，所有 `{n}` 佔位符序列一致；`git diff --check` 無內容錯誤
+  （只有 Git 提示工作樹 LF 日後會依設定轉 CRLF）。
+- 尚待真實遊戲寫入驗收：GUI 實際畫面、真實 `.adv` 匯出→匯入→進遊戲載入、保護性刪除
+  復原、player.ini 修改後遊戲顯示。未經使用者允許不得為測試改寫現有玩家資料；此階段
+  應標示為「程式與合成驗證完成，待實機驗收」，不可宣稱已在遊戲內完成。
+
+### 統計編輯器進度
+
+- 已新增 `Core/Saves/PlayerStatistics.cs` 第一版，依上述遊戲公式讀取彙總、配置 game records、
+  分配總量並原子寫回；尚未接 GUI/CLI 或通過測試。
+- 首次建置失敗：`PlayerStatistics.cs:375 CS9176`，原因是無目標型別的集合運算式直接接
+  `.Where()`。這是 C# 語法問題，需改成 `new[] { 0, 1, 2 }` 後重建；不可把此階段標為完成。
+- 統計核心修正後可建置；接上 `PlayerStatisticsDialog` 的首次建置又因屬性 `Update` 遮蔽
+  `Control.Update()` 觸發 `CS0108`（TreatWarningsAsErrors）。應改名 `ProposedUpdate`，不要用
+  `new` 隱藏框架成員。
+- 兩個編譯問題均已修正。統計摘要核心、`save stats get/set` JSON CLI、GUI「編輯遊戲統計」
+  對話框已接入；三語目前各 448 鍵。`dotnet build CKToolkit.sln --no-restore` 已重新通過
+  （0 warning / 0 error）。尚未補統計 SelfTest 或做真實 profile 唯讀公式對照。
+- 統計 SelfTest 已加入且核心案例全通過：真實截圖數值重現、軍事評價 10 公式、五場彙總、
+  增減 game section、局部 CLI 更新保留 duration、hash／未知欄位保留與錯誤零寫入。整套目前
+  唯一失敗是 `PlayerStatisticsDialog.CreateControl()` 未建立獨立 Form handle；需改成讀取
+  `statsDialog.Handle` 強制建立後再重跑，尚不可宣稱全綠。
+- 對話框測試已改用 `Handle` 並重新跑完全套：`dotnet build` 0 warning / 0 error，39 組
+  SelfTest 全部通過。第 39 組已涵蓋統計讀取唯讀、實機截圖值、軍事評價、5 場建立、2 場
+  縮減、勝場錯誤零寫入、hash／未知欄位保留、CLI stats get/set camelCase JSON 與 GUI handle。
+- 真實 Steam `noname/player.ini` 的 `save stats get --json` 已唯讀驗證：1 場單人、0 勝／0%、
+  多人 0、0 小時、軍事評價 10、羅馬 100%、食物 7、Mule 等級 1、其他截圖項目皆 0；
+  執行前後 SHA-256／長度／時間戳一致（`readonly=True`）。
+- 最新三語字串各 448 鍵，placeholder parity 為 0 mismatch，`git diff --check` 無內容錯誤
+  （僅 LF→CRLF 提示）。尚待使用者自行用真實 profile 寫入後進遊戲查看；不可標示為已實機
+  寫入驗收。
+- `AGENTS.md`、README、`docs/save-management.md` 與 reverse-engineering notes 已同步最新
+  統計範圍、公式、CLI 與歷史 section 刪除確認規則。最終再跑建置與 39 組 SelfTest 全綠；
+  真實 profile 最終唯讀對照仍為 `1/0/0%`、rating 10、Roman 100%、food 7、Mule level 1，
+  且 `readonly=True`。本次沒有改寫使用者真實 `player.ini`。
+
+## 前一狀態：v1.0.2 版本發布準備 (2026-08-23)
 
 1. **穩定性防護與產品化分流**：
    - 效能頁提供「已驗證的穩定性保護（建議，窄 guard）」與「實驗性極端負載腳本保護（VEH / 腳本修復）」。

@@ -18,6 +18,7 @@ cktoolkit.json
 ckprofile.txt
 *.orig
 *.superseded
+*.cksave
 
 # Scratch working data (intermediate translation build artifacts)
 scratch/

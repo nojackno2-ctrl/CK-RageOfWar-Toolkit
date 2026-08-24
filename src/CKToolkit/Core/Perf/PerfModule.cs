@@ -21,6 +21,11 @@ public sealed class PerfModule : IPatchModule
     /// </summary>
     public void ApplyExe(ref byte[] exeBytes, ToolkitConfig config)
     {
+        var (surfaceWidth, surfaceHeight) = ParseDimensions(config.Perf.Resolution, 0, 0);
+        EnsureSurfaceSupported(config.Perf.Resolution, surfaceWidth, surfaceHeight);
+        if (config.Perf.Hires != 0)
+            EnsureSurfaceSupported(config.Perf.Hires.ToString(), config.Perf.Hires, surfaceHeight);
+
         var pe = PeFile.Parse(exeBytes);
 
         // 1. LargeAddressAware (2GB -> 4GB)
@@ -85,6 +90,10 @@ public sealed class PerfModule : IPatchModule
     public void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null)
     {
         var (resW, resH) = ParseDimensions(config.Perf.Resolution, 1920, 1080);
+        EnsureSurfaceSupported(config.Perf.Resolution, resW, resH);
+        if (config.Perf.Hires != 0)
+            EnsureSurfaceSupported(config.Perf.Hires.ToString(), config.Perf.Hires, resH);
+
         int zoomMapCapacity = config.Perf.Hires >= 1600 ? Math.Max(config.Perf.Hires, resW) : 1600;
 
         var extraWanted = new List<(int Width, int Height)>();
@@ -93,6 +102,7 @@ public sealed class PerfModule : IPatchModule
             foreach (string resStr in config.Perf.AddRes)
             {
                 var (w, h) = ParseDimensions(resStr, 0, 0);
+                EnsureSurfaceSupported(resStr, w, h);
                 if (w > 0 && h > 0)
                 {
                     if (w <= zoomMapCapacity)
@@ -138,5 +148,18 @@ public sealed class PerfModule : IPatchModule
         }
 
         return (defaultW, defaultH);
+    }
+
+    private static void EnsureSurfaceSupported(string value, int width, int height)
+    {
+        if (CellGridPatch.IsSurfaceSupported(width, height)) return;
+
+        throw new ArgumentOutOfRangeException(
+            nameof(value),
+            I18n.Strings.Get(
+                "Error_ResolutionExceedsGridCeiling",
+                value,
+                CellGridPatch.MaxSurfaceWidth,
+                CellGridPatch.MaxSurfaceHeight));
     }
 }
