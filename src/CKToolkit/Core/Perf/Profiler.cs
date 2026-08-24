@@ -304,7 +304,7 @@ public static partial class Profiler
         public bool CatchCrash { get; set; } = true;
 
         /// <summary>minidump 是否包含完整記憶體 (檔案會有 1~2 GB)。</summary>
-        public bool FullMemoryDump { get; set; } = false;
+        public bool FullMemoryDump { get; set; } = true;
 
         /// <summary>遊戲加速倍率 (以引擎原生速度 1000 為基準，10 = 10 倍速)。0 或 1 = 不加速。</summary>
         public int SpeedMultiplier { get; set; } = 0;

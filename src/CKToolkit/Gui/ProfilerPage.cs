@@ -264,6 +264,7 @@ public sealed class ProfilerPage : UserControl
 
         r = NewRow(host);
         _fullDump.AutoSize = true;
+        _fullDump.Checked = true;
         _fullDump.Margin = new Padding(22, 4, 0, 2);
         host.Controls.Add(_fullDump, 0, r);
         host.SetColumnSpan(_fullDump, 2);

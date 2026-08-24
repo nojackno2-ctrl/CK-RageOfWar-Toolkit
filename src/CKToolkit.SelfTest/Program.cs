@@ -7,6 +7,7 @@ using CKToolkit.Core.Perf;
 using CKToolkit.Core.Runtime;
 using CKToolkit.Core.Saves;
 using CKToolkit.Core.Trainer;
+using CKToolkit.Gui;
 using CKToolkit.I18n;
 
 namespace CKToolkit.SelfTest;
@@ -2642,12 +2643,22 @@ internal static class Program
     // --- 37. 死行程／無效 handle 的位址空間掃描不得冒充 100% 用滿 --------
     private static void TestAddressSpaceUnavailable()
     {
-        Console.WriteLine("37. 位址空間取樣失敗的防假警報測試");
+        Console.WriteLine("37. 位址空間取樣失敗的防假警報與分析器選項測試");
 
         var space = Profiler.QueryAddressSpace(IntPtr.Zero, largeAddressAware: true);
         Check("無效程序 handle 的位址空間掃描標記為不完整", !space.Complete);
         Check("不完整掃描不回報 100% 使用率", space.UsedPercent == 0.0);
         Check("不完整掃描不捏造已用位址空間", space.Used == 0);
+
+        var profilerOpt = new Profiler.Options();
+        Check("Profiler.Options.FullMemoryDump 預設為 true", profilerOpt.FullMemoryDump);
+        Check("Profiler.Options.CatchCrash 預設為 true", profilerOpt.CatchCrash);
+        Check("Profiler.Options.Detailed 預設為 true", profilerOpt.Detailed);
+
+        using var profilerPage = new ProfilerPage();
+        profilerPage.ApplyLanguage();
+        profilerPage.CreateControl();
+        Check("分析器分頁控制項可正常建立", profilerPage.IsHandleCreated);
     }
 
     // --- 38. 產品化穩定層與修改器風險分級 -------------------------------

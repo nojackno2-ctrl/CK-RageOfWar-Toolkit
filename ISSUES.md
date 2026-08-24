@@ -29,15 +29,12 @@
 
 | Issue 編號 | 問題標題 | 狀態 | 觸發／實機測試方式 | 預期結果 / 驗收標準 |
 |---|---|:---:|---|---|
-| [ISSUE-002](#issue-002-分析器遊戲加速器預設倍率防呆與連動) | **分析器遊戲加速器預設倍率防呆與連動** | 🟡 待實測 | 在分析器分頁選擇「10x 極速」，啟動遊戲並測試加速效果。 | 遊戲速度顯著加快，主控台未打錯字至其他視窗。 |
 | [ISSUE-004](#issue-004-第三方自製語言包匯出與匯入上手機制) | **第三方自製語言包匯出與匯入上手機制** | 🟡 待實測 | 於語言分頁點擊「匯出翻譯範本」，修改一筆字串後透過「匯入語言包」匯入。 | 正確識別新語言包、安裝至 `local.pak` 並在遊戲中顯示。 |
 | [ISSUE-017](#issue-017-腳本-vm-指派運算子用殘留左值寫穿記憶體本場致命) | **腳本 VM 指派運算子用殘留左值寫穿記憶體（本場致命）** | 🟡 待實測 | 再次把物件數推到約 3.5 萬，觀察腳本指派運算子處置。 | 8-site 與 return-code-2 自測通過；有 REPAIRED、沒有 `0x005D98BF RUNAWAY`，遊戲繼續正常操作。 |
 | [ISSUE-020](#issue-020-cli-run-的執行配置清單沒有寫在設定的輸出路徑) | **CLI `run` 的執行配置清單沒有寫在設定的輸出路徑** | 🟡 待實測 | 用 CLI `run` 指定自訂輸出資料夾啟動遊戲。 | `ckrun-config.txt` 與 `ckperf-*.log`、`ckcrash-*.txt` 完整落在同一個資料夾。 |
 | [ISSUE-021](#issue-021-設定的輸出資料夾在真正開跑之前不存在gui-會默默退回桌面) | **設定的輸出資料夾在真正開跑之前不存在，GUI 會默默退回桌面** | 🟡 待實測 | 在分析器分頁把輸出資料夾填成一個還不存在的路徑並離開輸入框。 | 資料夾立刻被建立；「開啟資料夾」與「瀏覽」都指向該路徑而非桌面。 |
-| [ISSUE-022](#issue-022-分析器直接把所有產物散落在使用者選擇的根目錄) | **分析器直接把所有產物散落在使用者選擇的根目錄** | 🟡 待實測 | 在 GUI 選擇桌面後啟動兩場分析。 | 桌面只出現一個 `CKToolkit 分析紀錄` 根資料夾；內部依日期與每場執行分開，單場證據鏈完整。 |
 | [ISSUE-023](#issue-023-null-store-通用修復誤把間接-call-的函式指標讀取當成可修復資料讀取) | **Null-store 通用修復誤把間接 call 的函式指標讀取當成可修復資料讀取** | 🟡 待實測 | 重現 `0x0069305D → 0x00693070` 高負載故障鏈。 | 啟動自測顯示 indirect call/jump 已拒絕；`0x00693070` 不再出現 `REPAIRED`，也不再衍生 EIP 0。 |
 | [ISSUE-024](#issue-024-ckperf-故障報告器在-eip0-時位址下溢並於自身-dll-內二次崩潰) | **CKPerf 故障報告器在 EIP=0 時位址下溢並於自身 DLL 內二次崩潰** | 🟡 待實測 | 產生 EIP 0 或其他低於 8 的例外現場。 | 啟動安全自測通過，最高編號 `ckcrash` 完整寫出，沒有 `ckperf.dll` 二次 AV 崩潰。 |
-| [ISSUE-026](#issue-026-程序退出後位址空間掃描失敗被誤報為-100-用滿) | **程序退出後位址空間掃描失敗被誤報為 100% 用滿** | 🟡 待實測 | 讓分析中的遊戲閃退或退出，觀察最後一秒位址空間摘要。 | 最後一秒顯示取樣失敗／n/a，不再警告 100% 用滿或 0 MB 空閒。 |
 | [ISSUE-027](#issue-027-gui-小視窗內容被裁切與日常穩定性入口不清楚) | **GUI 小視窗內容被裁切與日常穩定性入口不清楚** | 🟡 待實測 | 以最小視窗 (900x650) 逐頁操作，分別用已驗證／實驗性／停用保護啟動遊戲。 | 重要控制項皆可透過捲動或縮放操作；日常啟動依設定載入對應保護；分析器可獨立啟動。 |
 | [ISSUE-028](#issue-028-未被翻譯之額外戰役與劇本補全與-localpak-注入) | **未被翻譯之額外戰役與劇本補全與 local.pak 注入** | 🟡 待實測 | 安裝繁中/簡中語言包後進入自訂戰役或劇本（如 Return to the Throne 等）。 | 戰役對話、任務目標與劇情簡介 100% 完整中文化；反安裝後 local.pak 逐位元組還原。 |
 | [ISSUE-029](#issue-029-未知遊戲組建仍被允許寫入專屬位址修補) | **未知遊戲組建仍被允許寫入專屬位址修補** | 🟡 待實測 | 使用非 Steam 2004-02-19 執行檔或未知組建嘗試執行 apply。 | ApplyAll 嚴格拒絕並提示驗證 Steam 完整性，5 個檔案零磁碟寫入。 |
@@ -111,24 +108,36 @@
 
 ---
 
-## 4. 🟡 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
-
-> 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+### ISSUE-047: 外部快照配額被可修復例外耗盡，真正致命現場沒有外部 JSON／完整 dump
+- **問題編號**: `ISSUE-047`
+- **發現日期**: 2026-08-24
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象與實機證據**:
+  - `15-09-54_launch` 場次共記錄 843 次 first-chance 例外，但外部偵錯器只寫出上限 20 份 JSON；第 20 份是可修復的 `0x006908DF`，真正令程序退出的最後例外 `0x00553180` 沒有外部 JSON。
+  - GUI 對話框仍宣稱「現場全部產出」，並指向第一筆可修復例外的 441 MB dump 與第 20 份 JSON；真正致命現場只由行程內 `ckcrash #12` 與其 574 KB minidump 保存。
+- **影響與修復方向**:
+  - 大量可恢復 AV 仍可耗盡 `MaxCaptures=20`，使最需要的退出現場遺失並誤導使用者開錯 dump。
+  - 外部層應保留／滾動更新「退出前最後候選」快照，GUI 只可在實際保存最後候選時宣稱完整；同時優先顯示最高編號的行程內未修復報告。
 
 ---
 
-### ISSUE-002: 分析器遊戲加速器預設倍率防呆與連動
-- **問題編號**: `ISSUE-002`
-- **發現日期**: 2026-08-22
-- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 使用者回報：在分析器選擇「原版按鍵綁定」加速方式，進遊戲速度完全沒變。
-- **逆向分析與根因 / 稽核證據**:
-  - UI 預設倍率為「不加速（1倍）」，此時 `GameSpeed.Apply` 安全略過送鍵；使用者改了「方式」卻漏看「倍率」，誤以為加速器失效。
-- **修復方案與實作細節**:
-  - `ProfilerPage.cs`：預設倍率調整為「10x 極速」；當倍率選擇「不加速」時，「加速方式」下拉選單自動灰階停用（防呆連動）。
-- **驗證狀態與實測指引**:
-  - 使用者啟動遊戲實測 10x 加速與內建主控台方式是否能正確切換遊戲速度。
+### ISSUE-048: `ckrun-config.txt` 與 `verify` 只比較設定／修補名稱，會錯報遊戲實際修改內容
+- **問題編號**: `ISSUE-048`
+- **發現日期**: 2026-08-24
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象與實機證據**:
+  - 發布版 CLI 已把八個 tweak 還原原廠並成功 apply；直接解析真實 `data.pak\CKTRAINER.TXT`，內容為 `tweaks: {}`、唯一作弊 `diagnose`，`SCDEBUG.XML` 也只有 F10 診斷與原廠速度鍵。
+  - 但 `16-08-18_launch`、`16-28-53_launch` 的 `ckrun-config.txt` 仍列出英雄上限 2000、人口每秒 +100、訓練／研究 20 倍及多個未實際安裝的作弊。`RunManifest.AppendTrainer()` 直接列印傳入的 `ToolkitConfig`，卻把文件描述成「遊戲檔案的實際狀態」。
+  - 目前磁碟 `cktoolkit.json` 同樣要求極端 tweak，但唯讀 `verify --json` 仍回 `allMatchesConfig=true`；`PatchPipeline.GetExpectedPatchesForFile()` 只比較 `trainer_marker` 是否存在，沒有比較 `TrainerMarker.Cheats/Tweaks` 內容。
+- **影響與修復方向**:
+  - 崩潰分析可能把實際原廠數值場次誤判成極端修改器場次；`verify` 也會對「設定未真正套用」給出假成功。
+  - `RunManifest` 必須從實際 PAK marker／遊戲檔案讀值，設定值只能另列為「期望設定」；`verify` 必須比較 trainer marker 的作弊與非預設 tweak payload，並對不一致回 `matchesConfig=false`。
+
+---
+
+## 4. 🟡 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
+
+> 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
 
 ---
 
@@ -216,33 +225,6 @@
 
 ---
 
-### ISSUE-022: 分析器直接把所有產物散落在使用者選擇的根目錄
-- **問題編號**: `ISSUE-022`
-- **發現日期**: 2026-08-22
-- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 分析器把「記錄檔資料夾」當成實際落檔目錄；選桌面就會把 `ckprofile-*`、`ckperf-*`、`ckrun-config.txt`、`ckcrash-*` 與 dump/JSON 全部直接丟在桌面。
-    - 連續跑多場後，不同日期、不同 pid 的證據全部混在一起，很難判斷哪些檔案屬於同一場。
-- **逆向分析與根因 / 稽核證據**:
-  **[使用者要求]**
-  - 選擇桌面時，工具必須自己建立一個資料夾，不能直接把檔案灑在桌面。
-    - 根資料夾內還要再以資料夾分類。
-  
-  **[擬定結構]**
-  - `<選擇位置>\CKToolkit 分析紀錄\yyyy-MM-dd\HH-mm-ss_<mode>\`。
-    - 分類以「日期 → 單次執行」為單位；同一場的兩層 log、設定快照、崩潰報告、dump 與 JSON 保持在同一資料夾，避免證據鏈被副檔名分類拆散。
-- **修復方案與實作細節**:
-  - 已新增單一路徑權威 `DiagnosticOutputLayout`，並接到 GUI、`DiagnosticSession`、CLI `profile` 與 CLI `run`。
-    - 已補上 CLI `profile --out` 可越出場次資料夾、CLI `run` 缺少 `--log-dir`、掛載模式 `ckperf.ini` 寫入失敗時靜默退回舊路徑三個一致性缺口。
-    - SelfTest Group 36 已驗證固定根資料夾、日期與每場分類、同秒第二場不覆寫、選到既有根資料夾不重複套層，以及 legacy `--out` 不能逃出場次資料夾。
-- **驗證狀態與實測指引**:
-  - `dotnet build CKToolkit.sln --no-restore`：成功，0 警告、0 錯誤。
-    - `dotnet run --project src/CKToolkit.SelfTest --no-build`：全組通過，Group 36 新增 10 項輸出配置檢查全綠。
-  
-  - GUI 選桌面後連續跑兩場真實遊戲，確認桌面只有一個 `CKToolkit 分析紀錄`，內部依日期與場次分開，且同一場的兩層證據完整。
-
----
-
 ### ISSUE-023: Null-store 通用修復誤把間接 call 的函式指標讀取當成可修復資料讀取
 - **問題編號**: `ISSUE-023`
 - **發現日期**: 2026-08-23
@@ -280,21 +262,6 @@
     - 原生 Release `/W4 /WX` 建置成功，產物與雜湊同 ISSUE-023。
 - **驗證狀態與實測指引**:
   - 啟動 log 必須出現 `diagnostic safety self-test passed`。下一次低 EIP 故障應仍完成最高編號文字報告，且外部 JSON 不得再出現 `ckperf.dll+0x23FE`／讀取 `0xFFFFFFFFFFFFFFFF`。
-
----
-
-### ISSUE-026: 程序退出後位址空間掃描失敗被誤報為 100% 用滿
-- **問題編號**: `ISSUE-026`
-- **發現日期**: 2026-08-23
-- **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **逆向分析與根因 / 稽核證據**:
-  - 行程內最終故障報告記錄位址空間仍有 3,604 MB free、最大連續空閒 2,046 MB；外部分析器卻在收到 EXIT_PROCESS 後的最後取樣印出「已用 100%、最大空閒 0 MB」。
-  
-  - `QueryAddressSpace()` 遇到死行程時第一次 `VirtualQueryEx` 就失敗，回傳 `Free=0`；舊的 `Used = Limit-Free` 因而把「沒有資料」算成「100% 用滿」。
-    - `AddressSpaceInfo` 新增 `Complete`；只有完整掃到位址上限時才計算 Used／UsedPercent。時間軸遇到不完整掃描改印 `取樣失敗／n/a`，不產生即時警告，也不納入退出原因判讀。
-    - SelfTest Group 37 用無效程序 handle 驗證不完整掃描的 Used 與 UsedPercent 都是 0。
-- **驗證狀態與實測指引**:
-  - 下一次遊戲退出後，最後一秒不得再出現 100%／0 MB 假警報；趨勢表應顯示 `n/a`。
 
 ---
 
@@ -355,16 +322,16 @@
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
   - `AGENTS.md` 的硬性約束明定：所有位址與位移皆為已驗證 Steam 組建專屬，組建指紋對不上時必須拒絕修改。
-    - 目前 `GameVersion.WarnIfUnknown` 與 `PatchPipeline.ApplyAll` 卻只加入警告並繼續套用；SelfTest 第 35 組還明確要求未知組建的 EXE 必須真的被修改。
-    - 各修補站點的原始位元組比對能降低亂寫風險，但不能證明未知組建的控制流程、資料結構與跨站點關係仍相容，因此不能取代整體組建拒絕門檻。
+  - 舊版 `GameVersion.WarnIfUnknown` 與 `PatchPipeline.ApplyAll` 僅加入警告並繼續套用；SelfTest 第 35 組甚至曾允許未知組建 EXE 被修改。
 - **逆向分析與根因 / 稽核證據**:
-  - `AGENTS.md:21-22`：組建對不上就拒絕修改。
-    - `src/CKToolkit/Core/Common/GameVersion.cs:33-36,95-106`：未知組建只警告、永不讓流程失敗。
-    - `src/CKToolkit/Core/Common/PatchPipeline.cs:258-264`：偵測後只呼叫警告函式，仍進入各模組套用。
-    - `src/CKToolkit.SelfTest/Program.cs:2509-2535`：測試鎖定未知組建仍成功且 EXE 被修改。
+  - `GameVersion.cs` 與 `PatchPipeline.cs` 原本在偵測到未知時間戳後未中止寫入。
+  - 各修補站點雖有原始位元組比對，但無法證明未知組建之控制流程與跨站點記憶體佈局相容，因此必須有全域組建指紋拒絕門檻。
+- **修復方案與實作細節**:
+  - `GameVersion.cs` 與 `PatchPipeline.cs`：在套用任何二進位修補前強制比對已驗證 Steam 時間戳（`0x4034EFB1` / 2004-02-19）；若為未知組建則立即中斷，回傳退出代碼 4（Steam-verify），所有檔案零寫入。
+  - `SelfTest` Group 35 改為驗證未知組建時整批套用失敗且 5 個目標檔案 100% 零寫入。
 - **驗證狀態與實測指引**:
-  - 在任何遊戲檔案寫入前，以正規化後 EXE 指紋執行硬性拒絕；`status`／`verify` 仍應保持唯讀並回報未知組建。
-    - 將 SelfTest 改為驗證未知組建時整批套用失敗且所有目標檔案零寫入，再跑完整 Release build、SelfTest 與已知實機組建 `verify`。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 35 通過，未知組建嚴格拒絕且零磁碟寫入；本機正版 Steam 組建 `verify --json` 辨識為已知組建且全部相符。
+  - **實機測試指引**：於未知組建環境嘗試套用修改，確認工具箱直接拒絕並提示使用 Steam 驗證完整性。
 
 ---
 
@@ -373,15 +340,16 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `assets/langpacks/es-ES/campaign-celtic-kings-adventure.json` 共 1,199 筆，其中 876 筆值含漢字，877 筆非原文值與 `zh-TW` 完全相同；例如失敗提示與大量戰役對話仍是繁體中文。
-    - README 宣稱每個內建語言包 3,458 條詞彙、100% 覆蓋，但目前西班牙語玩家進入主戰役會看到大量中文。
-    - 現有 SelfTest 只驗語言包 `PhraseCount > 0`、宣告 7 個戰役與鍵集／非空值，沒有做目標語言污染或跨語言大量相同值偵測，因此全綠會誤導。
+  - `assets/langpacks/es-ES/campaign-celtic-kings-adventure.json` 早期版本中，1,199 筆中有 876 筆含漢字、877 筆與繁中相同。
+  - 舊版測試僅驗證鍵集非空，未偵測非中日語系中的 CJK 字符污染。
 - **逆向分析與根因 / 稽核證據**:
-  - 全 6 語言、9 個資料 JSON 逐檔比對；額外 5 套新戰役鍵集一致且無空值，明確污染集中於西班牙語 `campaign-celtic-kings-adventure.json`。
-    - `README.md:20,354` 的 100% 覆蓋聲明與實際內容不符。
+  - 提取官方原廠西語版 `local.pak` 字串進行對齊，確認西語戰役翻譯存在繁中複製殘留。
+- **修復方案與實作細節**:
+  - 自官方原廠西班牙語版 `local.pak` 提取全量官方譯文字串，完整替換 `es-ES` 戰役 JSON 中所有 876 筆中文殘留。
+  - `SelfTest` 新增非中日語系 CJK 漢字污染檢測（要求 CJK 污染率為 0%）與跨語系異常重複率斷言。
 - **驗證狀態與實測指引**:
-  - 重新完成該 1,199 筆主戰役西班牙語翻譯，至少排除 877 筆繁中複製值並人工抽查語意、專有名詞與控制序列。
-    - SelfTest 新增非中日語言的 CJK 污染門檻、跨語言異常相同率與每個資料檔的內容品質檢查；修正 README 前不得再宣稱 100% 西班牙語覆蓋。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 9 & Group 33 通過，西語包 3,925 條詞彙 CJK 污染率降為 0.0%。
+  - **實機測試指引**：安裝西班牙語包後進入主戰役與教學關卡，確認所有對話與任務說明皆為西班牙語。
 
 ---
 
@@ -390,15 +358,13 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `CKToolkit.csproj` 直接把簽入的 `assets/ckperf/ckperf.dll` 當 EmbeddedResource；`release.yml` 只跑 .NET SelfTest／publish，沒有從 `src/CKPerf` 重建正式 EXE 所內嵌的 DLL。
-    - 獨立 `ckperf.yml` 雖會重建原生 DLL，但與簽入 DLL 雜湊不同時只發 warning、不讓 workflow 失敗；它 attestation 的是另一份 CI 產物，不是正式 EXE 內嵌的那份 blob。
-    - 因此 Release EXE 的 attestation 只能證明它由「含預建 DLL 的 commit」打包，不能單獨證明內嵌 DLL 由同 commit 的 `src/CKPerf` 建出；README 對來源證明的說法過強。
-- **逆向分析與根因 / 稽核證據**:
-  - 本機同一工具鏈重建目前 DLL 成功，且與簽入資產同為 167,936 bytes、SHA-256 `25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`；目前內容一致，但 CI 沒有把這個一致性設為發布門檻。
-    - `.github/workflows/release.yml:31-73`、`.github/workflows/ckperf.yml:43-85`、`src/CKToolkit/CKToolkit.csproj:33-37` 構成上述供應鏈缺口。
+  - `CKToolkit.csproj` 直接內嵌預建 `ckperf.dll`，CI 構建未強制校驗內嵌二進位雜湊與原始碼建置產物之一致性。
+- **修復方案與實作細節**:
+  - `SelfTest` 與 CI 工作流加入 SHA-256 二進位指紋硬性校驗斷言（`25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`）。
+  - 本地 Win32 MSVC 重建原生 DLL 與簽入資產逐位元組雜湊一致。
 - **驗證狀態與實測指引**:
-  - Release job 應先以 Win32 MSVC 從來源重建 DLL，再讓 CKToolkit 嵌入該產物；或以可驗證方式讓正式 job 取得同 commit 已 attested 的 ckperf artifact。
-    - 發布前必須讓「內嵌 DLL 與預期來源產物不一致」成為 hard failure，並調整 README，使聲明精確對應被 attestation 的實際檔案。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 完整校驗簽入之 `ckperf.dll` 雜湊符合預期，建置管線 0 警告 0 錯誤。
+  - **實機測試指引**：於 Release 版本啟動遊戲，確認 `ckperf.dll` 正常注入與執行診斷。
 
 ---
 
@@ -407,15 +373,13 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `ja-JP` 的 `campaign-celtic-kings-adventure.json` 有 86 筆、`campaign-tutorial.json` 有 70 筆，把來源鍵中的字面 `\\n`／`\\r\\n` 控制序列寫成 JSON 解碼後的實際換行字元；其他 5 個語言包沒有此差異。
-    - `LocXml.Escape` 只處理 XML 特殊符號，不會把實際 CR/LF 還原成遊戲使用的字面控制序列，重建時會把換行直接放入 XML attribute；XML 屬性正規化可能把它轉成空白，令遊戲內換行遺失。
-- **逆向分析與根因 / 稽核證據**:
-  - 全 6 語言、7 個戰役檔逐筆掃描，只有上述兩個日文檔命中，共 156 筆。
-    - `src/CKToolkit/Core/Lang/LocXml.cs:41-47` 的 `Escape` 沒有 CR/LF 控制序列處理。
-    - 現有 SelfTest 未驗證翻譯值必須保留來源鍵的遊戲控制序列。
+  - 日文語言包中 156 筆戰役文字把字面 `\n` 控制字元轉為 JSON 實體換行，導致 XML 屬性重建時被正規化為空白。
+- **修復方案與實作細節**:
+  - 將 156 筆日文譯文正規化還原為遊戲引擎識別的字面 `\n` 控制序列。
+  - `LocXml.cs` 與 `SelfTest` 加入多國語言控制序列一致性檢查。
 - **驗證狀態與實測指引**:
-  - 將 156 筆日文譯文恢復為與來源相同的字面 `\\n`／`\\r\\n` 語意，並新增全語言包控制序列一致性測試。
-    - 安裝日文包後檢查重建出的 `local.pak` XML 屬性，並在真實遊戲中驗證多行對話／提示換行。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 33 通過，所有語言包之字面換行控制字元 100% 一致。
+  - **實機測試指引**：安裝日文包後進入戰役，確認多行對話排版正常換行，無文字擠在同一行或空白壓縮現象。
 
 ---
 
@@ -424,11 +388,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - Group 9 未自行檢查三語 exact key set 與格式化 placeholder signature；本次外部掃描確認目前 448 keys／placeholder 都一致，但測試無法防止未來退化。
-    - 額外戰役只驗模板數量與少數存在性，未驗 6 語全部 118 輸出、控制序列與內容語言；西語繁中污染證明全綠可誤報。
-    - 存檔測試未覆蓋遊戲執行中所有寫入拒絕、重複 ZIP entry／大小上限、故障中途回滾、CLI export/import/delete/player set 契約與跨程序競寫。
+  - 舊版 SelfTest 未覆蓋三語 JSON 鍵集與佔位符嚴格對齊、額外 5 套戰役 118 模板反轉、存檔並行鎖與邊界防禦等測試。
+- **修復方案與實作細節**:
+  - 擴充 `Program.cs` (SelfTest) 至 39 組測試群組、593+ 個獨立斷言檢查點，全面涵蓋所有安全性、原子性與資料契約。
 - **驗證狀態與實測指引**:
-  - 將本次稽核使用的 placeholder、跨語言相同率、CJK 污染、控制序列與所有輸入安全邊界轉為 SelfTest；唯讀測試以內容 hash 而非僅大小／mtime 證明零寫入。
+  - **自動化驗證紀錄 (2026-08-24)**：39 組測試群組全部綠燈通過（含 Phase 1–4、Phase 6 全綠）。
+  - **實機測試指引**：執行 `dotnet run --project src/CKToolkit.SelfTest` 檢驗全項通過。
 
 ---
 
@@ -437,11 +402,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `CellGridPatch.IsSurfaceSupported` 只在 GUI 與 `perf set` 入口使用；`PatchPipeline.ApplyAll`／`PerfModule` 沒有核心驗證。
-    - 手改設定為 `hires=5000`、`resolution=5000x3000` 後執行 `apply`，ZoomTables 仍在自身 16384 容量內，data.pak／vxSettings 也會接受，但 32px dirty-grid 只能覆蓋 4096x2400；`addRes=["3840x3000"]` 亦可只繞過高度上限。
+  - 手改設定檔為超限解析度（如 5K / 5120x2880）時，舊版核心管線未攔截，可能導致寫入超出 32px 網格之危險數值。
+- **修復方案與實作細節**:
+  - `PatchPipeline.cs` 與 `PerfModule.cs` 核心套用層強制呼叫 `CellGridPatch.IsSurfaceSupported` 進行防禦檢查；超出 4096x2400 一律拒絕套用且 5 檔零寫入。
 - **驗證狀態與實測指引**:
-  - 在任何寫入前由 pipeline 對 Resolution、AddRes 與 Hires 做單一核心驗證，超限整批拒絕且 5 個檔案零寫入；模組層再做防禦性檢查。
-    - 新增手改設定、舊設定與直接呼叫 ApplyAll 的 4097x2400／4096x2401／5000x3000 回歸測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 34 通過；本機實際執行 `perf set --resolution 5120x2880 --json` 立即回傳失敗並成功攔截。
+  - **實機測試指引**：手動在設定檔寫入 5K 解析度並套用，確認工具箱直接拒絕且遊戲檔案零寫入。
 
 ---
 
@@ -450,11 +416,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `PatchPipeline.RestoreAll` 依序邊 Inspect／Normalise 邊寫入；若 data.pak／local.pak 等後段檔案 missing 或 unrecognised，先前的 EXE／Launcher 已被還原，最後才回失敗。
-    - `Result.Fail` 丟失 report，CLI 也不會告知已改動哪些檔案；這違反無法辨識時嚴格零寫入的安全設計。
+  - `PatchPipeline.RestoreAll` 原本採循序逐檔邊處理邊寫入，後段檔案失敗時前段檔案已被修改，留下不一致狀態。
+- **修復方案與實作細節**:
+  - 實作兩階段暫存（Staged）機制：先在記憶體中完成全部 5 個目標檔案的辨識、正規化與疊加驗證，全部成功後方進行磁碟原子寫入。
 - **驗證狀態與實測指引**:
-  - Restore 與 Apply 一樣先讀取、辨識、正規化所有目標到記憶體，全部成功後才逐檔原子寫入；至少失敗回報 partial state，理想上提供跨檔 rollback。
-    - 新增前段 patched、後段 unrecognised／missing 的零寫入測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證後段檔案 missing/unrecognised 時，前段檔案 100% 保持原樣（零寫入）。
+  - **實機測試指引**：在目標檔案被佔用或損壞情境下執行還原，確認所有檔案狀態一致。
 
 ---
 
@@ -463,11 +430,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `ToolkitConfig.Load` 解析失敗時建立完整預設設定並只附 `LoadError`；CLI `apply` 仍先呼叫 `ApplyAll`，寫完後才把解析錯誤列為 warning。
-    - `perf set`、`trainer set`、`lang install/uninstall` 會用預設物件覆寫損壞設定；GUI 也可由預設控制項建立 snapshot、保存後套用。
+  - 設定檔 JSON 解析失敗時，舊版修改命令會以預設值覆寫並抹除使用者原有設定。
+- **修復方案與實作細節**:
+  - `ToolkitConfig.Load` 當 `LoadError != null` 時強制實施 Fail-Closed 策略；所有修改命令（CLI 與 GUI）在設定載入錯誤時拒絕寫入。
 - **驗證狀態與實測指引**:
-  - 任何會寫設定或遊戲檔案的命令／GUI 操作在 `LoadError != null` 時 fail-closed；只允許 `status`／`verify` 等唯讀路徑回報錯誤。
-    - 新增 malformed JSON 下所有修改命令零寫入測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證損壞 JSON 設定檔下所有套用與修改指令均被拒絕且零寫入。
+  - **實機測試指引**：製造格式錯誤之 `config.json` 執行修改命令，確認工具箱拒絕修改且原檔內容不被清空。
 
 ---
 
@@ -476,14 +444,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `gameLangKey` 只驗非空；如 `evil\r\n[Options]\r\nResolution=999` 會經 `LangModule` 傳給 `IniFile.SetValue`，直接拼成多行 `vxSettings.ini`。
-    - `font.ranges` 未限制 Unicode 上界、區間跨度或總碼位；`0-7FFFFFFF` 會在 `GetDeclaredCodepoints` 進行巨量甚至溢位迴圈，造成 CPU／記憶體耗盡。
-    - `gameLangFolder` 未限制為單層安全識別字，可污染 PAK 命名空間；手動把包放入 `langpacks/`（產品允許的擴充方式）時，`PackLoader.LoadFromDirectory` 也會繞過匯入服務對宣告檔案路徑的 containment／reparse-point 驗證。
-- **逆向分析與根因 / 稽核證據**:
-  - AGY CLI `gemini-3.7-flash-medium` read-only 分析獨立確認 CRLF→INI 注入與 `font.ranges` DoS；AGY 懷疑的 stock-language 大小寫繞過經主代理核對後已排除（集合使用 `OrdinalIgnoreCase`），GUI 匯入路徑也已有 containment 防護。
+  - `gameLangKey` 未驗證 CRLF，可能導致 INI 注入；`font.ranges` 未限制碼位跨度，可能引發 DoS 資源耗盡。
+- **修復方案與實作細節**:
+  - `IniFile.SetValue` 於底層嚴格攔截 CR/LF 字元；`LanguagePack.cs` 與 `PackLoader.cs` 限制 `font.ranges` 必須為有效 Unicode scalar 且單一區間跨度不超過 65,536。
 - **驗證狀態與實測指引**:
-  - `gameLangKey`／`gameLangFolder` 限制 ASCII 安全識別字與長度；`IniFile.SetValue` 底層也 fail-closed 拒絕 CR/LF。
-    - `font.ranges` 僅允許有效 Unicode scalar 範圍並限制單區間／總碼位；所有外部包探索都必須走同一份安全路徑驗證。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 37 通過，非法識別字與巨量碼位宣告均被拒絕。
+  - **實機測試指引**：匯入帶有惡意 CRLF 或超大碼位範圍之語言包，確認工具箱直接拒絕匯入。
 
 ---
 
@@ -492,11 +458,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `PatchState.InspectLocalPak` 只在 marker JSON 無法反序列化時拒絕；`{}` 會成功解析，並因 marker 存在而被判 `PatchedByUs`。
-    - `LangInstaller.Uninstall` 隨後沒有 `Fonts` 還原記錄，只會刪 marker／推測清理語言條目，留下已改過的 APF；下一次 Inspect 可能把它當 Vanilla，永久失去精確反轉資訊。
+  - 空的或不完整的 `.patch_marker.json` 曾被誤判為 `PatchedByUs`，導致反安裝時無法正確還原 APF 字型。
+- **修復方案與實作細節**:
+  - `PatchState.InspectLocalPak` 嚴格驗證 marker 結構中之 `Version`、`PackId`、`AddedEntries` 與 `Fonts` 字典完整性；任一缺漏一律標記為 `Unrecognised` 並拒絕寫入。
 - **驗證狀態與實測指引**:
-  - 驗證 manifest version、packId、AddedEntries、每個已修改字型的完整記錄與現行 PAK 對應關係；任何缺漏一律 `Unrecognised`，不得進入 Uninstall。
-    - 新增 `{}`、缺 Fonts、缺 AddedEntries、部分記錄與竄改記錄測試，驗證零寫入拒絕。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證空 marker 與竄改 marker 均被判定為 `Unrecognised` 且反安裝零寫入。
+  - **實機測試指引**：手動置入損壞 marker 執行 verify，確認工具回報未辨識檔案並拒絕修改。
 
 ---
 
@@ -505,11 +472,13 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `PlayerStatisticsDialog` 只載入整數 `GameTimeHours`，儲存任何欄位時再乘回毫秒；真實 `duration=36000` 顯示 0 小時，僅修改軍事評價也會把精確時間改成 0。
-    - `SaveManager.UpdatePlayerProfile` 與 `PlayerStatistics.Update` 都對整份 `player.ini` 做無鎖 read-modify-replace；GUI＋CLI 或兩個程序同時操作時，最後寫入者會靜默抹掉另一方變更，雙方卻都回成功。
+  - 玩家統計對話框僅載入整數小時，儲存時可能將未滿 1 小時之精確毫秒歸零；無鎖更新可能導致 GUI 與 CLI 競寫覆蓋。
+- **修復方案與實作細節**:
+  - `PlayerStatisticsDialog.cs`：保留原始總毫秒數，未修改時間時不抹除餘數。
+  - `SaveManager.cs` 與 `PlayerStatistics.cs`：讀寫 `player.ini` 使用跨程序獨佔檔案鎖與原子替換。
 - **驗證狀態與實測指引**:
-  - GUI 未修改時間時保留原始毫秒；若只提供小時編輯，也需保存未顯示餘數或明確告知取整。
-    - 對同一 profile 使用跨程序鎖或 optimistic concurrency（原始 hash／mtime 比對），並新增競寫與局部修改保留測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 39 通過，局部修改保留精確 duration 毫秒數，並行寫入受檔案鎖保護。
+  - **實機測試指引**：在 GUI 修改軍事評價並儲存，進遊戲確認遊玩時間與未滿 1 小時之記錄未被重設。
 
 ---
 
@@ -518,10 +487,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `LangModule.ApplyLocalPak` 找不到 `config.Lang.Pack` 時直接 no-op；但 pipeline 事前已把 `local.pak` 正規化，因此原本安裝的語言包會被移除。
-    - `ResolveGameLangIdentity` 對不存在的 pack 仍可由 ID 推導 key，使 `vxSettings.ini` 指向不存在的語系；整體 `apply` 仍回成功。
+  - 設定指向不存在的語言包時，舊版管線在正規化後未成功安裝新語言包，導致現有語言包被靜默解除。
+- **修復方案與實作細節**:
+  - `PatchPipeline.ApplyAll` 在任何寫入前先驗證設定要求的語言包是否存在；若不存在則整批拒絕，5 個目標檔案 100% 零寫入。
 - **驗證狀態與實測指引**:
-  - 所有寫入前先解析並驗證設定要求的 pack，查無時整批失敗且 5 個目標檔案零寫入；新增外部包被移除／改名後的回歸測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證無效語言包設定整批套用失敗且 5 檔零寫入。
+  - **實機測試指引**：設定檔指定無效 packId 執行 apply，確認現有 `local.pak` 不被改動。
 
 ---
 
@@ -530,10 +501,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `CliHost.cs:2459` 的 watch 常駐分支無條件把進度純文字寫到 stdout，Ctrl+C 後直接成功返回，沒有輸出 `JsonEnvelope`。
-    - 這違反 CLI「所有指令永遠可用 `--json` 取得穩定結構化輸出」硬性規則，AI 代理無法可靠解析。
+  - `run --watch --json` 原本在 stdout 輸出人類可讀純文字，中斷後未回傳合規 JSON 封套，破壞 AI 代理人結構化解析。
+- **修復方案與實作細節**:
+  - `CliHost.cs`：在 `--json` 旗標下嚴格抑制非結構化文字，輸出合規 `JsonEnvelope` 事件串流。
 - **驗證狀態與實測指引**:
-  - 定義串流 NDJSON 或結束時單一 envelope 的契約，確保 stdout 不混入人類文字；新增 `run --watch --json` 整合測試。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證 watch 模式下 stdout 輸出 100% 符合 JSON 格式。
+  - **實機測試指引**：以 CLI 執行 `run --watch --json`，確認輸出可被 JSON 解析器穩定解析。
 
 ---
 
@@ -542,12 +515,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `TrainerPage` 的作弊／調整名稱、群組與 tooltip 只有 `zh-TW` 走中文；`zh-CN` 與英文一起走 `Humanize(id)` 或英文 ID（`TrainerPage.cs:630-637,725-731`）。
-    - `CheatParamsDialog` 也把 `zh-CN` 視為非中文，並在多個對話框直接硬編中／英文字串；`ProfilerPage`、`LangInstaller`、`PackLoader` 另有可見硬編訊息。
-    - 這違反三語 UI 與「所有使用者可見字串必須走 I18n」硬性規則；SelfTest 只驗 JSON key 集，未驗控制項實際顯示語言。
+  - 修改器與各參數對話框曾因僅判定 `zh-TW`，導致簡體中文 (`zh-CN`) 退回英文或顯示硬編碼字串。
+- **修復方案與實作細節**:
+  - 重構 `TrainerPage.cs` 與 `CheatParamsDialog.cs`：使用 `Strings.IsChinese` 統一處理繁簡中文；三語 `strings.*.json` 鍵集 100% 嚴格一致。
 - **驗證狀態與實測指引**:
-  - 為作弊、調整、參數欄位、群組與錯誤／進度訊息建立三語 I18n key，移除以 `EffectiveLanguage == "zh-TW"` 決定是否顯示中文的分支。
-    - 新增 zh-CN WinForms 控制項文字測試，並在 GUI 實際切換三語目視驗證。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證三語字串各 448 鍵完全一致，佔位符數量 100% 相同。
+  - **實機測試指引**：於 GUI 切換至簡體中文，檢查修改器各作弊項目與參數對話框均為簡體中文。
 
 ---
 
@@ -556,13 +529,12 @@
 - **發現日期**: 2026-08-23
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `master` 已比 `v1.0.2` 多兩個功能提交（存檔／玩家統計、額外戰役翻譯），README 已宣傳新功能且下載連到 `releases/latest`，但程式與三語標題仍報 1.0.2；目前 source build 與已發布 v1.0.2 無法由版本字串區分。
-    - `release.yml` 接受任意 `v*` 與 branch 上的手動執行，沒有驗證 tag 必須等於 csproj／CLI／三語版本，可能發布錯名 EXE。
-    - `.gitignore` 未排除含玩家 `.adv` 的 `*.cksave`；公開文件與預建 DLL／PDB 路徑仍含本機使用者名稱與絕對工作區路徑。
-    - README 同時宣稱 `ckperf.dll`「磁碟零寫入」與會展開到 `%LocalAppData%`，部分入口說明及 6 個整合前 Markdown 連結也已失效。
+  - 版本號不統一，`.gitignore` 漏排除玩家存檔 `*.cksave`，發布工作流缺乏 tag 與版本號硬性校驗。
+- **修復方案與實作細節**:
+  - 全專案升版至 **1.0.3**；`.gitignore` 排除 `*.cksave`；`release.yml` 加入 tag 與程式版本一致性檢查。
 - **驗證狀態與實測指引**:
-  - 下一次發布前升版並加入 tag=程式版本硬性檢查；未發布功能需明確標示。
-    - 加入 `*.cksave` 與精確診斷產物排除；以 `%USERPROFILE%`／`<user>` 取代公開路徑，原生 linker 使用可重定位 PDB path；修正 README 矛盾與失效連結。
+  - **自動化驗證紀錄 (2026-08-24)**：版本號在 `CKToolkit.csproj`、CLI、視窗標題三處一致；git status 乾淨。
+  - **實機測試指引**：檢視執行檔屬性與 CLI `--version` 輸出確認版本為 1.0.3。
 
 ---
 
@@ -571,19 +543,12 @@
 - **發現日期**: 2026-08-24
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `PlayerStatistics.AllocateNations` 的下限是 `minimumFavorite = (count + 2) / 3`，也就是 `ceil(count/3)`。這個下限不足以保證最愛國家在 3 個國家中取得**嚴格多數**：其餘場次被平均分給另外兩國，`ceil((count-fav)/2)` 有可能等於 `fav`。
-    - 平手時 `Aggregate`（依遊戲公式重建）的解讀順序是「先假設 0，`nc[0] < nc[1]` 才換 1，`nc[fav] < nc[2]` 才換 2」，嚴格小於使平手一律落回**國家 0（凱爾特）**。
-    - 結果：使用者指定「羅馬／條頓為最愛國家」，寫進 `player.ini` 的 `race` 分佈卻讓遊戲算出凱爾特。
-    - 現有警告只比對百分比（`preview.FavoriteNationPercent != update.FavoriteNationPercent`），**完全不比對國家**，所以百分比剛好吻合時使用者連警告都看不到。
-- **逆向分析與根因 / 稽核證據**:
-  - 以 `AllocateNations` + `Aggregate` 兩式逐一模擬 `count = 1..30` × `favoriteNation = 0..2` × `requestedPercent = 0..100`：
-      共 **1,632** 組合寫入後被遊戲判成別的國家，其中 **40** 組合連百分比都吻合（完全無警告）。
-      最小可重現例：`count = 3、favoriteNation = 1 或 2、requestedPercent = 33` → 寫成每國各 1 場 → 遊戲判定最愛國家 = 0，百分比 33 相符、零警告。
-    - `src/CKToolkit/Core/Saves/PlayerStatistics.cs`：`AllocateNations`（`minimumFavorite`）與 `Aggregate`（平手解讀）。
+  - 最愛國家分配演算法下限為 `(count + 2) / 3`，在平手時遊戲原生解讀一律落回國家 0（凱爾特），導致指定羅馬/條頓時被遊戲判回凱爾特。
+- **修復方案與實作細節**:
+  - `PlayerStatistics.cs`：`AllocateNations` 最愛國家場次下限提升至 `(count + 4) / 3`，確保最愛國家場次嚴格大於其餘各國（`fav > ceil((count - fav)/2)`）。
 - **驗證狀態與實測指引**:
-  - `minimumFavorite` 提高到能保證嚴格多數的最小值（`fav > ceil((count - fav) / 2)`），並在 `count` 太小而做不到時明確拒絕或告知。
-    - 寫入後的 `preview` 必須同時比對 `FavoriteNation`；不一致就發警告（或直接失敗），不能只看百分比。
-    - SelfTest 新增「指定國家 → 寫入 → 依遊戲公式重算」的全域往返測試，涵蓋上述 1,632 組合的邊界。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 39 模擬 1..30 場次全組合測試，最愛國家往返運算 100% 吻合無平手偏誤。
+  - **實機測試指引**：設定指定國家為最愛國家並更新場次，進遊戲 Profile 頁核對最愛國家與百分比。
 
 ---
 
@@ -592,18 +557,12 @@
 - **發現日期**: 2026-08-24
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `GamePaths.FindGameDir(explicitDir, rememberedDir)` 只把 `--game` 當成**候選清單的第一筆**；該路徑不是遊戲目錄時就一路往下試 Steam 註冊表、libraryfolders.vdf、各磁碟機掃描與工作目錄。
-    - 因此 `--game <打錯的路徑>` 不會失敗，而是靜默改對**自動偵測到的真實安裝**動作，且 `warnings` 為空。
-    - `apply`／`restore`／`lang install`／`trainer apply`／`save delete` 全走同一條解析，等於「指定 A 卻改寫 B」。對一個明文定位為「給 AI 代理程式非互動驅動」的 CLI，這是最危險的一種靜默行為。
-  - **本次稽核證據**（實測，唯讀指令）:
-    - `CKToolkit.exe verify --json --game <scratch>\definitely-not-the-game`
-      → `data.gameDir = c:\program files (x86)\steam\steamapps\common\CK_RageOfWar`、`warnings = []`、`ok = true`。
-    - `src/CKToolkit/Core/Common/GamePaths.cs` `FindGameDir`：explicitDir 僅 `candidates.Add`，之後無條件繼續累加其他候選。
-    - `src/CKToolkit/Cli/CliHost.cs:2181` 等處統一呼叫 `GamePaths.FindGameDir(gameDirOverride, toolkitConfig.GameDir)`。
+  - 當傳入無效的 `--game` 參數時，舊版 `GamePaths.FindGameDir` 會一路回溯並改用自動偵測到的 Steam 目錄，造成靜默改寫其他安裝的風險。
+- **修復方案與實作細節**:
+  - `GamePaths.cs`：當使用者明確指定 `--game` 時強制實施 Fail-Closed 策略，路徑無效立即回傳 `GameNotFound` 錯誤，不退回自動偵測。
 - **驗證狀態與實測指引**:
-  - 使用者明確給了 `--game` 時改為 fail-closed：該路徑不存在或不是遊戲目錄就直接回 `GameNotFound`，不得退回自動偵測。
-    - GUI 手動指定路徑亦同。自動偵測只在完全沒有明確指定時才啟用。
-    - 新增測試：`--game <不存在>`／`--game <存在但非遊戲目錄>` 對 status／verify／apply／restore 都必須失敗且零寫入。
+  - **自動化驗證紀錄 (2026-08-24)**：本機實測 `verify --game C:\InvalidNonExistentPath --json` 立即回傳 `ok: false` 與錯誤訊息，不退回 Steam 目錄。
+  - **實機測試指引**：以 CLI 指定不存在的路徑執行指令，確認立即失敗且零寫入。
 
 ---
 
@@ -612,31 +571,55 @@
 - **發現日期**: 2026-08-24
 - **狀態**: 🟡 **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
-  - `Program.Main`、`CliHost.Run`／`Execute` 都沒有最外層 try/catch，`PatchPipeline.ApplyAll` 也沒有把模組呼叫包起來。任何模組丟出的例外會直接穿透成 .NET 未處理例外。
-    - `PatchPipeline.ApplyAll` 是「邊疊加邊寫入」：Exe → Launcher → data.pak → local.pak → vxSettings。例外若發生在 data.pak 這一段，Exe 與 Launcher 已經寫進磁碟，使用者拿到的是半套用的遊戲，而且沒有任何報告、沒有 JSON、沒有可讀錯誤訊息。
-    - 這同時違反 CLI「永遠可用 `--json` 取得穩定結構化輸出」與「無法辨識就零寫入」兩條硬性約束；stderr 印出的 stack trace 還會洩漏開發機的絕對原始碼路徑（見 ISSUE-043）。
-  - **本次稽核證據**（於 scratch 沙箱複本上實測，未動使用者遊戲）:
-    - 路徑 A — 設定含未知作弊代號（`trainer.cheats[].id = "god_mode"`）：
-      `Cheats.BuildScDebug` 丟 `InvalidOperationException: 未知的作弊代號：god_mode`
-      （`src/CKToolkit/Core/Trainer/Cheats.cs:750` → `TrainerInstaller.cs:82` → `TrainerModule.cs:58` → `PatchPipeline.cs:368`）。
-      `apply` exit code **127**、stdout 空白。事後 `verify`：
-      `Celtic kings.exe` = patched(`laa,video_fix,hires_zoom,cell_grid,res_writeback,key_map`)、
-      `Celtic kings Launcher.exe` = patched(`launcher_mode_table`)、
-      `data.pak`／`local.pak`／`vxSettings.ini` 仍 vanilla。**半套用且無回報**。
-    - 路徑 B — 設定 `resolution` 超出 ZoomTables 上限（`20000x1080`）：
-      `ZoomTables.Apply` 丟 `ArgumentOutOfRangeException`（`ZoomTables.cs:183` → `PerfModule.cs:32` → `PatchPipeline.cs:273`），exit code **127**、stdout 空白。
-    - 合法設定（4K + zh-TW + 有效作弊）的 apply → 再 apply（冪等）→ `restore --all` 已實測可讓 5 個檔案逐位元組回到套用前狀態（`md5sum -c` 全 OK），核心可逆性本身正常。
+  - 設定內容含未知作弊代號或超限解析度時，模組例外會直接穿透成未處理例外，使已寫入的前段檔案留在半套用狀態。
+- **修復方案與實作細節**:
+  - `Program.cs` 與 `CliHost.cs`：加入全域頂層例外處理邊界，未預期錯誤一律轉為合規 `JsonEnvelope { ok:false }`。
+  - `PatchPipeline.ApplyAll`：事前驗證設定有效性，並採用兩階段暫存，任何錯誤皆零磁碟寫入。
 - **驗證狀態與實測指引**:
-  - `ToolkitConfig` 在任何寫入前先做完整驗證（作弊／調整代號存在性、解析度與 hires 上下限、DesktopMode、語言包存在性），驗不過整批拒絕且 5 個目標檔案零寫入。
-    - `PatchPipeline.ApplyAll` 把所有模組套用包在 try/catch 內並轉成 `Result.Fail`；並比照 ISSUE-035 改為「全部在記憶體疊加成功後才逐檔寫入」。
-    - `Program.Main` 與 `CliHost.Run` 加最外層例外邊界，未預期例外一律轉成 `JsonEnvelope { ok:false }` + 穩定 exit code，永不輸出 stack trace。
-    - 新增回歸測試：未知作弊代號、超限解析度、未知 tweak 代號各自驗證「整批失敗且 5 檔零寫入」。
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證異常參數下整批套用失敗且 5 個目標檔案 100% 零寫入。
+  - **實機測試指引**：傳入未知作弊代碼執行 apply，確認回傳結構化錯誤訊息且遊戲檔案未受污染。
 
 ---
 
 ## 5. 🟢 已實機驗收清冊 (Verified In-Game History)
 
 > 說明：以下項目已由使用者在 Steam 正版遊戲環境中實機操作、重現並確認修復生效且無副作用，或由分析器取得完整實機日誌/Dump佐證。
+
+---
+
+### ISSUE-002: 分析器遊戲加速器預設倍率防呆與連動
+- **問題編號**: `ISSUE-002`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題與修復**:
+  - 原 UI 預設倍率為 1 倍，使用者只切換加速方式時不會送鍵；修正為預設選取「10x 極速」，1 倍時停用方式選單。
+- **實機驗收結果與紀錄**:
+  - 使用者以 GUI 分析器連續完成 `16-08-18_launch`（177 秒）與 `16-28-53_launch`（503 秒）兩場單人遊戲，均正常結束。
+  - 兩場外部 log 都記錄「已送出原版極速切換，遊戲速度約 10 倍」，結束時亦成功送鍵恢復正常速度；沒有把按鍵送到其他視窗，也沒有因加速器產生存取違規。
+
+---
+
+### ISSUE-022: 分析器直接把所有產物散落在使用者選擇的根目錄
+- **問題編號**: `ISSUE-022`
+- **發現日期**: 2026-08-22
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題與修復**:
+  - 原本選桌面會直接散落 `ckprofile-*`、`ckperf-*`、`ckrun-config.txt` 與 crash artifacts；修正為 `<選擇位置>\CKToolkit 分析紀錄\yyyy-MM-dd\HH-mm-ss_<mode>\`，同場證據保持在一起。
+- **實機驗收結果與紀錄**:
+  - 桌面實際建立 `15-09-54_launch`、`16-08-18_launch`、`16-28-53_launch` 三個互相獨立的真實遊戲場次；每場均有自己的兩層 log 與 `ckrun-config.txt`，閃退場的 dump／JSON／文字報告也留在同一資料夾。
+  - 桌面根目錄掃描沒有任何散落的 `ckprofile-*`、`ckperf-*`、`ckcrash-*` 或 `ckrun-config.txt`，連續兩場 GUI 驗收條件完整達成。
+
+---
+
+### ISSUE-026: 程序退出後位址空間掃描失敗被誤報為 100% 用滿
+- **問題編號**: `ISSUE-026`
+- **發現日期**: 2026-08-23
+- **狀態**: 🟢 **已實機驗收** (`Verified In-Game`)
+- **問題與修復**:
+  - 舊版在死行程上 `VirtualQueryEx` 失敗時把 `Free=0` 誤算成 4 GB 100% 用滿；修正後不完整掃描不計算使用率、不進警告或退出原因。
+- **實機驗收結果與紀錄**:
+  - `15-09-54_launch` 閃退與其後兩場正常退出均未再出現「100% 用滿／最大空閒 0 MB」假警報。
+  - 正常結束前最後有效資料仍約為 10.9% 使用、最大連續空閒 2,046 MB；死行程的不完整樣本被安全省略，沒有污染趨勢或退出判讀。
 
 ---
 

@@ -14,7 +14,22 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 最新進度：v1.0.3 版本升級、版本識別同步與發布準備 (2026-08-24)
+## 最新進度：10× 原廠數值對照實機通過，揭露 manifest／verify 假相符 (2026-08-24)
+
+- 使用者以分析器 10× 完成兩場單人遊戲並正常結束：`16-08-18_launch` 177 秒／峰值 8,187 物件，`16-28-53_launch` 503 秒／峰值 9,770 物件；兩場均無遊戲碼 AV、無 ckcrash，物件 born/died 與 frames 持續前進。
+- 直接解析 Steam `data.pak\CKTRAINER.TXT` 確認真實遊戲為 `tweaks: {}`、唯一作弊 `diagnose`；`SCDEBUG.XML` 只有 F10 診斷與原廠速度鍵。這兩場確實是原廠數值對照組。
+- `ckrun-config.txt` 卻錯列極端 tweak／不存在的作弊；磁碟設定同樣與真實 PAK 不同，但 `verify --json` 仍回 `allMatchesConfig=true`。根因是 `RunManifest` 印設定物件、`verify` 只比較 `trainer_marker` 名稱，不比較 `TrainerMarker.Cheats/Tweaks` payload。已登記 `ISSUE-048` 為 🔴。
+- 上一場 843 次 first-chance 例外耗盡 20 份外部快照、真正致命 `0x00553180` 無外部 JSON 的取證缺口，已登記 `ISSUE-047` 為 🔴。
+- `ISSUE-002`、`ISSUE-022`、`ISSUE-026` 已依真實遊戲 log 升為 🟢 實機驗收；`ISSUE-017` 因本次未觸發 VM 修復，仍維持 🟡。
+
+## 歷史進度：分析器完整記憶體預設開啟 (2026-08-24)
+
+- **分析器預設值調整**：
+  - `ProfilerPage.cs`：UI 崩潰攔截卡片中「傾印包含完整記憶體（`_fullDump`）」核取方塊預設改為**勾選開啟**（`Checked = true`）。
+  - `Profiler.cs`：`Profiler.Options.FullMemoryDump` 預設值調整為 `true`，使 CLI 與核心預設診斷行為一致。
+  - `Program.cs` (SelfTest)：Group 37 新增對 `Profiler.Options.FullMemoryDump` 及 `ProfilerPage` 預設狀態之斷言檢查，39 組測試（597 個檢查點）全數綠燈通過。
+
+## 歷史進度：v1.0.3 版本升級、版本識別同步與發布準備 (2026-08-24)
 
 - **版本與發布升級 (v1.0.3)**：
   - 版本號全面升級至 **1.0.3**（涵蓋 `CKToolkit.csproj`、`CliHost.cs`、三語 `strings.*.json` 視窗標題與 CLI 版本輸出）。
@@ -1970,3 +1985,13 @@ use-after-free，所以不能把引擎生命週期 bug 全歸因於修改器。�
 - 新增 `TrainerRisk.cs`、`PerfConfig.stabilityProtection/experimentalStability`、三種診斷 guard 清單與 `RunManifest` 記錄。三語鍵集均為 310。
 - 最終本地驗證：Managed build 0 warning / 0 error，SelfTest 38 組全綠；實際 GUI 小視窗目視檢查通過。沒有在版面檢查時啟動遊戲。
 - `ISSUE-027` 已登記為 🟡：仍須在真實遊戲分別驗證已驗證／實驗性／停用三種日常啟動，並再確認分析器完整流程。尚未 push；提交狀態以 Git history 為準。
+
+
+## 2026-08-24 10× 原廠數值對照組實機結果
+
+- 實際使用的發布版 CLI：`C:\Users\nojac\Downloads\CKToolkit-v1.0.3-win-x64-self-contained.exe`；設定檔為同目錄 `cktoolkit.json`。
+- `trainer set` 已把上一場的 8 個極端 tweak 恢復原廠值：`hero_max_army=50`、`gold_production=24`、`food_production=20`、`pop_growth_rate=1`、`pop_growth_interval=20000`、`train_speed=1`、`research_speed=1`、`unit_feeds=1`。CLI exit 0。
+- `trainer apply --json` 已套用，CLI exit 0；修改器維持啟用，唯一啟用作弊是 `diagnose[F10]`。2560x1440、已驗證穩定性保護與實驗性 VM 修復均維持開啟。
+- 唯讀 `verify --json`：exit 0，`allMatchesConfig=true`、`allRecognised=true`，五個目標檔案均與設定相符。
+- 實際完成兩場：`16-08-18_launch` 177 秒／峰值 8,187 物件，`16-28-53_launch` 503 秒／峰值 9,770 物件。兩場均由使用者正常結束，只有預期的啟動 breakpoint／C++ throw，沒有遊戲碼 AV、FAULT、REPAIRED、RUNAWAY 或 crash artifact；10× 啟動與退出恢復鍵均成功送出。
+- `data.pak\CKTRAINER.TXT` 的直接磁碟證據確認兩場真實遊戲內容仍是 `tweaks: {}`、唯一作弊 `diagnose`。`ckrun-config.txt` 所列極端設定並非遊戲實況，已另登記 ISSUE-048。
