@@ -94,6 +94,15 @@ public static class TrainerInstaller
                 continue;
             }
 
+            // Do not also write the shared VXCONST/COMMANDS/CLASSES value when
+            // the completed subset is being represented by the owner-aware EXE
+            // helper. This keeps multiplayer fail-closed and avoids applying a
+            // second, global copy of the same legacy tweak.
+            if (ScopedTweakPatch.ShouldRouteToScopedPatch(config, id))
+            {
+                continue;
+            }
+
             if (value == tweak.Default)
             {
                 continue;

@@ -70,6 +70,29 @@ public static class ScopedTweakPatch
     public const uint PlayerStructSize = 0x254;
     public const uint PlayerArrayOffset = 0xCD4;
 
+    // Generic Object::SetPlayer core. ESI=Object*, EAX=new owner pointer at the
+    // overwritten site; the second MOV must still return owner+0x1C4 in ECX.
+    public const uint OwnerScalarSiteVa = 0x004F479D;
+    public static readonly byte[] OwnerScalarOriginal =
+        [0x89, 0x46, 0x6E, 0x8B, 0x88, 0xC4, 0x01, 0x00, 0x00];
+    public const uint ObjectClassOffset = 0x3A;
+    // ClassNameOffset 目前未使用：Gaul/Roman 種族判斷邏輯尚無反組譯證據支持
+    // （使用者已確認），GaulPower/RomanPower 設定欄位因此仍是儲存但未套用的保留欄位。
+    public const uint ClassNameOffset = 0x04;
+    public const uint ClassHealthOffset = 0xCC;
+    public const uint ClassMinAttackOffset = 0xD4;
+    public const uint ClassMaxAttackOffset = 0xD8;
+    public const uint ClassDefenseSlashOffset = 0xE4;
+    public const uint ClassDefensePierceOffset = 0xE8;
+    public const uint ClassVisionOffset = 0xFC;
+    public const uint InstanceHealthOffset = 0xA8;
+    public const uint InstanceMaxHealthOffset = 0xAC;
+    public const uint InstanceVisionOffset = 0xB0;
+    public const uint InstanceMinAttackOffset = 0xBC;
+    public const uint InstanceMaxAttackOffset = 0xC0;
+    public const uint InstanceDefenseSlashOffset = 0xC8;
+    public const uint InstanceDefensePierceOffset = 0xCC;
+
     private const uint Magic = 0x57544B43; // "CKTW" little-endian
     private const uint CommandHelperOffset = HeaderSize;
     private const uint GoldHelperOffset = 384;
@@ -79,9 +102,10 @@ public static class ScopedTweakPatch
     private const uint PopulationLossPercentHelperOffset = 1408;
     private const uint PopulationLossIntervalHelperOffset = 1664;
     private const uint InitialGoldHelperOffset = 1920;
-    private const uint ConfigOffset = 2176;
-    private const uint ConfigCount = 48;
-    private const uint HookCount = 8;
+    private const uint OwnerScalarHelperOffset = 2176;
+    private const uint ConfigOffset = 3072;
+    private const uint ConfigCount = 61;
+    private const uint HookCount = 9;
 
     public sealed record CommandSettings(
         uint SelfTrainSpeedQ16,
@@ -169,6 +193,320 @@ public static class ScopedTweakPatch
         public static InitialGoldSettings Disabled { get; } = new(false, 2_500, 0, 2_500, 0);
     }
 
+    public sealed record UnitScalarSettings(
+        bool Enabled,
+        uint SelfHealthQ16,
+        uint EnemyHealthQ16,
+        uint SelfAttackQ16,
+        uint EnemyAttackQ16,
+        uint SelfDefenseQ16,
+        uint EnemyDefenseQ16,
+        uint SelfGaulPowerQ16,
+        uint EnemyGaulPowerQ16,
+        uint SelfRomanPowerQ16,
+        uint EnemyRomanPowerQ16,
+        uint SelfVisionQ16,
+        uint EnemyVisionQ16)
+    {
+        public static UnitScalarSettings Disabled { get; } = new(
+            false,
+            1u << 16, 1u << 16,
+            1u << 16, 1u << 16,
+            1u << 16, 1u << 16,
+            1u << 16, 1u << 16,
+            1u << 16, 1u << 16,
+            1u << 16, 1u << 16);
+    }
+
+    /// <summary>
+    /// Effective settings built from explicit scoped values, legacy single-value
+    /// fallbacks, and finally the original game defaults. The historical type
+    /// name is retained because it is already used by verification tests.
+    /// </summary>
+    public sealed record LegacySettings(
+        CommandSettings Command,
+        ProductionSettings Production,
+        PopulationSettings Population,
+        CapacitySettings Capacity,
+        InitialGoldSettings InitialGold,
+        UnitScalarSettings UnitScalars);
+
+    private static readonly string[] SelfEnemyScopes = ["self", "enemy"];
+    private static readonly string[] SettlementScopes =
+        ["selfTownhall", "selfVillage", "enemyTownhall", "enemyVillage"];
+
+    private static readonly IReadOnlyDictionary<string, string[]> SupportedScopes =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["train_speed"] = SelfEnemyScopes,
+            ["research_speed"] = SelfEnemyScopes,
+            ["gold_production"] = SettlementScopes,
+            ["food_production"] = SettlementScopes,
+            ["pop_growth_rate"] = SettlementScopes,
+            ["pop_growth_interval"] = SettlementScopes,
+            ["pop_decrease_percent"] = SettlementScopes,
+            ["pop_decrease_interval"] = SettlementScopes,
+            ["townhall_maxgold"] = SelfEnemyScopes,
+            ["townhall_maxfood"] = SelfEnemyScopes,
+            ["townhall_start_gold"] = SelfEnemyScopes,
+            ["townhall_max_population"] = SelfEnemyScopes,
+            ["village_max_population"] = SelfEnemyScopes,
+            ["village_maxgold"] = SelfEnemyScopes,
+            ["village_maxfood"] = SelfEnemyScopes,
+            ["all_unit_health"] = SelfEnemyScopes,
+            ["all_unit_attack"] = SelfEnemyScopes,
+            ["all_unit_defense"] = SelfEnemyScopes
+        };
+
+    /// <summary>回傳目前已有 owner-aware hook 與反轉測試的合法 scope。</summary>
+    public static IReadOnlyList<string> GetSupportedScopes(string id) =>
+        SupportedScopes.TryGetValue(id, out string[]? scopes) ? scopes : Array.Empty<string>();
+
+    public static bool IsSupportedScopedTweakId(string id) => SupportedScopes.ContainsKey(id);
+
+    /// <summary>
+    /// 取得某 scope 在沒有明確 scoped 值時的 fallback。這是 GUI、CLI payload
+    /// 與 legacy migration 共用的語意來源：先用舊單值，再用原廠值；金錢的
+    /// village 與食物的 townhall 原版通道固定為 0。
+    /// </summary>
+    public static decimal GetScopedFallbackValue(TrainerConfig trainer, string id, string scope)
+    {
+        IReadOnlyList<string> scopes = GetSupportedScopes(id);
+        if (!scopes.Contains(scope, StringComparer.Ordinal) ||
+            !Tweaks.ById.TryGetValue(id, out Tweak? definition))
+        {
+            throw new ArgumentException($"Unsupported scoped tweak '{id}.{scope}'.");
+        }
+
+        decimal legacy = trainer.Tweaks is not null &&
+                         trainer.Tweaks.TryGetValue(id, out decimal value)
+            ? value
+            : definition.Default;
+
+        if (id == "gold_production" && scope.EndsWith("Village", StringComparison.Ordinal))
+            return 0m;
+        if (id == "food_production" && scope.EndsWith("Townhall", StringComparison.Ordinal))
+            return 0m;
+        return legacy;
+    }
+
+    public static decimal GetEffectiveScopedValue(TrainerConfig trainer, string id, string scope)
+    {
+        if (trainer.ScopedTweaks is not null &&
+            trainer.ScopedTweaks.TryGetValue(id, out Dictionary<string, decimal>? values) &&
+            values is not null && values.TryGetValue(scope, out decimal value))
+        {
+            return value;
+        }
+        return GetScopedFallbackValue(trainer, id, scope);
+    }
+
+    /// <summary>相容舊呼叫端：目前完成的 legacy ID 與 scoped ID 是同一集合。</summary>
+    public static bool IsSupportedLegacyTweakId(string id) => IsSupportedScopedTweakId(id);
+
+    /// <summary>
+    /// 判斷 data.pak 的某一個舊設定是否必須改走 .cktw。只要有明確 scoped
+    /// 設定，或舊單值不是原廠值，就不能再寫共享資料檔。
+    /// </summary>
+    public static bool ShouldRouteToScopedPatch(TrainerConfig trainer, string id)
+    {
+        if (trainer is null || !trainer.Enabled || !IsSupportedScopedTweakId(id))
+            return false;
+
+        if (trainer.ScopedTweaks?.ContainsKey(id) == true)
+            return true;
+
+        return trainer.Tweaks is not null &&
+               trainer.Tweaks.TryGetValue(id, out decimal value) &&
+               Tweaks.ById.TryGetValue(id, out Tweak? definition) &&
+               value != definition.Default;
+    }
+
+    /// <summary>是否有非原廠的有效 scoped payload 需要寫入 .cktw。</summary>
+    public static bool HasSupportedPayload(TrainerConfig trainer) =>
+        TryBuildSettings(trainer, out _);
+
+    /// <summary>相容既有呼叫端。</summary>
+    public static bool HasSupportedLegacyPayload(TrainerConfig trainer) =>
+        HasSupportedPayload(trainer);
+
+    /// <summary>
+    /// 建立有效 scoped 設定。明確 scope 優先，其次是舊版單值，最後是原廠值。
+    /// 未列出的項目（hero、種族、speed、feeds、wagon）刻意保持原版路徑。
+    /// </summary>
+    public static bool TryBuildSettings(TrainerConfig trainer, out LegacySettings settings)
+    {
+        settings = new LegacySettings(
+            CommandSettings.Vanilla,
+            ProductionSettings.Vanilla,
+            PopulationSettings.Vanilla,
+            CapacitySettings.Disabled,
+            InitialGoldSettings.Disabled,
+            UnitScalarSettings.Disabled);
+
+        if (trainer is null || !trainer.Enabled || trainer.Tweaks is null || trainer.ScopedTweaks is null)
+            return false;
+
+        decimal Legacy(string id, decimal fallback)
+        {
+            return trainer.Tweaks.TryGetValue(id, out decimal value) ? value : fallback;
+        }
+
+        decimal Scoped(string id, string scope, decimal fallback)
+        {
+            if (trainer.ScopedTweaks.TryGetValue(id, out Dictionary<string, decimal>? values) &&
+                values is not null && values.TryGetValue(scope, out decimal value))
+            {
+                return value;
+            }
+            return GetScopedFallbackValue(trainer, id, scope);
+        }
+
+        uint Integer(string id, string scope, decimal fallback) =>
+            checked((uint)decimal.Truncate(Scoped(id, scope, fallback)));
+
+        uint Q16(string id, string scope, decimal fallback)
+        {
+            decimal scaled = decimal.Round(
+                Scoped(id, scope, fallback) * 65_536m,
+                0,
+                MidpointRounding.AwayFromZero);
+            return checked((uint)scaled);
+        }
+
+        decimal train = Legacy("train_speed", 1m);
+        decimal research = Legacy("research_speed", 1m);
+        decimal gold = Legacy("gold_production", 24m);
+        decimal food = Legacy("food_production", 20m);
+        decimal growthAmount = Legacy("pop_growth_rate", 1m);
+        decimal growthInterval = Legacy("pop_growth_interval", 20_000m);
+        decimal lossPercent = Legacy("pop_decrease_percent", 10m);
+        decimal lossInterval = Legacy("pop_decrease_interval", 4_000m);
+
+        decimal townhallMaxGold = Legacy("townhall_maxgold", 100_000m);
+        decimal villageMaxGold = Legacy("village_maxgold", 5_000m);
+        decimal townhallMaxFood = Legacy("townhall_maxfood", 100_000m);
+        decimal villageMaxFood = Legacy("village_maxfood", 5_000m);
+        decimal townhallMaxPopulation = Legacy("townhall_max_population", 100m);
+        decimal villageMaxPopulation = Legacy("village_max_population", 20m);
+        decimal townhallStartGold = Legacy("townhall_start_gold", 2_500m);
+        decimal unitHealth = Legacy("all_unit_health", 1m);
+        decimal unitAttack = Legacy("all_unit_attack", 1m);
+        decimal unitDefense = Legacy("all_unit_defense", 1m);
+
+        settings = new LegacySettings(
+            new CommandSettings(
+                Q16("train_speed", "self", train), Q16("train_speed", "enemy", train),
+                Q16("research_speed", "self", research), Q16("research_speed", "enemy", research),
+                7_000, 7_000),
+            new ProductionSettings(
+                Integer("gold_production", "selfTownhall", gold),
+                Integer("gold_production", "selfVillage", 0m),
+                Integer("gold_production", "enemyTownhall", gold),
+                Integer("gold_production", "enemyVillage", 0m),
+                Integer("food_production", "selfTownhall", 0m),
+                Integer("food_production", "selfVillage", food),
+                Integer("food_production", "enemyTownhall", 0m),
+                Integer("food_production", "enemyVillage", food)),
+            new PopulationSettings(
+                Integer("pop_growth_rate", "selfTownhall", growthAmount),
+                Integer("pop_growth_rate", "selfVillage", growthAmount),
+                Integer("pop_growth_rate", "enemyTownhall", growthAmount),
+                Integer("pop_growth_rate", "enemyVillage", growthAmount),
+                Integer("pop_growth_interval", "selfTownhall", growthInterval),
+                Integer("pop_growth_interval", "selfVillage", growthInterval),
+                Integer("pop_growth_interval", "enemyTownhall", growthInterval),
+                Integer("pop_growth_interval", "enemyVillage", growthInterval),
+                Integer("pop_decrease_percent", "selfTownhall", lossPercent),
+                Integer("pop_decrease_percent", "selfVillage", lossPercent),
+                Integer("pop_decrease_percent", "enemyTownhall", lossPercent),
+                Integer("pop_decrease_percent", "enemyVillage", lossPercent),
+                Integer("pop_decrease_interval", "selfTownhall", lossInterval),
+                Integer("pop_decrease_interval", "selfVillage", lossInterval),
+                Integer("pop_decrease_interval", "enemyTownhall", lossInterval),
+                Integer("pop_decrease_interval", "enemyVillage", lossInterval)),
+            new CapacitySettings(
+                true,
+                Integer("townhall_maxgold", "self", townhallMaxGold),
+                Integer("village_maxgold", "self", villageMaxGold),
+                Integer("townhall_maxgold", "enemy", townhallMaxGold),
+                Integer("village_maxgold", "enemy", villageMaxGold),
+                Integer("townhall_maxfood", "self", townhallMaxFood),
+                Integer("village_maxfood", "self", villageMaxFood),
+                Integer("townhall_maxfood", "enemy", townhallMaxFood),
+                Integer("village_maxfood", "enemy", villageMaxFood),
+                Integer("townhall_max_population", "self", townhallMaxPopulation),
+                Integer("village_max_population", "self", villageMaxPopulation),
+                Integer("townhall_max_population", "enemy", townhallMaxPopulation),
+                Integer("village_max_population", "enemy", villageMaxPopulation)),
+            new InitialGoldSettings(
+                true,
+                Integer("townhall_start_gold", "self", townhallStartGold), 0,
+                Integer("townhall_start_gold", "enemy", townhallStartGold), 0),
+            new UnitScalarSettings(
+                true,
+                Q16("all_unit_health", "self", unitHealth), Q16("all_unit_health", "enemy", unitHealth),
+                Q16("all_unit_attack", "self", unitAttack), Q16("all_unit_attack", "enemy", unitAttack),
+                Q16("all_unit_defense", "self", unitDefense), Q16("all_unit_defense", "enemy", unitDefense),
+                1u << 16, 1u << 16, 1u << 16, 1u << 16,
+                1u << 16, 1u << 16));
+
+        settings = settings with
+        {
+            Capacity = settings.Capacity with
+            {
+                Enabled = (settings.Capacity with { Enabled = false }) != CapacitySettings.Disabled
+            },
+            InitialGold = settings.InitialGold with
+            {
+                Enabled = (settings.InitialGold with { Enabled = false }) != InitialGoldSettings.Disabled
+            },
+            UnitScalars = settings.UnitScalars with
+            {
+                Enabled = (settings.UnitScalars with { Enabled = false }) != UnitScalarSettings.Disabled
+            }
+        };
+
+        return settings.Command != CommandSettings.Vanilla ||
+               settings.Production != ProductionSettings.Vanilla ||
+               settings.Population != PopulationSettings.Vanilla ||
+               settings.Capacity != CapacitySettings.Disabled ||
+               settings.InitialGold != InitialGoldSettings.Disabled ||
+               settings.UnitScalars != UnitScalarSettings.Disabled;
+    }
+
+    public static bool TryBuildLegacySettings(TrainerConfig trainer, out LegacySettings settings) =>
+        TryBuildSettings(trainer, out settings);
+
+    /// <summary>
+    /// 比對執行檔內的 .cktw payload 與目前設定。Patch 名稱只能證明 hook 存在，
+    /// 不能證明它承載的是這一次要求的數值，因此 verify 必須再做內容比對。
+    /// </summary>
+    public static bool MatchesLegacySettings(byte[] exeBytes, TrainerConfig trainer)
+    {
+        bool expected = TryBuildLegacySettings(trainer, out LegacySettings settings);
+        bool applied = IsApplied(exeBytes);
+        if (!expected)
+            return !applied;
+        if (!applied)
+            return false;
+
+        try
+        {
+            PatchInfo info = ReadInfo(PeFile.Parse(exeBytes));
+            return info.Settings == settings.Command &&
+                   info.Production == settings.Production &&
+                   info.Population == settings.Population &&
+                   info.Capacity == settings.Capacity &&
+                   info.InitialGold == settings.InitialGold &&
+                   info.UnitScalars == settings.UnitScalars;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public sealed record PatchInfo(
         int OriginalFileLength,
         uint SectionVa,
@@ -188,13 +526,16 @@ public static class ScopedTweakPatch
         uint PopulationLossIntervalHelperSize,
         uint InitialGoldHelperVa,
         uint InitialGoldHelperSize,
+        uint OwnerScalarHelperVa,
+        uint OwnerScalarHelperSize,
         uint Flags,
         uint Hooks,
         CommandSettings Settings,
         ProductionSettings Production,
         PopulationSettings Population,
         CapacitySettings Capacity,
-        InitialGoldSettings InitialGold);
+        InitialGoldSettings InitialGold,
+        UnitScalarSettings UnitScalars);
 
     public static bool IsOriginal(byte[] exeBytes)
     {
@@ -217,7 +558,9 @@ public static class ScopedTweakPatch
                    pe.ReadBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal.Length)
                      .AsSpan().SequenceEqual(PopulationLossIntervalOriginal) &&
                    pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length)
-                     .AsSpan().SequenceEqual(InitialGoldOriginal);
+                     .AsSpan().SequenceEqual(InitialGoldOriginal) &&
+                   pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length)
+                     .AsSpan().SequenceEqual(OwnerScalarOriginal);
         }
         catch { return false; }
     }
@@ -239,7 +582,8 @@ public static class ScopedTweakPatch
         ProductionSettings? production = null,
         PopulationSettings? population = null,
         CapacitySettings? capacity = null,
-        InitialGoldSettings? initialGold = null)
+        InitialGoldSettings? initialGold = null,
+        UnitScalarSettings? unitScalars = null)
     {
         var pe = PeFile.Parse(exeBytes);
         int sectionIndex = pe.FindSection(SectionName);
@@ -261,11 +605,14 @@ public static class ScopedTweakPatch
             InitialGoldSettings updatedInitialGold = initialGold is null
                 ? existing.InitialGold
                 : ValidateInitialGoldSettings(initialGold);
+            UnitScalarSettings updatedUnitScalars = unitScalars is null
+                ? existing.UnitScalars
+                : ValidateUnitScalarSettings(unitScalars);
             if (effectiveCommand != existing.Settings || updatedProduction != existing.Production ||
                 updatedPopulation != existing.Population || updatedCapacity != existing.Capacity ||
-                updatedInitialGold != existing.InitialGold)
+                updatedInitialGold != existing.InitialGold || updatedUnitScalars != existing.UnitScalars)
                 WriteSettings(pe, existing.SectionVa, effectiveCommand, updatedProduction,
-                    updatedPopulation, updatedCapacity, updatedInitialGold);
+                    updatedPopulation, updatedCapacity, updatedInitialGold, updatedUnitScalars);
 
             return pe.ToBytes();
         }
@@ -284,6 +631,7 @@ public static class ScopedTweakPatch
         ValidateOriginalSite(pe, PopulationLossPercentSiteVa, PopulationLossPercentOriginal, "population-loss-percent");
         ValidateOriginalSite(pe, PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal, "population-loss-interval");
         ValidateOriginalSite(pe, InitialGoldSiteVa, InitialGoldOriginal, "initial-gold");
+        ValidateOriginalSite(pe, OwnerScalarSiteVa, OwnerScalarOriginal, "owner-scalars");
 
         CommandSettings effective = ValidateSettings(settings ?? CommandSettings.Vanilla);
         ProductionSettings effectiveProduction = production ?? ProductionSettings.Vanilla;
@@ -291,8 +639,10 @@ public static class ScopedTweakPatch
         CapacitySettings effectiveCapacity = ValidateCapacitySettings(capacity ?? CapacitySettings.Disabled);
         InitialGoldSettings effectiveInitialGold = ValidateInitialGoldSettings(
             initialGold ?? InitialGoldSettings.Disabled);
+        UnitScalarSettings effectiveUnitScalars = ValidateUnitScalarSettings(
+            unitScalars ?? UnitScalarSettings.Disabled);
         byte[] payload = BuildPayload(exeBytes.Length, effective, effectiveProduction,
-            effectivePopulation, effectiveCapacity, effectiveInitialGold);
+            effectivePopulation, effectiveCapacity, effectiveInitialGold, effectiveUnitScalars);
         PeSection section = pe.AddSection(
             SectionName,
             (uint)payload.Length,
@@ -313,6 +663,7 @@ public static class ScopedTweakPatch
         byte[] lossIntervalHelper = BuildPopulationLoadHelper(
             sectionVa + ConfigOffset, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx);
         byte[] initialGoldHelper = BuildInitialGoldHelper(sectionVa + ConfigOffset);
+        byte[] ownerScalarHelper = BuildOwnerScalarHelper(sectionVa + ConfigOffset);
         if (helper.Length > GoldHelperOffset - CommandHelperOffset ||
             goldHelper.Length > FoodHelperOffset - GoldHelperOffset ||
             foodHelper.Length > PopulationGrowthAmountHelperOffset - FoodHelperOffset ||
@@ -320,7 +671,8 @@ public static class ScopedTweakPatch
             growthIntervalHelper.Length > PopulationLossPercentHelperOffset - PopulationGrowthIntervalHelperOffset ||
             lossPercentHelper.Length > PopulationLossIntervalHelperOffset - PopulationLossPercentHelperOffset ||
             lossIntervalHelper.Length > InitialGoldHelperOffset - PopulationLossIntervalHelperOffset ||
-            initialGoldHelper.Length > ConfigOffset - InitialGoldHelperOffset)
+            initialGoldHelper.Length > OwnerScalarHelperOffset - InitialGoldHelperOffset ||
+            ownerScalarHelper.Length > ConfigOffset - OwnerScalarHelperOffset)
             throw new InvalidOperationException(".cktw helper 超出保留空間。");
 
         pe.WriteUInt32AtVa(sectionVa + 40, checked((uint)helper.Length));
@@ -336,6 +688,7 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(sectionVa + PopulationLossPercentHelperOffset, lossPercentHelper);
         pe.WriteBytesAtVa(sectionVa + PopulationLossIntervalHelperOffset, lossIntervalHelper);
         pe.WriteBytesAtVa(sectionVa + InitialGoldHelperOffset, initialGoldHelper);
+        pe.WriteBytesAtVa(sectionVa + OwnerScalarHelperOffset, ownerScalarHelper);
         pe.WriteBytesAtVa(CommandDelaySiteVa, BuildCommandHook(helperVa));
         pe.WriteBytesAtVa(GoldProductionSiteVa,
             BuildRelativeCall(GoldProductionSiteVa, sectionVa + GoldHelperOffset, GoldProductionOriginal.Length));
@@ -355,6 +708,8 @@ public static class ScopedTweakPatch
                 sectionVa + PopulationLossIntervalHelperOffset, PopulationLossIntervalOriginal.Length));
         pe.WriteBytesAtVa(InitialGoldSiteVa,
             BuildRelativeCall(InitialGoldSiteVa, sectionVa + InitialGoldHelperOffset, InitialGoldOriginal.Length));
+        pe.WriteBytesAtVa(OwnerScalarSiteVa,
+            BuildRelativeCall(OwnerScalarSiteVa, sectionVa + OwnerScalarHelperOffset, OwnerScalarOriginal.Length));
         return pe.ToBytes();
     }
 
@@ -378,7 +733,9 @@ public static class ScopedTweakPatch
                 !pe.ReadBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal.Length)
                    .AsSpan().SequenceEqual(PopulationLossIntervalOriginal) ||
                 !pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length)
-                   .AsSpan().SequenceEqual(InitialGoldOriginal))
+                   .AsSpan().SequenceEqual(InitialGoldOriginal) ||
+                !pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length)
+                   .AsSpan().SequenceEqual(OwnerScalarOriginal))
                 throw new InvalidOperationException("找不到 .cktw，但 scoped hook 指令也不是原版；拒絕猜測還原。");
             return pe.ToBytes();
         }
@@ -395,6 +752,7 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(PopulationLossPercentSiteVa, PopulationLossPercentOriginal);
         pe.WriteBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal);
         pe.WriteBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal);
+        pe.WriteBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal);
         pe.RemoveSection(SectionName, info.OriginalFileLength);
         return pe.ToBytes();
     }
@@ -468,6 +826,14 @@ public static class ScopedTweakPatch
             pe.ReadUInt32(cfg + 172) != 0,
             pe.ReadUInt32(cfg + 176), pe.ReadUInt32(cfg + 180),
             pe.ReadUInt32(cfg + 184), pe.ReadUInt32(cfg + 188)));
+        var unitScalars = ValidateUnitScalarSettings(new UnitScalarSettings(
+            pe.ReadUInt32(cfg + 192) != 0,
+            pe.ReadUInt32(cfg + 196), pe.ReadUInt32(cfg + 200),
+            pe.ReadUInt32(cfg + 204), pe.ReadUInt32(cfg + 208),
+            pe.ReadUInt32(cfg + 212), pe.ReadUInt32(cfg + 216),
+            pe.ReadUInt32(cfg + 220), pe.ReadUInt32(cfg + 224),
+            pe.ReadUInt32(cfg + 228), pe.ReadUInt32(cfg + 232),
+            pe.ReadUInt32(cfg + 236), pe.ReadUInt32(cfg + 240)));
 
         uint sectionVa = checked((uint)pe.ImageBase + section.VirtualAddress);
         uint configVa = sectionVa + ConfigOffset;
@@ -479,6 +845,7 @@ public static class ScopedTweakPatch
         uint lossIntervalSize = checked((uint)BuildPopulationLoadHelper(
             configVa, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx).Length);
         uint initialGoldSize = checked((uint)BuildInitialGoldHelper(configVa).Length);
+        uint ownerScalarSize = checked((uint)BuildOwnerScalarHelper(configVa).Length);
         return new PatchInfo(originalLength, sectionVa, sectionVa + CommandHelperOffset,
             helperSize, sectionVa + goldHelperOffset, goldHelperSize,
             sectionVa + foodHelperOffset, foodHelperSize,
@@ -487,7 +854,8 @@ public static class ScopedTweakPatch
             sectionVa + PopulationLossPercentHelperOffset, lossPercentSize,
             sectionVa + PopulationLossIntervalHelperOffset, lossIntervalSize,
             sectionVa + InitialGoldHelperOffset, initialGoldSize,
-            flags, HookCount, settings, production, population, capacity, initialGold);
+            sectionVa + OwnerScalarHelperOffset, ownerScalarSize,
+            flags, HookCount, settings, production, population, capacity, initialGold, unitScalars);
     }
 
     private static byte[] BuildPayload(
@@ -496,7 +864,8 @@ public static class ScopedTweakPatch
         ProductionSettings production,
         PopulationSettings population,
         CapacitySettings capacity,
-        InitialGoldSettings initialGold)
+        InitialGoldSettings initialGold,
+        UnitScalarSettings unitScalars)
     {
         int payloadSize = checked((int)(ConfigOffset + ConfigCount * 4));
         byte[] payload = new byte[payloadSize];
@@ -561,6 +930,19 @@ public static class ScopedTweakPatch
         Write(payload, cfg + 180, initialGold.SelfVillage);
         Write(payload, cfg + 184, initialGold.EnemyTownhall);
         Write(payload, cfg + 188, initialGold.EnemyVillage);
+        Write(payload, cfg + 192, unitScalars.Enabled ? 1u : 0u);
+        Write(payload, cfg + 196, unitScalars.SelfHealthQ16);
+        Write(payload, cfg + 200, unitScalars.EnemyHealthQ16);
+        Write(payload, cfg + 204, unitScalars.SelfAttackQ16);
+        Write(payload, cfg + 208, unitScalars.EnemyAttackQ16);
+        Write(payload, cfg + 212, unitScalars.SelfDefenseQ16);
+        Write(payload, cfg + 216, unitScalars.EnemyDefenseQ16);
+        Write(payload, cfg + 220, unitScalars.SelfGaulPowerQ16);
+        Write(payload, cfg + 224, unitScalars.EnemyGaulPowerQ16);
+        Write(payload, cfg + 228, unitScalars.SelfRomanPowerQ16);
+        Write(payload, cfg + 232, unitScalars.EnemyRomanPowerQ16);
+        Write(payload, cfg + 236, unitScalars.SelfVisionQ16);
+        Write(payload, cfg + 240, unitScalars.EnemyVisionQ16);
         return payload;
     }
 
@@ -581,6 +963,7 @@ public static class ScopedTweakPatch
         byte[] expectedLossIntervalHelper = BuildPopulationLoadHelper(
             info.SectionVa + ConfigOffset, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx);
         byte[] expectedInitialGoldHelper = BuildInitialGoldHelper(info.SectionVa + ConfigOffset);
+        byte[] expectedOwnerScalarHelper = BuildOwnerScalarHelper(info.SectionVa + ConfigOffset);
         return info.HelperSize == expectedHelper.Length &&
                pe.ReadBytesAtVa(info.HelperVa, expectedHelper.Length).AsSpan().SequenceEqual(expectedHelper) &&
                info.GoldHelperSize == expectedGoldHelper.Length &&
@@ -602,6 +985,9 @@ public static class ScopedTweakPatch
                info.InitialGoldHelperSize == expectedInitialGoldHelper.Length &&
                pe.ReadBytesAtVa(info.InitialGoldHelperVa, expectedInitialGoldHelper.Length)
                  .AsSpan().SequenceEqual(expectedInitialGoldHelper) &&
+               info.OwnerScalarHelperSize == expectedOwnerScalarHelper.Length &&
+               pe.ReadBytesAtVa(info.OwnerScalarHelperVa, expectedOwnerScalarHelper.Length)
+                 .AsSpan().SequenceEqual(expectedOwnerScalarHelper) &&
                pe.ReadBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal.Length).AsSpan()
                  .SequenceEqual(BuildRelativeCall(GoldProductionSiteVa, info.GoldHelperVa, GoldProductionOriginal.Length)) &&
                pe.ReadBytesAtVa(FoodProductionSiteVa, FoodProductionOriginal.Length).AsSpan()
@@ -620,7 +1006,10 @@ public static class ScopedTweakPatch
                      info.PopulationLossIntervalHelperVa, PopulationLossIntervalOriginal.Length)) &&
                pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length).AsSpan()
                  .SequenceEqual(BuildRelativeCall(InitialGoldSiteVa,
-                     info.InitialGoldHelperVa, InitialGoldOriginal.Length));
+                     info.InitialGoldHelperVa, InitialGoldOriginal.Length)) &&
+               pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(OwnerScalarSiteVa,
+                     info.OwnerScalarHelperVa, OwnerScalarOriginal.Length));
     }
 
     private static CommandSettings ValidateSettings(CommandSettings settings)
@@ -696,6 +1085,23 @@ public static class ScopedTweakPatch
         return initialGold;
     }
 
+    private static UnitScalarSettings ValidateUnitScalarSettings(UnitScalarSettings settings)
+    {
+        uint[] factors =
+        [
+            settings.SelfHealthQ16, settings.EnemyHealthQ16,
+            settings.SelfAttackQ16, settings.EnemyAttackQ16,
+            settings.SelfDefenseQ16, settings.EnemyDefenseQ16,
+            settings.SelfGaulPowerQ16, settings.EnemyGaulPowerQ16,
+            settings.SelfRomanPowerQ16, settings.EnemyRomanPowerQ16,
+            settings.SelfVisionQ16, settings.EnemyVisionQ16
+        ];
+        // Existing multiplier UI allows 0.01x..100x. Q16 minimum 656 rounds up from 0.01.
+        if (factors.Any(value => value is < 656 or > 6_553_600))
+            throw new ArgumentOutOfRangeException(nameof(settings), "單位 scoped 倍率必須介於 0.01x 與 100x。");
+        return settings;
+    }
+
     private static void ValidateOriginalSite(PeFile pe, uint siteVa, byte[] original, string name)
     {
         if (!pe.ReadBytesAtVa(siteVa, original.Length).AsSpan().SequenceEqual(original))
@@ -709,7 +1115,8 @@ public static class ScopedTweakPatch
         ProductionSettings production,
         PopulationSettings population,
         CapacitySettings capacity,
-        InitialGoldSettings initialGold)
+        InitialGoldSettings initialGold,
+        UnitScalarSettings unitScalars)
     {
         ulong cfg = sectionVa + ConfigOffset;
         pe.WriteUInt32AtVa(cfg, settings.SelfTrainSpeedQ16);
@@ -760,6 +1167,19 @@ public static class ScopedTweakPatch
         pe.WriteUInt32AtVa(cfg + 180, initialGold.SelfVillage);
         pe.WriteUInt32AtVa(cfg + 184, initialGold.EnemyTownhall);
         pe.WriteUInt32AtVa(cfg + 188, initialGold.EnemyVillage);
+        pe.WriteUInt32AtVa(cfg + 192, unitScalars.Enabled ? 1u : 0u);
+        pe.WriteUInt32AtVa(cfg + 196, unitScalars.SelfHealthQ16);
+        pe.WriteUInt32AtVa(cfg + 200, unitScalars.EnemyHealthQ16);
+        pe.WriteUInt32AtVa(cfg + 204, unitScalars.SelfAttackQ16);
+        pe.WriteUInt32AtVa(cfg + 208, unitScalars.EnemyAttackQ16);
+        pe.WriteUInt32AtVa(cfg + 212, unitScalars.SelfDefenseQ16);
+        pe.WriteUInt32AtVa(cfg + 216, unitScalars.EnemyDefenseQ16);
+        pe.WriteUInt32AtVa(cfg + 220, unitScalars.SelfGaulPowerQ16);
+        pe.WriteUInt32AtVa(cfg + 224, unitScalars.EnemyGaulPowerQ16);
+        pe.WriteUInt32AtVa(cfg + 228, unitScalars.SelfRomanPowerQ16);
+        pe.WriteUInt32AtVa(cfg + 232, unitScalars.EnemyRomanPowerQ16);
+        pe.WriteUInt32AtVa(cfg + 236, unitScalars.SelfVisionQ16);
+        pe.WriteUInt32AtVa(cfg + 240, unitScalars.EnemyVisionQ16);
     }
 
     private static byte[] BuildCommandHelper(uint configVa)
@@ -1036,6 +1456,111 @@ public static class ScopedTweakPatch
 
         x86.Label("done");
         x86.Emit(0x5B, 0x5A, 0x58, 0x9D, 0xC3);            // restore; ret
+        return x86.Build();
+    }
+
+    private static byte[] BuildOwnerScalarHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        void EmitLoadClassField(uint classOffset)
+        {
+            x86.Emit(0x8B, 0x87);                          // mov eax,[edi+classOffset]
+            x86.EmitUInt32(classOffset);
+        }
+
+        void EmitScaleEaxByOwnerMultiplier(uint multiplierSelfVa)
+        {
+            x86.EmitIndexedLoadEdxByEbx(multiplierSelfVa); // edx = [ebx*4+multiplierSelfVa]
+            x86.Emit(0xF7, 0xE2);                          // mul edx -> edx:eax = value*Q16.16
+            x86.Emit(0x81, 0xFA);                          // cmp edx,0x10000
+            x86.EmitUInt32(0x10000);
+            x86.Jump(0x83, "done");                        // jae done: shifted result would overflow uint32
+            x86.Emit(0xB9);                                // mov ecx,65536
+            x86.EmitUInt32(65536);
+            x86.Emit(0xF7, 0xF1);                           // div ecx -> eax = (value*mult)/65536
+        }
+
+        void EmitStoreInstanceField(uint instanceOffset)
+        {
+            x86.Emit(0x89, 0x86);                          // mov [esi+instanceOffset],eax
+            x86.EmitUInt32(instanceOffset);
+        }
+
+        // Preserve every register the caller may still need across this call. EAX/ECX
+        // carry the two values the replaced instructions define, so they are stashed on
+        // the stack immediately and the registers reused as scratch for the scaling below.
+        x86.Emit(0x9C, 0x52, 0x53, 0x57);                  // pushfd; push edx/ebx/edi
+        x86.Emit(0x89, 0x46, 0x6E);                        // mov [esi+6E],eax (original 1/2)
+        x86.Emit(0x8B, 0x88, 0xC4, 0x01, 0x00, 0x00);      // mov ecx,[eax+1C4] (original 2/2)
+        x86.Emit(0x51, 0x50);                              // push ecx; push eax
+
+        x86.Emit(0x83, 0x3D);                              // cmp dword [enabled],0
+        x86.EmitUInt32(configVa + 192);
+        x86.Emit(0x00);
+        x86.Jump(0x84, "done");
+        x86.Emit(0x85, 0xF6);                              // test esi,esi
+        x86.Jump(0x84, "done");
+        x86.Emit(0x85, 0xC0);                              // test eax,eax
+        x86.Jump(0x84, "done");
+
+        x86.EmitAbsoluteLoadEdx(GameGlobalVa);
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "done");
+        x86.Emit(0x8B, 0x52, (byte)SessionOffset);          // mov edx,[edx+50]
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "done");
+        x86.Emit(0x80, 0xBA);                               // cmp byte [edx+108],0
+        x86.EmitUInt32(MultiplayerMaskOffset);
+        x86.Emit(0x00);
+        x86.Jump(0x85, "done");
+
+        x86.EmitAbsoluteLoadEdx(EngineBaseGlobalVa);
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "done");
+        x86.Emit(0x8B, 0x92);                               // mov edx,[edx+CD0]
+        x86.EmitUInt32(LocalPlayerOffset);
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "done");
+
+        x86.Emit(0x33, 0xDB);                               // xor ebx,ebx (self=0)
+        x86.Emit(0x3B, 0xC2);                               // cmp eax,edx (new owner vs local player)
+        x86.Emit(0x0F, 0x95, 0xC3);                         // setne bl (enemy=1)
+
+        x86.Emit(0x8B, 0x7E, (byte)ObjectClassOffset);       // mov edi,[esi+3A]
+        x86.Emit(0x85, 0xFF);                               // test edi,edi
+        x86.Jump(0x84, "done");
+
+        // Health: 0x004F1070 copies class+0xCC into both instance +0xA8/+0xAC at vanilla
+        // init; this hook re-derives the same pair from the class base every time owner
+        // changes (creation and capture alike), so repeated SetPlayer calls never compound.
+        EmitLoadClassField(ClassHealthOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 196);
+        EmitStoreInstanceField(InstanceHealthOffset);
+        EmitStoreInstanceField(InstanceMaxHealthOffset);
+
+        EmitLoadClassField(ClassMinAttackOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 204);
+        EmitStoreInstanceField(InstanceMinAttackOffset);
+        EmitLoadClassField(ClassMaxAttackOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 204);
+        EmitStoreInstanceField(InstanceMaxAttackOffset);
+
+        EmitLoadClassField(ClassDefenseSlashOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 212);
+        EmitStoreInstanceField(InstanceDefenseSlashOffset);
+        EmitLoadClassField(ClassDefensePierceOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 212);
+        EmitStoreInstanceField(InstanceDefensePierceOffset);
+
+        // Vision: also copied by the vanilla 0x004F1070 class->instance routine, same
+        // as health/attack/defense, so it is safe to re-derive it here unconditionally.
+        EmitLoadClassField(ClassVisionOffset);
+        EmitScaleEaxByOwnerMultiplier(configVa + 236);
+        EmitStoreInstanceField(InstanceVisionOffset);
+
+        x86.Label("done");
+        x86.Emit(0x58, 0x59, 0x5F, 0x5B, 0x5A, 0x9D, 0xC3); // pop eax/ecx/edi/ebx/edx; popfd; ret
         return x86.Build();
     }
 

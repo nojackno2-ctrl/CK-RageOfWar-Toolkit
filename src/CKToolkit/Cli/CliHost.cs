@@ -1541,7 +1541,9 @@ public static partial class CliHost
                 @default = t.Default,
                 minimum = t.Minimum,
                 maximum = t.Maximum,
-                isMultiplier = t.IsMultiplier
+                isMultiplier = t.IsMultiplier,
+                scopedSupported = ScopedTweakPatch.IsSupportedScopedTweakId(t.Id),
+                scopes = ScopedTweakPatch.GetSupportedScopes(t.Id)
             }).ToList()
         }).ToList();
 
@@ -1554,7 +1556,9 @@ public static partial class CliHost
             @default = t.Default,
             minimum = t.Minimum,
             maximum = t.Maximum,
-            isMultiplier = t.IsMultiplier
+            isMultiplier = t.IsMultiplier,
+            scopedSupported = ScopedTweakPatch.IsSupportedScopedTweakId(t.Id),
+            scopes = ScopedTweakPatch.GetSupportedScopes(t.Id)
         }).ToList();
 
         var data = new
@@ -1585,6 +1589,9 @@ public static partial class CliHost
                     string mulStr = t.IsMultiplier ? " [倍率 / Multiplier]" : "";
                     stdout.WriteLine($"  * {t.Id}{mulStr}: {t.Label}");
                     stdout.WriteLine($"      預設: {t.Default} (範圍: [{t.Minimum}..{t.Maximum}])");
+                    IReadOnlyList<string> scopes = ScopedTweakPatch.GetSupportedScopes(t.Id);
+                    if (scopes.Count > 0)
+                        stdout.WriteLine($"      分流 scope: {string.Join(", ", scopes)}");
                     stdout.WriteLine($"      說明: {t.Description}");
                 }
             }
@@ -1859,6 +1866,69 @@ public static partial class CliHost
                     break;
                 }
 
+                case "--scoped-tweak":
+                {
+                    int dot = val.IndexOf('.');
+                    int eq = val.IndexOf('=', dot + 1);
+                    if (dot <= 0 || eq <= dot + 1)
+                    {
+                        string err = Strings.Get(
+                            "Error_InvalidArgs",
+                            $"--scoped-tweak 格式必須為 <id>.<scope>=<value>，實際為 '{val}'");
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+
+                    string tweakId = val[..dot].Trim();
+                    string scope = val[(dot + 1)..eq].Trim();
+                    string tweakValStr = val[(eq + 1)..].Trim();
+
+                    if (!Tweaks.ById.TryGetValue(tweakId, out var tweak))
+                    {
+                        string err = Strings.Get("Error_TrainerUnknownTweak", tweakId);
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    if (!ScopedTweakPatch.IsSupportedScopedTweakId(tweak.Id))
+                    {
+                        string err = Strings.Get("Error_TrainerScopedTweakUnsupported", tweak.Id);
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    if (!ScopedTweakPatch.GetSupportedScopes(tweak.Id).Contains(scope, StringComparer.Ordinal))
+                    {
+                        string err = Strings.Get("Error_TrainerScopedTweakUnknownScope", tweak.Id, scope);
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    if (!decimal.TryParse(
+                            tweakValStr,
+                            NumberStyles.Float | NumberStyles.AllowThousands,
+                            CultureInfo.InvariantCulture,
+                            out decimal decVal) ||
+                        decVal < tweak.Minimum || decVal > tweak.Maximum)
+                    {
+                        string err = Strings.Get(
+                            "Error_TrainerTweakOutOfRange",
+                            $"{tweak.Id}.{scope}",
+                            tweakValStr,
+                            tweak.Minimum,
+                            tweak.Maximum);
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+
+                    if (!config.Trainer.ScopedTweaks.TryGetValue(
+                            tweak.Id,
+                            out Dictionary<string, decimal>? scopedValues))
+                    {
+                        scopedValues = new Dictionary<string, decimal>(StringComparer.Ordinal);
+                        config.Trainer.ScopedTweaks[tweak.Id] = scopedValues;
+                    }
+                    scopedValues[scope] = decVal;
+                    break;
+                }
+
                 case "--numpad":
                 {
                     if (TryParseOnOff(val, out bool numpad))
@@ -1974,7 +2044,8 @@ public static partial class CliHost
                 key = c.Key,
                 parameters = c.Parameters
             }).ToList(),
-            tweaks = config.Trainer.Tweaks
+            tweaks = config.Trainer.Tweaks,
+            scopedTweaks = config.Trainer.ScopedTweaks
         };
 
         if (isJson)
@@ -2005,6 +2076,13 @@ public static partial class CliHost
             foreach (var (k, v) in config.Trainer.Tweaks)
             {
                 stdout.WriteLine($"      * {k} = {v}");
+            }
+            int scopedCount = config.Trainer.ScopedTweaks.Sum(kv => kv.Value.Count);
+            stdout.WriteLine($"  - 已設定分流調整 (ScopedTweaks): {scopedCount} 個 scope");
+            foreach (var (id, values) in config.Trainer.ScopedTweaks)
+            {
+                foreach (var (scope, value) in values)
+                    stdout.WriteLine($"      * {id}.{scope} = {value}");
             }
             if (warnings.Count > 0)
             {

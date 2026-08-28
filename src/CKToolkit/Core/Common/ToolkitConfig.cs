@@ -119,6 +119,15 @@ public sealed class TrainerConfig
     /// <summary>數值調整。預設為空，代表全部維持遊戲原廠數值。</summary>
     [JsonPropertyName("tweaks")]
     public Dictionary<string, decimal> Tweaks { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 依目標分流的永久數值調整。外層 key 是 tweak ID，內層 key 是
+    /// <c>self</c>／<c>enemy</c> 或聚落四 scope；未指定的 scope 會回退到
+    /// 舊版 <see cref="Tweaks"/>，再回退到原廠值。
+    /// </summary>
+    [JsonPropertyName("scopedTweaks")]
+    public Dictionary<string, Dictionary<string, decimal>> ScopedTweaks { get; set; } =
+        new(StringComparer.Ordinal);
 }
 
 /// <summary>

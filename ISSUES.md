@@ -124,7 +124,7 @@
 ### ISSUE-048: `ckrun-config.txt` 與 `verify` 只比較設定／修補名稱，會錯報遊戲實際修改內容
 - **問題編號**: `ISSUE-048`
 - **發現日期**: 2026-08-24
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象與實機證據**:
   - 發布版 CLI 已把八個 tweak 還原原廠並成功 apply；直接解析真實 `data.pak\CKTRAINER.TXT`，內容為 `tweaks: {}`、唯一作弊 `diagnose`，`SCDEBUG.XML` 也只有 F10 診斷與原廠速度鍵。
   - 但 `16-08-18_launch`、`16-28-53_launch` 的 `ckrun-config.txt` 仍列出英雄上限 2000、人口每秒 +100、訓練／研究 20 倍及多個未實際安裝的作弊。`RunManifest.AppendTrainer()` 直接列印傳入的 `ToolkitConfig`，卻把文件描述成「遊戲檔案的實際狀態」。
@@ -132,6 +132,10 @@
 - **影響與修復方向**:
   - 崩潰分析可能把實際原廠數值場次誤判成極端修改器場次；`verify` 也會對「設定未真正套用」給出假成功。
   - `RunManifest` 必須從實際 PAK marker／遊戲檔案讀值，設定值只能另列為「期望設定」；`verify` 必須比較 trainer marker 的作弊與非預設 tweak payload，並對不一致回 `matchesConfig=false`。
+- **修復方案與自動化驗證**:
+  - `verify` 現在會比對 `TrainerMarker.Cheats/Tweaks` 與實際非預設 payload，並比對 `.cktw` 的完整 legacy 設定；只存在同名 patch 而 payload 不符時回報 `matchesConfig=false`。
+  - `ckrun-config.txt` 現在從遊戲目錄唯讀解析 `data.pak` marker 與 `.cktw`，另外列出本次期望設定，不再把設定物件冒充實際狀態。
+  - Release build 與 SelfTest 全部通過；尚未取得真實遊戲場次的 marker/manifest 交叉驗收，因此保留待實測狀態。
 
 ---
 
@@ -155,6 +159,9 @@
   - `.cktw` 目前已擴充為 7-hook／30-config：人口成長量、成長間隔、超額流失比例與流失間隔各自提供 self/enemy × townhall/village 四 scope；四處為 `0x005026B6`、`0x005026C7`、`0x005026EF`、`0x00502716`，均沿用 multiplayer/type/owner fail-closed 判定。
   - 聚落容量使用既有 income hook 更新 resource `+0x0C/+0x10` 與中央建築 `+0x3A`，具獨立 enable，disabled 不蓋地圖 override；初始金錢 hook `0x0050132E` 只攔 class fallback，map/save 明確 current gold 不受影響。兩組皆為 self/enemy × townhall/village。
   - manifest 現為 8-hook／48-config，已通過合成 apply/reapply/config-update/range-reject/tamper-reject/reverse、完整 x86 解碼及真實 Steam EXE 純記憶體 byte-exact Apply/Reverse；build 0 warning/0 error、SelfTest 39 組全綠。其他英雄／單位等永久 Tweak 未完成，狀態仍維持 🔴。
+  - 2026-08-27 目前 `.cktw` 為 9-hook／61-config，並已接通向後相容的 `trainer.scopedTweaks` JSON 與 CLI：`trainer set --scoped-tweak <id>.<scope>=<value>` 可保存目前 18 個已完成 hook 的明確值，`trainer list-tweaks --json` 會回報 `scopedSupported`／合法 `scopes`。明確值優先，缺少 scope 回退舊單值再回退原版；未知／未支援 ID、未知 scope 與超界值均在五檔寫入前拒絕。
+  - scoped-only 設定已驗證只進 `.cktw`，不會另寫共享 `data.pak`；Release build 0 warning／0 error、完整 SelfTest 40 組全綠。
+  - 2026-08-28 GUI scoped 編輯器完成：修改器頁新增「敵我／聚落分流」子分頁，只列出 18 個有 hook 的 ID（自動分成 self/enemy 單值表與四聚落 scope 表），`hero_max_army` 等未完成 ID 完全不產生可儲存的列；欄位空白或等於「原始值」不落盤，明確值寫入 `trainer.scopedTweaks`。SelfTest Group 40 覆蓋 TrainerPage handle、14 個 scoped i18n key 的 en／zh-TW／zh-CN 非空翻譯、`train_speed`／`gold_production` round-trip、fallback scope 不落盤、超界值拒絕與未完成 ID 隱藏；Debug build 與 SelfTest 全綠。這仍只是本地／合成證據，未改變 ISSUE-049 的 🔴 狀態。
 - **完成標準**:
   - 建立向後相容的 scoped-tweak 設定格式；舊版單一值遷移時必須同時套到我方與敵方，保持既有行為。
   - 每個 UI 可選欄位均必須有真實 owner-aware 引擎路徑、已知原始位元組、偵測簽章與精確反轉；未完成 hook 的項目不得先露出可儲存的假控制項。

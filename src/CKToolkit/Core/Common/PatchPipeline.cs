@@ -276,6 +276,8 @@ public sealed class PatchPipeline
         if (config.Perf.VideoFix) layered[GameFile.Exe].Add("video_fix");
         if (config.Perf.Hires >= 1600) layered[GameFile.Exe].Add($"hires_zoom ({config.Perf.Hires})");
         if (config.Perf.KeepRes) layered[GameFile.Exe].Add("res_writeback");
+        if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer))
+            layered[GameFile.Exe].Add("scoped_tweaks");
         if (config.Trainer.Enabled && config.Trainer.NumpadKeys) layered[GameFile.Exe].Add("key_map");
         foreach (IPatchModule module in _modules)
         {
@@ -325,7 +327,7 @@ public sealed class PatchPipeline
              !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) ||
             config.Perf.AddRes.Count > 0;
         if (hasCustomRes) layered[GameFile.DataPak].Add("resolutions_append");
-        if (TrainerHasPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
+        if (TrainerHasDataPakPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
         foreach (IPatchModule module in _modules)
         {
             try
@@ -543,7 +545,8 @@ public sealed class PatchPipeline
                 ExitCodes.InvalidArgs);
         }
 
-        if (config.Trainer.Cheats is null || config.Trainer.Tweaks is null)
+        if (config.Trainer.Cheats is null || config.Trainer.Tweaks is null ||
+            config.Trainer.ScopedTweaks is null)
             return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
 
         foreach (CheatConfig cheat in config.Trainer.Cheats)
@@ -565,6 +568,42 @@ public sealed class PatchPipeline
                 return Result.Fail(
                     Strings.Get("Error_TrainerTweakOutOfRange", id, value, tweak.Minimum, tweak.Maximum),
                     ExitCodes.InvalidArgs);
+            }
+        }
+
+        foreach ((string id, Dictionary<string, decimal> values) in config.Trainer.ScopedTweaks)
+        {
+            if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
+                return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
+            if (!ScopedTweakPatch.IsSupportedScopedTweakId(id))
+            {
+                return Result.Fail(
+                    Strings.Get("Error_TrainerScopedTweakUnsupported", id),
+                    ExitCodes.InvalidArgs);
+            }
+            if (values is null)
+                return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
+
+            IReadOnlyList<string> allowedScopes = ScopedTweakPatch.GetSupportedScopes(id);
+            foreach ((string scope, decimal value) in values)
+            {
+                if (!allowedScopes.Contains(scope, StringComparer.Ordinal))
+                {
+                    return Result.Fail(
+                        Strings.Get("Error_TrainerScopedTweakUnknownScope", id, scope),
+                        ExitCodes.InvalidArgs);
+                }
+                if (value < tweak.Minimum || value > tweak.Maximum)
+                {
+                    return Result.Fail(
+                        Strings.Get(
+                            "Error_TrainerTweakOutOfRange",
+                            $"{id}.{scope}",
+                            value,
+                            tweak.Minimum,
+                            tweak.Maximum),
+                        ExitCodes.InvalidArgs);
+                }
             }
         }
 
@@ -783,7 +822,7 @@ public sealed class PatchPipeline
             {
                 dataPakLayered.Add("resolutions_append");
             }
-            if (TrainerHasPayload(config.Trainer))
+            if (TrainerHasDataPakPayload(config.Trainer))
             {
                 dataPakLayered.Add("trainer_marker");
             }
@@ -1193,6 +1232,15 @@ public sealed class PatchPipeline
                 ? appliedPatches.OrderBy(x => x).SequenceEqual(expectedPatches.OrderBy(x => x))
                 : false;
 
+            if (matchesConfig && f == GameFile.Exe)
+            {
+                matchesConfig = ScopedTweakPatch.MatchesLegacySettings(liveBytes, effectiveConfig.Trainer);
+            }
+            else if (matchesConfig && f == GameFile.DataPak)
+            {
+                matchesConfig = TrainerMarkerMatchesConfig(liveBytes, effectiveConfig.Trainer);
+            }
+
             string stateStr = fileState.Kind switch
             {
                 FileStateKind.Vanilla => "vanilla",
@@ -1242,6 +1290,7 @@ public sealed class PatchPipeline
                     list.Add("cell_grid");
                 }
                 if (config.Perf.KeepRes) list.Add("res_writeback");
+                if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer)) list.Add("scoped_tweaks");
                 if (config.Trainer.Enabled && config.Trainer.NumpadKeys) list.Add("key_map");
                 break;
 
@@ -1262,7 +1311,7 @@ public sealed class PatchPipeline
                 {
                     list.Add("resolutions_append");
                 }
-                if (TrainerHasPayload(config.Trainer)) list.Add("trainer_marker");
+                if (TrainerHasDataPakPayload(config.Trainer)) list.Add("trainer_marker");
                 break;
 
             case GameFile.LocalPak:
@@ -1297,10 +1346,47 @@ public sealed class PatchPipeline
         return list;
     }
 
-    private static bool TrainerHasPayload(TrainerConfig trainer) =>
+    private static bool TrainerHasDataPakPayload(TrainerConfig trainer) =>
         trainer.Enabled &&
         (trainer.Cheats.Any(c => c.Enabled) ||
-         trainer.Tweaks.Any(kv => Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
+         trainer.Tweaks.Any(kv =>
+             !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
+             Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
+
+    private static bool TrainerMarkerMatchesConfig(byte[] dataPakBytes, TrainerConfig trainer)
+    {
+        bool expected = TrainerHasDataPakPayload(trainer);
+        HmmPak pak;
+        try
+        {
+            pak = HmmPak.FromBytes(dataPakBytes);
+        }
+        catch
+        {
+            return false;
+        }
+
+        TrainerMarker? marker = TrainerInstaller.ReadMarker(pak);
+        if (!expected)
+            return marker is null;
+        if (marker is null)
+            return false;
+
+        var expectedCheats = trainer.Cheats
+            .Where(c => c.Enabled)
+            .Select(c => c.Id)
+            .ToList();
+        var expectedTweaks = trainer.Tweaks
+            .Where(kv =>
+                !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
+                Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        return marker.Cheats.SequenceEqual(expectedCheats, StringComparer.Ordinal) &&
+               marker.Tweaks.Count == expectedTweaks.Count &&
+               marker.Tweaks.All(kv => expectedTweaks.TryGetValue(kv.Key, out decimal value) &&
+                                       value == kv.Value);
+    }
 
     // ---- 先寫 .cktmp 再取代之安全寫檔輔助 ----------------------------------
 

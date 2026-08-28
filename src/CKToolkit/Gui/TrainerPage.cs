@@ -17,14 +17,21 @@ public sealed class TrainerPage : UserControl
     private readonly TabControl _subTabs = new();
     private readonly TabPage _cheatsTab = new();
     private readonly TabPage _tweaksTab = new();
+    private readonly TabPage _scopedTweaksTab = new();
     private readonly KeyCaptureGrid _cheats = new();
     private readonly DataGridView _tweaks = new();
+    private readonly DataGridView _scopedSimple = new();
+    private readonly DataGridView _scopedSettlement = new();
     private readonly Button _resetCheats = new();
     private readonly Button _resetTweaks = new();
+    private readonly Button _resetScopedTweaks = new();
     private readonly Button _launchGame = new();
     private readonly Label _launchHint = new();
     private readonly Label _hint = new();
     private readonly Label _tweaksWarning = new();
+    private readonly Label _scopedWarning = new();
+    private readonly Label _scopedSimpleLabel = new();
+    private readonly Label _scopedSettlementLabel = new();
     private readonly Label _riskBanner = new();
     private bool _loading;
     private int _capturingRow = -1;
@@ -122,9 +129,10 @@ public sealed class TrainerPage : UserControl
         _subTabs.Dock = DockStyle.Top;
         _subTabs.Height = 440;
         _subTabs.MinimumSize = new Size(0, 360);
-        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
+        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab, _scopedTweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
+        BuildScopedTweaksTab();
         root.Controls.Add(_subTabs, 0, 3);
         root.Controls.Add(launchRow, 0, 4);
         Controls.Add(root);
@@ -193,6 +201,130 @@ public sealed class TrainerPage : UserControl
         _tweaksTab.Controls.Add(panel);
     }
 
+    private void BuildScopedTweaksTab()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(4)
+        };
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        _scopedWarning.AutoSize = true;
+        _scopedWarning.Dock = DockStyle.Fill;
+        _scopedWarning.MaximumSize = new Size(1000, 0);
+        _scopedWarning.Padding = new Padding(10, 8, 10, 8);
+        _scopedWarning.Margin = new Padding(2, 2, 2, 6);
+        _scopedWarning.BackColor = Color.FromArgb(239, 246, 255);
+        _scopedWarning.ForeColor = Color.FromArgb(30, 64, 175);
+        panel.Controls.Add(_scopedWarning, 0, 0);
+
+        ConfigureSectionLabel(_scopedSimpleLabel);
+        panel.Controls.Add(_scopedSimpleLabel, 0, 1);
+        ConfigureGrid(_scopedSimple);
+        AddScopedIdentityColumns(_scopedSimple, nameWidth: 220);
+        AddScopedValueColumn(_scopedSimple, "Self", 112);
+        AddScopedValueColumn(_scopedSimple, "Enemy", 112);
+        AddScopedTailColumns(_scopedSimple);
+        ConfigureScopedGrid(_scopedSimple);
+        panel.Controls.Add(_scopedSimple, 0, 2);
+
+        ConfigureSectionLabel(_scopedSettlementLabel);
+        _scopedSettlementLabel.Margin = new Padding(2, 8, 2, 3);
+        panel.Controls.Add(_scopedSettlementLabel, 0, 3);
+        ConfigureGrid(_scopedSettlement);
+        AddScopedIdentityColumns(_scopedSettlement, nameWidth: 190);
+        AddScopedValueColumn(_scopedSettlement, "SelfTownhall", 108);
+        AddScopedValueColumn(_scopedSettlement, "SelfVillage", 108);
+        AddScopedValueColumn(_scopedSettlement, "EnemyTownhall", 108);
+        AddScopedValueColumn(_scopedSettlement, "EnemyVillage", 108);
+        AddScopedTailColumns(_scopedSettlement);
+        ConfigureScopedGrid(_scopedSettlement);
+        panel.Controls.Add(_scopedSettlement, 0, 4);
+
+        _resetScopedTweaks.AutoSize = true;
+        _resetScopedTweaks.Margin = new Padding(2, 7, 2, 2);
+        _resetScopedTweaks.Click += (_, _) => ResetAllScopedTweaks();
+        panel.Controls.Add(_resetScopedTweaks, 0, 5);
+        _scopedTweaksTab.Controls.Add(panel);
+    }
+
+    private static void ConfigureSectionLabel(Label label)
+    {
+        label.AutoSize = true;
+        label.Dock = DockStyle.Fill;
+        label.Font = new Font(label.Font, FontStyle.Bold);
+        label.ForeColor = Color.FromArgb(51, 65, 85);
+        label.Padding = new Padding(2, 3, 2, 3);
+        label.Margin = new Padding(2, 2, 2, 3);
+    }
+
+    private static void AddScopedIdentityColumns(DataGridView grid, int nameWidth)
+    {
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Group", ReadOnly = true, Width = 105 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = nameWidth });
+    }
+
+    private static void AddScopedValueColumn(DataGridView grid, string name, int width)
+    {
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = name,
+            Width = width,
+            DefaultCellStyle = new DataGridViewCellStyle
+            {
+                Alignment = DataGridViewContentAlignment.MiddleRight,
+                Font = new Font("Consolas", 9F)
+            }
+        });
+    }
+
+    private static void AddScopedTailColumns(DataGridView grid)
+    {
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Original",
+            ReadOnly = true,
+            Width = 116,
+            DefaultCellStyle = new DataGridViewCellStyle
+            {
+                Alignment = DataGridViewContentAlignment.MiddleRight,
+                ForeColor = Color.FromArgb(100, 116, 139),
+                Font = new Font("Consolas", 9F)
+            }
+        });
+        grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "Range",
+            ReadOnly = true,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            MinimumWidth = 120
+        });
+        grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "ResetRow",
+            Width = 82,
+            MinimumWidth = 82,
+            FlatStyle = FlatStyle.Flat,
+            UseColumnTextForButtonValue = true
+        });
+    }
+
+    private void ConfigureScopedGrid(DataGridView grid)
+    {
+        grid.CellToolTipTextNeeded += ScopedCellToolTipTextNeeded;
+        grid.CellClick += ScopedGridCellClick;
+        grid.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
+        grid.CellEndEdit += (_, _) => UpdateRiskBanner();
+    }
+
     private static void ConfigureGrid(DataGridView grid)
     {
         grid.Dock = DockStyle.Fill;
@@ -206,6 +338,16 @@ public sealed class TrainerPage : UserControl
         grid.BackgroundColor = Color.White;
         grid.BorderStyle = BorderStyle.FixedSingle;
         grid.EditMode = DataGridViewEditMode.EditOnEnter;
+        grid.EnableHeadersVisualStyles = false;
+        grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(241, 245, 249);
+        grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(51, 65, 85);
+        grid.ColumnHeadersDefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
+        grid.ColumnHeadersHeight = 34;
+        grid.RowTemplate.Height = 30;
+        grid.GridColor = Color.FromArgb(226, 232, 240);
+        grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
+        grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(15, 23, 42);
+        grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
     }
 
     private void PopulateDefinitions()
@@ -231,6 +373,33 @@ public sealed class TrainerPage : UserControl
                 FormatDecimal(tweak.Default), FormatDecimal(tweak.Default),
                 $"{FormatDecimal(tweak.Minimum)} – {FormatDecimal(tweak.Maximum)}");
             _tweaks.Rows[rowIndex].Tag = tweak;
+        }
+
+        _scopedSimple.Rows.Clear();
+        _scopedSettlement.Rows.Clear();
+        var vanillaTrainer = new TrainerConfig();
+        foreach (Tweak tweak in Tweaks.All)
+        {
+            IReadOnlyList<string> scopes = ScopedTweakPatch.GetSupportedScopes(tweak.Id);
+            if (scopes.Count == 2)
+            {
+                string original = string.Join(" / ", scopes.Select(scope =>
+                    FormatDecimal(ScopedTweakPatch.GetScopedFallbackValue(vanillaTrainer, tweak.Id, scope))));
+                int rowIndex = _scopedSimple.Rows.Add(
+                    DisplayGroup(tweak.Group), DisplayTweakName(tweak), string.Empty, string.Empty,
+                    original, $"{FormatDecimal(tweak.Minimum)} – {FormatDecimal(tweak.Maximum)}");
+                _scopedSimple.Rows[rowIndex].Tag = tweak;
+            }
+            else if (scopes.Count == 4)
+            {
+                string original = string.Join(" / ", scopes.Select(scope =>
+                    FormatDecimal(ScopedTweakPatch.GetScopedFallbackValue(vanillaTrainer, tweak.Id, scope))));
+                int rowIndex = _scopedSettlement.Rows.Add(
+                    DisplayGroup(tweak.Group), DisplayTweakName(tweak),
+                    string.Empty, string.Empty, string.Empty, string.Empty,
+                    original, $"{FormatDecimal(tweak.Minimum)} – {FormatDecimal(tweak.Maximum)}");
+                _scopedSettlement.Rows[rowIndex].Tag = tweak;
+            }
         }
         _loading = false;
     }
@@ -278,6 +447,8 @@ public sealed class TrainerPage : UserControl
             decimal value = config.Tweaks.TryGetValue(tweak.Id, out decimal configuredValue) ? configuredValue : tweak.Default;
             row.Cells["Value"].Value = FormatDecimal(value);
         }
+        LoadScopedGrid(_scopedSimple, config);
+        LoadScopedGrid(_scopedSettlement, config);
         _loading = false;
         RefreshEnabledState();
         ApplyLanguage();
@@ -289,6 +460,8 @@ public sealed class TrainerPage : UserControl
         CancelCapture();
         _cheats.EndEdit();
         _tweaks.EndEdit();
+        _scopedSimple.EndEdit();
+        _scopedSettlement.EndEdit();
         config.Enabled = _enabled.Checked;
         config.NumpadKeys = _numpad.Checked;
         config.KeepVanilla = _keepVanilla.Checked;
@@ -340,6 +513,10 @@ public sealed class TrainerPage : UserControl
             config.Tweaks[tweak.Id] = value;
         }
 
+        config.ScopedTweaks = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.Ordinal);
+        SaveScopedGrid(_scopedSimple, config);
+        SaveScopedGrid(_scopedSettlement, config);
+
         // 使用核心產生器做最後驗證：重複按鍵、未知參數或不合法值都在寫檔前被擋下。
         if (config.Enabled && config.Cheats.Any(c => c.Enabled))
         {
@@ -361,12 +538,17 @@ public sealed class TrainerPage : UserControl
         _fixedPlayerLabel.Text = Strings.Get("Gui_Trainer_FixedPlayer");
         _cheatsTab.Text = Strings.Get("Gui_Trainer_Cheats");
         _tweaksTab.Text = Strings.Get("Gui_Trainer_Tweaks");
+        _scopedTweaksTab.Text = Strings.Get("Gui_Trainer_ScopedTweaks");
         _resetCheats.Text = Strings.Get("Gui_Trainer_ResetCheats");
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
+        _resetScopedTweaks.Text = Strings.Get("Gui_Trainer_ResetScopedTweaks");
         _launchGame.Text = Strings.Get("Gui_Trainer_Launch");
         _launchHint.Text = Strings.Get("Gui_Trainer_LaunchHint");
         _hint.Text = Strings.Get("Gui_Trainer_Hint");
         _tweaksWarning.Text = Strings.Get("Gui_Trainer_TweaksWarning");
+        _scopedWarning.Text = Strings.Get("Gui_Trainer_ScopedWarning");
+        _scopedSimpleLabel.Text = Strings.Get("Gui_Trainer_ScopedSimple");
+        _scopedSettlementLabel.Text = Strings.Get("Gui_Trainer_ScopedSettlement");
         UpdateRiskBanner();
         _cheats.Columns["Enabled"]!.HeaderText = Strings.Get("Gui_Enabled");
         _cheats.Columns["Name"]!.HeaderText = Strings.Get("Gui_Name");
@@ -379,6 +561,8 @@ public sealed class TrainerPage : UserControl
         _tweaks.Columns["Value"]!.HeaderText = Strings.Get("Gui_Value");
         _tweaks.Columns["Default"]!.HeaderText = Strings.Get("Gui_Default");
         _tweaks.Columns["Range"]!.HeaderText = Strings.Get("Gui_Range");
+        ApplyScopedGridLanguage(_scopedSimple, settlement: false);
+        ApplyScopedGridLanguage(_scopedSettlement, settlement: true);
 
         foreach (DataGridViewRow row in _cheats.Rows)
         {
@@ -395,8 +579,108 @@ public sealed class TrainerPage : UserControl
                 row.Cells["Group"].Value = DisplayGroup(tweak.Group);
                 row.Cells["Name"].Value = DisplayTweakName(tweak);
             }
+        foreach (DataGridView grid in new[] { _scopedSimple, _scopedSettlement })
+        {
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.Tag is not Tweak tweak) continue;
+                row.Cells["Group"].Value = DisplayGroup(tweak.Group);
+                row.Cells["Name"].Value = DisplayTweakName(tweak);
+            }
+        }
         RefreshPlayerModeItems();
     }
+
+    private static void ApplyScopedGridLanguage(DataGridView grid, bool settlement)
+    {
+        grid.Columns["Group"]!.HeaderText = Strings.Get("Gui_Group");
+        grid.Columns["Name"]!.HeaderText = Strings.Get("Gui_Name");
+        if (settlement)
+        {
+            grid.Columns["SelfTownhall"]!.HeaderText = Strings.Get("Gui_Trainer_SelfTownhall");
+            grid.Columns["SelfVillage"]!.HeaderText = Strings.Get("Gui_Trainer_SelfVillage");
+            grid.Columns["EnemyTownhall"]!.HeaderText = Strings.Get("Gui_Trainer_EnemyTownhall");
+            grid.Columns["EnemyVillage"]!.HeaderText = Strings.Get("Gui_Trainer_EnemyVillage");
+        }
+        else
+        {
+            grid.Columns["Self"]!.HeaderText = Strings.Get("Gui_Trainer_Self");
+            grid.Columns["Enemy"]!.HeaderText = Strings.Get("Gui_Trainer_Enemy");
+        }
+        grid.Columns["Original"]!.HeaderText = Strings.Get("Gui_Trainer_OriginalScopes");
+        grid.Columns["Range"]!.HeaderText = Strings.Get("Gui_Range");
+        var resetColumn = (DataGridViewButtonColumn)grid.Columns["ResetRow"]!;
+        resetColumn.HeaderText = string.Empty;
+        resetColumn.Text = Strings.Get("Gui_Trainer_ResetRow");
+    }
+
+    private static IReadOnlyList<(string Scope, string Column)> ScopeBindings(DataGridView grid) =>
+        grid.Columns.Contains("Self")
+            ? [("self", "Self"), ("enemy", "Enemy")]
+            :
+            [
+                ("selfTownhall", "SelfTownhall"),
+                ("selfVillage", "SelfVillage"),
+                ("enemyTownhall", "EnemyTownhall"),
+                ("enemyVillage", "EnemyVillage")
+            ];
+
+    private static void LoadScopedGrid(DataGridView grid, TrainerConfig config)
+    {
+        foreach (DataGridViewRow row in grid.Rows)
+        {
+            if (row.Tag is not Tweak tweak) continue;
+            foreach ((string scope, string column) in ScopeBindings(grid))
+            {
+                row.Cells[column].Value = FormatDecimal(
+                    ScopedTweakPatch.GetEffectiveScopedValue(config, tweak.Id, scope));
+            }
+        }
+    }
+
+    private static void SaveScopedGrid(DataGridView grid, TrainerConfig config)
+    {
+        foreach (DataGridViewRow row in grid.Rows)
+        {
+            if (row.Tag is not Tweak tweak) continue;
+            foreach ((string scope, string column) in ScopeBindings(grid))
+            {
+                string raw = Convert.ToString(row.Cells[column].Value, CultureInfo.InvariantCulture) ?? string.Empty;
+                if (!TryParseDecimal(raw, out decimal value) ||
+                    value < tweak.Minimum || value > tweak.Maximum)
+                {
+                    throw new InvalidOperationException(Strings.Get(
+                        "Gui_Trainer_InvalidScopedTweak",
+                        DisplayTweakName(tweak),
+                        Strings.Get(ScopeLabelKey(scope)),
+                        raw,
+                        FormatDecimal(tweak.Minimum),
+                        FormatDecimal(tweak.Maximum)));
+                }
+
+                decimal fallback = ScopedTweakPatch.GetScopedFallbackValue(config, tweak.Id, scope);
+                if (value == fallback) continue;
+
+                if (!config.ScopedTweaks.TryGetValue(tweak.Id, out Dictionary<string, decimal>? values))
+                {
+                    values = new Dictionary<string, decimal>(StringComparer.Ordinal);
+                    config.ScopedTweaks[tweak.Id] = values;
+                }
+                values[scope] = value;
+            }
+        }
+    }
+
+    private static string ScopeLabelKey(string scope) => scope switch
+    {
+        "self" => "Gui_Trainer_Self",
+        "enemy" => "Gui_Trainer_Enemy",
+        "selfTownhall" => "Gui_Trainer_SelfTownhall",
+        "selfVillage" => "Gui_Trainer_SelfVillage",
+        "enemyTownhall" => "Gui_Trainer_EnemyTownhall",
+        "enemyVillage" => "Gui_Trainer_EnemyVillage",
+        _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, null)
+    };
 
     private void RefreshPlayerModeItems()
     {
@@ -459,6 +743,8 @@ public sealed class TrainerPage : UserControl
             string raw = Convert.ToString(row.Cells["Value"].Value, CultureInfo.InvariantCulture) ?? string.Empty;
             if (TryParseDecimal(raw, out decimal value)) config.Tweaks[tweak.Id] = value;
         }
+        SaveScopedGrid(_scopedSimple, config);
+        SaveScopedGrid(_scopedSettlement, config);
         foreach (DataGridViewRow row in _cheats.Rows)
         {
             if (row.Tag is not Cheat cheat) continue;
@@ -625,6 +911,57 @@ public sealed class TrainerPage : UserControl
         UpdateRiskBanner();
     }
 
+    private TrainerConfig BuildCurrentLegacyTweakConfig()
+    {
+        var config = new TrainerConfig { Enabled = _enabled.Checked };
+        foreach (DataGridViewRow row in _tweaks.Rows)
+        {
+            if (row.Tag is not Tweak tweak) continue;
+            string raw = Convert.ToString(row.Cells["Value"].Value, CultureInfo.InvariantCulture) ?? string.Empty;
+            config.Tweaks[tweak.Id] = TryParseDecimal(raw, out decimal value) ? value : tweak.Default;
+        }
+        return config;
+    }
+
+    private void ResetScopedRow(DataGridView grid, int rowIndex)
+    {
+        if (rowIndex < 0 || grid.Rows[rowIndex].Tag is not Tweak tweak) return;
+        TrainerConfig legacy = BuildCurrentLegacyTweakConfig();
+        foreach ((string scope, string column) in ScopeBindings(grid))
+        {
+            grid.Rows[rowIndex].Cells[column].Value = FormatDecimal(
+                ScopedTweakPatch.GetScopedFallbackValue(legacy, tweak.Id, scope));
+        }
+        UpdateRiskBanner();
+    }
+
+    private void ResetAllScopedTweaks()
+    {
+        _loading = true;
+        TrainerConfig legacy = BuildCurrentLegacyTweakConfig();
+        foreach (DataGridView grid in new[] { _scopedSimple, _scopedSettlement })
+        {
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                if (row.Tag is not Tweak tweak) continue;
+                foreach ((string scope, string column) in ScopeBindings(grid))
+                {
+                    row.Cells[column].Value = FormatDecimal(
+                        ScopedTweakPatch.GetScopedFallbackValue(legacy, tweak.Id, scope));
+                }
+            }
+        }
+        _loading = false;
+        UpdateRiskBanner();
+    }
+
+    private void ScopedGridCellClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (sender is not DataGridView grid || e.RowIndex < 0) return;
+        if (e.ColumnIndex == grid.Columns["ResetRow"]!.Index)
+            ResetScopedRow(grid, e.RowIndex);
+    }
+
     private void CheatsCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _cheats.Rows[e.RowIndex].Tag is Cheat cheat)
@@ -634,6 +971,12 @@ public sealed class TrainerPage : UserControl
     private void TweaksCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _tweaks.Rows[e.RowIndex].Tag is Tweak tweak)
+            e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
+    }
+
+    private void ScopedCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
+    {
+        if (sender is DataGridView grid && e.RowIndex >= 0 && grid.Rows[e.RowIndex].Tag is Tweak tweak)
             e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
     }
 

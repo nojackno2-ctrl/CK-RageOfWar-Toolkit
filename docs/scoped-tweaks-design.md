@@ -32,9 +32,9 @@
 
 ```json
 "scopedTweaks": {
-  "hero_max_army": {
-    "self": 100,
-    "enemy": 50
+  "train_speed": {
+    "self": 2,
+    "enemy": 1
   },
   "gold_production": {
     "selfTownhall": 48,
@@ -47,7 +47,7 @@
 
 遷移規則：
 
-1. 只有舊 `tweaks[id]` 時，該值複製到此項全部有效 scope，結果必須與舊版全域修改完全相同。
+1. 只有舊 `tweaks[id]` 時，該值複製到原本會受此設定影響的敵我 scope，結果必須與舊版全域修改完全相同。金錢的舊值只回退到 townhall、食物的舊值只回退到 village；另一種聚落原版為 0，只有明確 scoped 值才會改變。
 2. `scopedTweaks[id]` 存在時優先；缺少的 scope 回退到舊 `tweaks[id]`，再回退到原版值。
 3. 不認得的 id／scope、超出範圍或缺少必要 scope 一律 fail-closed，套用前拒絕，五個遊戲檔案零寫入。
 4. `trainer.enabled=false` 時 scoped 值不生效，也不得留下 EXE scoped patch。
@@ -157,6 +157,66 @@ owner 變更後從原版 class 值重新計算，避免乘上目前值而重複�
 只有確定不存在安全的 instance 表示法時，才評估 class clone。任一類別大小或生命週期證明不足時，
 禁止用猜測長度的 `memcpy`。
 
+**血量／攻擊／防禦／視野已實作進 `.cktw`（2026-08-25）**：hook 點改為 `0x004F479D`（`0x004F4760+0x3D`，
+`Object::SetPlayer` 核心內把 owner 存進 `esi+0x6E` 並回傳 `[eax+0x1C4]` 到 ecx 那兩條指令），而非
+`0x004F1070`。理由：`SetPlayer` 在建立與俘虜都會執行，`0x004F1070` 只在建立時跑一次；在 `SetPlayer`
+用 `esi+0x3A` 拿到的 class 指標重新讀 `class+0xCC/0xD4/0xD8/0xE4/0xE8/0xFC` 再依 self/enemy 倍率寫回
+`instance+0xA8/0xAC/0xBC/0xC0/0xC8/0xCC/0xB0`（血量、最小/最大攻擊、slash/pierce 防禦、視野），
+可以同時涵蓋建立與換手兩種情境，且每次都從不變的 class 基準值重算，不會因為呼叫多次而疊乘。
+視野與血量／攻擊／防禦一樣，是 `0x004F1070` 那個通用 Object copy routine 的一部分（不是 Hero 專屬
+欄位），所以套用同一個 hook、同一套「對所有走過 SetPlayer 的物件無條件套用」的邏輯是安全的。
+
+尚未實作、刻意保留原版行為的部份：
+
+- **GaulPower／RomanPower 種族倍率**：config 表已保留 `SelfGaulPowerQ16`／`EnemyGaulPowerQ16`／
+  `SelfRomanPowerQ16`／`EnemyRomanPowerQ16` 四個欄位可完整往返，但 helper 目前完全不讀取、不套用。
+  原因是 `ClassNameOffset (class+0x04)` 只確認是某種名稱／識別欄位，沒有反組譯證據能證明如何從它
+  判斷高盧／羅馬；使用者已確認目前沒有這項證據，此為明確擱置而非遺漏。
+- **英雄 `max_army`（class `+0x288` → instance `+0x198`）**：已用真實 EXE 深入調查（2026-08-25），
+  結論是「目前證據不足以安全套用」，且原因已量化，不是單純懶得查：
+  1. `0x004E23CE` 所在的 `fcn.004e22f0` 是 Hero 建構子，確認整個函式從頭到尾**不曾寫入
+     `this+0x6E`**（owner 欄位）——建構當下 owner 確定還沒指派，不是猜測。
+  2. 用同樣的「`class 指標 = [reg+0x3A]`、`push 1`、呼叫建構子」樣式在整支 EXE 搜尋，找到 **6 個
+     不同物件類型的工廠**，各自配置不同大小：430、364、486、442（Hero，`fcn.004e27c0` 呼叫
+     `push 0x1BA`）、470、**352** bytes。`max_army` 在 instance `+0x198`（十進位 408），寫 4 bytes
+     要到 byte 411——**352 與 364 bytes 的物件類型連分配的記憶體都不夠**，若把這個欄位塞進通用
+     `SetPlayer` hook（`0x004F479D`）對所有物件無條件寫入，對這兩種物件是真實可證明的 heap
+     overflow，不是理論風險。這也回頭證實了血量/攻擊/防禦/視野（最大用到 `+0x100`）在全部
+     6 種類型的最小配置（352 bytes）內都安全。
+  3. 嘗試找「只給 Hero/Unit 用、不給 Building 用」的替代 `SetPlayer`呼叫點：文件先前記錄的
+     `0x0050CD1D` 確實是 `call fcn.004f4760`，其呼叫鏈往上追到 `fcn.0050cbc0 ← fcn.004e24c0`（同一
+     支函式也會呼叫 Hero 建構子），一度像是英雄專用路徑；但再往上一層 `fcn.004894b0` 的呼叫者
+     有 7 處、散布在完全不相關的位址範圍，比較像是廣泛共用的物件方法（例如逐 tick 更新），
+     沒有字串或其他證據能證明它排除一般 Unit。也就是說這條路徑**同樣有無法排除的 heap
+     overflow 風險**，不是更安全的替代方案。
+  4. 目前唯一 100% 確定「只有 Hero 會執行到」的位址就是建構子本身（`0x004E23CE`），但那裡
+     owner 還未知（見第 1 點）。要安全做這件事，需要在遊戲實際執行時用偵錯器觀察：Hero
+     建構完成到 owner 真正寫入 `+0x6E`之間，是否存在一個「owner 已知且保證只對 Hero 執行」的
+     時間點；這台機器沒有裝遊戲，無法做這一步的動態驗證，純靜態繼續往上追呼叫鏈的投資報酬
+     已经很低。**這是有具體數字支撐的暫緩，不是遺漏**；下一步需要在有裝遊戲的機器上掛偵錯器
+     實測，而不是繼續猜測呼叫鏈。
+- **unit speed／`feeds`**：仍由共享 class 即時讀取，尚未找到 instance factor 或最小 hook 點。
+
+驗證現況：`dotnet build` 0 warning/0 error；SelfTest 40 組全綠，新增 owner-scalar hook CALL 目標、
+設定表往返、helper register-preserve 契約、fail-closed 鏈、class→instance 欄位複製（含視野）等
+檢查；helper（381 bytes）已用 `rz-asm` 完整反組譯，指令邊界合法、所有跳轉精準落在共用 `done` 標籤。
+
+**真實 Steam EXE 驗證（2026-08-25，補做）**：當時誤判「這台機器沒有安裝遊戲」，改用
+`%TEMP%\claude\...\scratchpad\backup-keep\Celtic kings.exe.orig`（前一個工作階段留下的暫存複本）
+做驗證。事後更正：`C:\Program Files (x86)\Steam\steamapps\common\CK_RageOfWar\` 其實一直都有真實
+安裝（2026-08-23 裝妥），只是查證時沒有先確認 Steam library。逐一比對本工具已知的全部 hook 位址
+（command-delay、gold/food production、initial-gold、owner-scalar）原始位元組，**九個都逐位元組
+完全相符**，確認程式碼配置與先前所有反組譯工作依據的版本一致，可放心使用。以 9 hooks/61 config
+對該份 EXE 做純記憶體 Apply/Reverse：原檔 3,516,344 bytes（SHA-256
+`86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`）→ 套用後 3,522,560 bytes →
+反轉後與原檔逐位元組相同、SHA-256 相同；磁碟上的暫存複本本身也維持只讀、未被覆寫。至此血量／
+攻擊／防禦／視野 owner-scalar hook 已完成與其他 hook 相同等級的驗證。**注意**：這份暫存複本的
+SHA-256（`86FC9F80...`）與真實安裝目錄裡 `Celtic kings.exe` 目前的 SHA-256（`E27066F8...`，且
+`verify` 顯示該真實安裝檔已套用 laa/video_fix 等 6 項舊版修補、非 vanilla）不同，兩者並非同一份
+檔案；本節的驗證仍成立（比對的是 hook 位址位元組，不依賴整檔雜湊一致），但兩份基準檔的來源與
+狀態需要進一步釐清，且英雄 `max_army` 原本因「沒裝遊戲」擱置的動態偵錯驗證，現在可以直接對
+這台機器的真實安裝進行。
+
 ### 4.3 英雄成長常數
 
 `HeroHealthPerLevel` 與 `ExpFromArmyDivider` 分別在英雄建構／經驗子系統載入，已知相關函式包含
@@ -198,12 +258,23 @@ command 建立真實的 delay 路徑，不能沿用目前無效的 VXCONST 改�
 - 一般項目顯示「我方值」「敵方值」兩欄。
 - 金錢／食物生產率顯示四個聚落 scope；不得把金錢與食物合併成同一數字。
 - 全部重設需分成「此列恢復原版」與「全部 scope 恢復原版」。
-- CLI 使用穩定格式：`--scoped-tweak <id>.<scope>=<value>`；`list-tweaks --json` 回報合法 scope。
+- CLI 已使用穩定格式：`--scoped-tweak <id>.<scope>=<value>`；`list-tweaks --json` 回報 `scopedSupported` 與合法 `scopes`。
 - 只有 hook 與回歸測試都完成的項目才可在 GUI 啟用；其餘保持隱藏或唯讀並標示調查中。
 
-## 5.1 `.cktw` command helper（已合成驗證，尚未接入 Pipeline）
+目前設定檔、Pipeline 驗證與 CLI 已接通 18 個有 hook 的 ID。一般項目使用 `self`／`enemy`；
+`gold_production`、`food_production` 與四個人口項目使用 `selfTownhall`、`selfVillage`、
+`enemyTownhall`、`enemyVillage`。容量 ID 已在名稱區分 townhall/village，因此各使用 `self`／
+`enemy`。未知 ID、尚未完成的 ID、未知 scope 或超出原 tweak 範圍會在寫入遊戲前 fail-closed。
+GUI 修改器頁已新增「敵我／聚落分流」子分頁：只列出有 hook 的 18 個 ID（自動依 2／4 scope
+分到單值與聚落兩個表格），未完成的 ID（如 `hero_max_army`）完全不產生可儲存的列。欄位空白或
+等於「原始值」欄不寫入；明確值寫入 `trainer.scopedTweaks` 並只進 `.cktw`。SelfTest Group 40
+覆蓋建立、三語字串、往返、fallback 略過與範圍拒絕。現有單值 Tweak 欄位則保留向後相容。
 
-`ScopedTweakPatch.cs` 已建立格式版本 1 的 raw executable section，但尚未接入正式 Pipeline：
+## 5.1 `.cktw` command helper（已接入 Pipeline，尚未完成全部 scoped surface）
+
+`ScopedTweakPatch.cs` 已建立格式版本 1 的 raw executable section，並已接入目前完成子集的
+`TrainerModule`／`PatchPipeline`。明確 `scopedTweaks` 值優先，未指定 scope 回退舊版單值與
+原廠值；支援的項目不再重複寫入共享 `data.pak`。尚未完成的 tweak 不會被假裝成 scoped 行為。
 
 - Header：magic `CKTW`、格式版本、套用前檔案長度、payload／helper／設定表位移、hook 數與旗標。
 - Flags：`single-player-only`。
@@ -214,18 +285,21 @@ command 建立真實的 delay 路徑，不能沿用目前無效的 VXCONST 改�
   `+0xCF/+0xD0` 選擇 Q16.16 倍率；用 64-bit numerator 除法、overflow clamp 與最小 1 tick
   防止 wrap／除零／非零指令變成零延遲。
 - 設定表：command 6 欄、gold/food production 8 欄、人口 16 欄、容量 enable+12 欄、
-  初始金錢 enable+4 欄，共 48 欄。
+  初始金錢 enable+4 欄、unit scalar enable+12 欄，共 61 欄。
 
 SelfTest 已驗證八個 CALL 目標、command helper 多人與 owner/flag 關鍵指令、settlement helper 的
 `ret 4`／`test eax,eax` 呼叫端契約、`+0x32/+0x36/+0x90` 分型與 owner 位移、人口 helper 的
-MOV flags／IMUL 契約、容量索引／enable、constructor owner stack 與 48 欄設定往返及原地更新、
+MOV flags／IMUL 契約、容量索引／enable、constructor owner stack、owner-scalar 與 61 欄設定往返及原地更新、
 範圍拒絕、重複套用冪等、
 hook/helper 混合狀態拒絕，以及移除 raw section 後逐位元組回到合成原版。
 另以目前真實 Steam EXE 在記憶體中完成 Apply／Reverse（未寫磁碟）：3,516,344 bytes 附加
 `.cktw` 後為 3,522,560 bytes，反轉後 byte-exact，前後 SHA-256 均為
 `E27066F82510DA7B400FB341906B86B5CFFF1795BA1C2D76CFF48D07C070C440`。
-騾車尚無可用 command delay，其他永久 Tweak hook 亦未完成；在全套邏輯完成前不得接入
-`TrainerModule`。
+`verify` 現在會比對 `.cktw` 完整設定與 `data.pak` trainer marker payload；`RunManifest` 也會
+分開列出遊戲檔案實際狀態與本次期望設定。騾車尚無可用 command delay，英雄／種族／speed／
+feeds 等永久 Tweak hook 亦未完成；因此目前仍不能宣稱全部永久 Tweak 已分流。CLI、JSON 與
+GUI「敵我／聚落分流」子分頁均已接入目前完成子集（SelfTest Group 40）；仍待真實遊戲敵我／
+聚落／多人實機驗收。
 
 ## 6. 驗證門檻
 
