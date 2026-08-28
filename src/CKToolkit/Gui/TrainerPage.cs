@@ -207,53 +207,76 @@ public sealed class TrainerPage : UserControl
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 6,
+            RowCount = 3,
             Padding = new Padding(4)
         };
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 42F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 58F));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         _scopedWarning.AutoSize = true;
         _scopedWarning.Dock = DockStyle.Fill;
-        _scopedWarning.MaximumSize = new Size(1000, 0);
+        _scopedWarning.MaximumSize = new Size(1600, 0);
         _scopedWarning.Padding = new Padding(10, 8, 10, 8);
         _scopedWarning.Margin = new Padding(2, 2, 2, 6);
         _scopedWarning.BackColor = Color.FromArgb(239, 246, 255);
         _scopedWarning.ForeColor = Color.FromArgb(30, 64, 175);
         panel.Controls.Add(_scopedWarning, 0, 0);
 
-        ConfigureSectionLabel(_scopedSimpleLabel);
-        panel.Controls.Add(_scopedSimpleLabel, 0, 1);
+        // 兩個分流表格改為左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
+        var split = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0)
+        };
+        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
+        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56F));
+
         ConfigureGrid(_scopedSimple);
-        AddScopedIdentityColumns(_scopedSimple, nameWidth: 220);
-        AddScopedValueColumn(_scopedSimple, "Self", 112);
-        AddScopedValueColumn(_scopedSimple, "Enemy", 112);
+        AddScopedIdentityColumns(_scopedSimple, nameWidth: 200);
+        AddScopedValueColumn(_scopedSimple, "Self", 104);
+        AddScopedValueColumn(_scopedSimple, "Enemy", 104);
         AddScopedTailColumns(_scopedSimple);
         ConfigureScopedGrid(_scopedSimple);
-        panel.Controls.Add(_scopedSimple, 0, 2);
 
-        ConfigureSectionLabel(_scopedSettlementLabel);
-        _scopedSettlementLabel.Margin = new Padding(2, 8, 2, 3);
-        panel.Controls.Add(_scopedSettlementLabel, 0, 3);
         ConfigureGrid(_scopedSettlement);
-        AddScopedIdentityColumns(_scopedSettlement, nameWidth: 190);
-        AddScopedValueColumn(_scopedSettlement, "SelfTownhall", 108);
-        AddScopedValueColumn(_scopedSettlement, "SelfVillage", 108);
-        AddScopedValueColumn(_scopedSettlement, "EnemyTownhall", 108);
-        AddScopedValueColumn(_scopedSettlement, "EnemyVillage", 108);
+        AddScopedIdentityColumns(_scopedSettlement, nameWidth: 170);
+        AddScopedValueColumn(_scopedSettlement, "SelfTownhall", 96);
+        AddScopedValueColumn(_scopedSettlement, "SelfVillage", 96);
+        AddScopedValueColumn(_scopedSettlement, "EnemyTownhall", 96);
+        AddScopedValueColumn(_scopedSettlement, "EnemyVillage", 96);
         AddScopedTailColumns(_scopedSettlement);
         ConfigureScopedGrid(_scopedSettlement);
-        panel.Controls.Add(_scopedSettlement, 0, 4);
+
+        split.Controls.Add(BuildScopedColumn(_scopedSimpleLabel, _scopedSimple), 0, 0);
+        split.Controls.Add(BuildScopedColumn(_scopedSettlementLabel, _scopedSettlement), 1, 0);
+        panel.Controls.Add(split, 0, 1);
 
         _resetScopedTweaks.AutoSize = true;
         _resetScopedTweaks.Margin = new Padding(2, 7, 2, 2);
         _resetScopedTweaks.Click += (_, _) => ResetAllScopedTweaks();
-        panel.Controls.Add(_resetScopedTweaks, 0, 5);
+        panel.Controls.Add(_resetScopedTweaks, 0, 2);
         _scopedTweaksTab.Controls.Add(panel);
+    }
+
+    /// <summary>一個分流欄：上方區段標題、下方填滿的表格。</summary>
+    private static Control BuildScopedColumn(Label label, DataGridView grid)
+    {
+        var column = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(2, 0, 2, 0)
+        };
+        column.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        column.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        ConfigureSectionLabel(label);
+        column.Controls.Add(label, 0, 0);
+        column.Controls.Add(grid, 0, 1);
+        return column;
     }
 
     private static void ConfigureSectionLabel(Label label)
