@@ -49,7 +49,6 @@ public sealed class TrainerPage : UserControl
 
     public TrainerPage()
     {
-        AutoScroll = true;
         BackColor = Color.White;
         Padding = new Padding(12);
         BuildUi();
@@ -58,11 +57,13 @@ public sealed class TrainerPage : UserControl
 
     private void BuildUi()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 5 };
+        // root 填滿整個分頁：只有分頁表格那一列吃掉剩餘高度，其餘列 AutoSize。
+        // 這樣視窗放大時表格會跟著長高，不會在下方留一大塊空白。
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var settings = new FlowLayoutPanel
@@ -126,9 +127,8 @@ public sealed class TrainerPage : UserControl
         _hint.Padding = new Padding(8, 6, 8, 8);
         root.Controls.Add(_hint, 0, 2);
 
-        _subTabs.Dock = DockStyle.Top;
-        _subTabs.Height = 440;
-        _subTabs.MinimumSize = new Size(0, 360);
+        _subTabs.Dock = DockStyle.Fill;
+        _subTabs.MinimumSize = new Size(0, 240);
         _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab, _scopedTweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
