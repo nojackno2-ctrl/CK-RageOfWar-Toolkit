@@ -55,6 +55,8 @@
 | [ISSUE-044](#issue-044-玩家統計的最愛國家會被靜默改成另一個國家) | **玩家統計的「最愛國家」會被靜默改成另一個國家** | ⏳ 待實測 | 設定指定國家為最愛國家並更新場次統計。 | 最愛國家場次嚴格大於其餘各國，重算後國家 100% 精確吻合。 |
 | [ISSUE-045](#issue-045-game-指定的路徑無效時會靜默改用自動偵測到的另一套安裝) | **`--game` 指定的路徑無效時會靜默改用自動偵測到的另一套安裝** | ⏳ 待實測 | CLI 傳入無效或非遊戲目錄的 `--game` 參數執行指令。 | 立即回報 GameNotFound 錯誤，不靜默退回自動偵測安裝目錄。 |
 | [ISSUE-046](#issue-046-設定內容錯誤會讓-apply-以未處理例外中止並留下半套用的遊戲) | **設定內容錯誤會讓 `apply` 以未處理例外中止並留下半套用的遊戲** | ⏳ 待實測 | 傳入未知作弊代號或極端異常參數執行 apply。 | 最外層例外邊界攔截並回傳合規 JsonEnvelope 錯誤，零磁碟寫入。 |
+| [ISSUE-051](#issue-051-新功能仍使用已發布的-v103-版本識別) | **新功能仍使用已發布的 v1.0.3 版本識別** | ⏳ 待實測 | 建置後檢查 CLI `version --json`、GUI 標題與新 tag。 | 三處版本皆為 1.0.4，發布工作流只接受 `v1.0.4` tag。 |
+| [ISSUE-052](#issue-052-cktw-與-ckhr-複合反轉順序缺少交叉回歸測試) | **`.cktw` 與 `.ckhr` 複合反轉順序缺少交叉回歸測試** | ⏳ 待實測 | 同時套用 scoped tweaks 與 HiRes 1920，重套、更新後 RestoreAll。 | Group 41 證明五檔逐位元還原，竄改 hook 仍拒絕反轉。 |
 
 ---
 
@@ -417,6 +419,8 @@
   - 本地 Win32 MSVC 重建原生 DLL 與簽入資產逐位元組雜湊一致。
 - **驗證狀態與實測指引**:
   - **自動化驗證紀錄 (2026-08-24)**：SelfTest 完整校驗簽入之 `ckperf.dll` 雜湊符合預期，建置管線 0 警告 0 錯誤。
+  - **發布稽核更正 (2026-08-28)**：目前 `.github/workflows/release.yml` 只直接 publish 內嵌簽入的 `assets/ckperf/ckperf.dll`；獨立 `ckperf.yml` 的重建／attestation 無法證明正式 `CKToolkit.exe` 內嵌的就是該次來源建置產物。既有「已修碼」狀態不成立，正式 release job 必須從 `src/CKPerf` 重建並把該產物嵌入發布 EXE 後再驗證。
+  - **修復與自動化驗證 (2026-08-28)**：正式 release job 現會以 MSBuild `Release|Win32` 重建 `src/CKPerf`，將該次產物替換為 publish 前的 embedded resource，並單獨發布 `CKPerf-SHA256.txt`。本機來源重建產物與簽入資產均為 167,936 bytes，SHA-256 同為 `25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`；Release build 0 警告／0 錯誤、最終 SelfTest 41 組全綠，兩種 publish EXE 的真實行程 CLI smoke test 全數通過。GitHub tag job 尚未遠端執行，真實遊戲注入仍由使用者驗收。
   - **實機測試指引**：於 Release 版本啟動遊戲，確認 `ckperf.dll` 正常注入與執行診斷。
 
 ---
@@ -587,7 +591,9 @@
   - 全專案升版至 **1.0.3**；`.gitignore` 排除 `*.cksave`；`release.yml` 加入 tag 與程式版本一致性檢查。
 - **驗證狀態與實測指引**:
   - **自動化驗證紀錄 (2026-08-24)**：版本號在 `CKToolkit.csproj`、CLI、視窗標題三處一致；git status 乾淨。
-  - **實機測試指引**：檢視執行檔屬性與 CLI `--version` 輸出確認版本為 1.0.3。
+  - **發布稽核更正 (2026-08-28)**：實際讀取 `.github/workflows/release.yml`，找不到任何 tag 與 `CKToolkit.csproj` 版本比對步驟；`workflow_dispatch` 也沒有強制只能從 tag 發布。文件宣稱「已加入硬性校驗」與 repository 現況不符，因此重新開啟。
+  - **修復與自動化驗證 (2026-08-28)**：`release.yml` 現在建置前要求 tag ref 且必須精確等於 `v<CKToolkit.csproj Version>`；兩種 publish EXE 的版本／scoped metadata／錯誤 JSON 契約都由同步行程 smoke test 驗證。發布資產改為白名單四檔，本機 staging 模擬確認不會把 `dist` 殘留檔一併上傳；PowerShell 區塊通過 parser、`git diff --check` 通過。專用 GitHub Actions YAML parser 未安裝，遠端 tag job 仍待執行。
+  - **實機測試指引**：檢視執行檔屬性與 CLI `version --json` 確認版本為 1.0.4。
 
 ---
 
@@ -631,6 +637,33 @@
 - **驗證狀態與實測指引**:
   - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證異常參數下整批套用失敗且 5 個目標檔案 100% 零寫入。
   - **實機測試指引**：傳入未知作弊代碼執行 apply，確認回傳結構化錯誤訊息且遊戲檔案未受污染。
+
+---
+
+### ISSUE-051: 新功能仍使用已發布的 v1.0.3 版本識別
+- **問題編號**: `ISSUE-051`
+- **發現日期**: 2026-08-28
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `v1.0.3` 已指向舊發布提交，但目前 `master` 另含四個後續功能／GUI 提交，而 `CKToolkit.csproj`、CLI 與三語 GUI 標題仍報 1.0.3。若重用同名 tag 會破壞既有發布來源與可追溯性。
+- **修復方案與實作細節**:
+  - 新版本升為 **1.0.4**，同步 `CKToolkit.csproj`、CLI `version --json`、三語 `Cli_Version`、placeholder title 與 GUI window title。
+  - 發布工作流的 tag gate 會拒絕非 `v1.0.4` 的 ref，避免後續再以舊版本號打包。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-28)**：Release build 0 警告／0 錯誤、SelfTest 41 組全綠；framework-dependent 與 self-contained 兩個真實 publish EXE 的 `version --json` 均報 1.0.4。自包版 GUI 已建立可回應主視窗，標題為「CK-RageOfWar 工具包 v1.0.4」後關閉；未啟動遊戲。
+
+---
+
+### ISSUE-052: `.cktw` 與 `.ckhr` 複合反轉順序缺少交叉回歸測試
+- **問題編號**: `ISSUE-052`
+- **發現日期**: 2026-08-28
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - Claude CLI 發布稽核懷疑 `PatchState.NormaliseExe` 先反轉 `.cktw`、後移除 `.ckhr` 會造成第一次套用後無法再套用／還原。主代理核對發現 `.ckhr` 是 `SizeOfRawData=0` 的未初始化節區，不會觸發該 retained-raw guard；缺陷本身經實跑證偽，但原有測試確實缺少此複合契約。
+- **修復方案與自動化驗證**:
+  - 新增 SelfTest Group 41 `ScopedTweaksAndHiResCompositeReversal`：以 `PatchPipeline` 真實順序套用 scoped tweaks 與 HiRes 1920，驗證 inspect／verify、同設定重套、設定更新、直接 Normalise 與 RestoreAll。
+  - Group 41 實跑全綠：`.cktw` 與 `.ckhr` 都消失，`Celtic kings.exe`、Launcher、`data.pak`、`local.pak`、`vxSettings.ini` 五檔逐位元等於原版；竄改 `.cktw` command hook 後複合反轉仍拒絕。不需要修改 production code，本項修正是永久補上交叉回歸防線。
+  - 最終 Release build 0 警告／0 錯誤，完整 SelfTest 41 組全綠。這是合成證據，不代表 scoped hooks 已在真實遊戲實測。
 
 ---
 

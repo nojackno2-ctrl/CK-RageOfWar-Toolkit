@@ -28,10 +28,57 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3.0.0
+
+      # workflow_dispatch 只允許在 tag ref 上重跑；任何 tag 與程式版本不一致
+      # 都在建置前失敗，避免把舊版號的 EXE 發成新版本。
+      - name: Verify tag matches application version
+        shell: pwsh
+        run: |
+          if ('${{ github.ref_type }}' -ne 'tag') {
+            throw 'Release workflow 必須從 v* tag 執行；workflow_dispatch 請選擇既有 tag ref。'
+          }
+
+          [xml]$project = Get-Content 'src/CKToolkit/CKToolkit.csproj' -Raw
+          $versionNodes = @($project.Project.PropertyGroup.Version | Where-Object { $_ })
+          if ($versionNodes.Count -ne 1) {
+            throw "CKToolkit.csproj 必須恰好有一個 Version；目前找到 $($versionNodes.Count) 個。"
+          }
+
+          $version = [string]$versionNodes[0]
+          $expectedTag = "v$version"
+          if ('${{ github.ref_name }}' -cne $expectedTag) {
+            throw "tag '${{ github.ref_name }}' 與程式版本 '$version' 不一致；預期 tag 為 '$expectedTag'。"
+          }
+
+          "CKTOOLKIT_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "release tag/version：$expectedTag"
+
       # 先跑自我測試再打包。SelfTest 用合成的遊戲檔案，不需要安裝遊戲，
       # 所以沒有理由讓它只在開發機上跑過。測試不過就不該有 Release。
       - name: Run self-test
         run: dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
+
+      # 正式 EXE 必須內嵌同一個 release job 從 src/CKPerf 建出的 DLL，不能只信任
+      # repository 內預建的 assets/ckperf/ckperf.dll 或另一個 workflow 的證明。
+      - name: Build ckperf.dll for the release EXE (Release|Win32)
+        run: msbuild src\CKPerf\CKPerf.vcxproj /p:Configuration=Release /p:Platform=Win32 /v:minimal /nologo
+
+      - name: Stage source-built ckperf.dll for embedding
+        shell: pwsh
+        run: |
+          $built = 'dist\ckperf\Release\ckperf.dll'
+          $asset = 'assets\ckperf\ckperf.dll'
+          if (-not (Test-Path $built)) { throw "建置成功但找不到輸出：$built" }
+
+          Copy-Item $built $asset -Force
+          $hash = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = (Get-Item $asset).Length
+          [System.IO.File]::WriteAllText(
+            "$PWD\ckperf-release-sha256.txt",
+            "$hash *ckperf.dll`n",
+            [System.Text.UTF8Encoding]::new($false))
+          Write-Host "正式 EXE 將內嵌 source-built ckperf.dll：$size bytes / $hash"
 
       # 兩種打包並存，因為使用者分兩種：
       #   framework-dependent  3 MB，但需要先裝 .NET 10 Desktop Runtime
@@ -50,15 +97,122 @@ jobs:
           -p:EnableCompressionInSingleFile=true -p:DebugType=none
           -o publish/sc
 
+      # SelfTest 在原生重建前執行，它驗證的是 repository 白名單資產。
+      # 這一步另外直接讀 publish 實際使用的 managed assembly manifest
+      # resource，證明單檔打包器的輸入內嵌的就是本次 source-built DLL。
+      - name: Verify publish input embeds source-built ckperf.dll
+        shell: pwsh
+        run: |
+          $assemblyPath = Resolve-Path 'src\CKToolkit\bin\Release\net10.0-windows\win-x64\CKToolkit.dll'
+          $sourcePath = Resolve-Path 'assets\ckperf\ckperf.dll'
+          $assembly = [System.Reflection.Assembly]::LoadFile($assemblyPath.Path)
+          $stream = $assembly.GetManifestResourceStream('CKToolkit.Runtime.ckperf.dll')
+          if ($null -eq $stream) {
+            throw 'publish 輸入 assembly 找不到 CKToolkit.Runtime.ckperf.dll resource。'
+          }
+
+          try {
+            $memory = [System.IO.MemoryStream]::new()
+            try {
+              $stream.CopyTo($memory)
+              $embeddedBytes = $memory.ToArray()
+            }
+            finally {
+              $memory.Dispose()
+            }
+          }
+          finally {
+            $stream.Dispose()
+          }
+
+          $sourceBytes = [System.IO.File]::ReadAllBytes($sourcePath.Path)
+          $embeddedHash = [Convert]::ToHexString(
+            [System.Security.Cryptography.SHA256]::HashData($embeddedBytes)).ToLowerInvariant()
+          $sourceHash = [Convert]::ToHexString(
+            [System.Security.Cryptography.SHA256]::HashData($sourceBytes)).ToLowerInvariant()
+          if ($embeddedBytes.Length -ne $sourceBytes.Length -or $embeddedHash -cne $sourceHash) {
+            throw "publish 輸入內嵌 CKPerf 與 source-built DLL 不同：embedded $($embeddedBytes.Length)/$embeddedHash; source $($sourceBytes.Length)/$sourceHash"
+          }
+          Write-Host "publish 輸入已內嵌 source-built ckperf.dll：$($embeddedBytes.Length) bytes / $embeddedHash"
+
+      # CKToolkit 是 WinExe/GUI subsystem；PowerShell 的 call operator 不會可靠等待。
+      # 用 ProcessStartInfo 同步讀 stdout/stderr，驗證真正的發布 EXE，而不是只在
+      # SelfTest 內直接呼叫 CliHost。
+      - name: Smoke-test published CLI JSON contracts
+        shell: pwsh
+        run: |
+          function Invoke-CliJson {
+            param(
+              [Parameter(Mandatory)][string]$Exe,
+              [Parameter(Mandatory)][string[]]$Arguments,
+              [int]$ExpectedExitCode = 0
+            )
+
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = (Resolve-Path $Exe).Path
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            foreach ($argument in $Arguments) { [void]$psi.ArgumentList.Add($argument) }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $psi
+            if (-not $process.Start()) { throw "無法啟動 $Exe" }
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            $process.WaitForExit()
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            if ($process.ExitCode -ne $ExpectedExitCode) {
+              throw "$Exe $($Arguments -join ' ') exit $($process.ExitCode)，預期 $ExpectedExitCode：$stderr"
+            }
+            if ($stderr) { throw "$Exe 非預期寫入 stderr：$stderr" }
+            try { return $stdout | ConvertFrom-Json -Depth 20 }
+            catch { throw "$Exe 未輸出合法 JSON：$stdout" }
+          }
+
+          foreach ($exe in @('publish/fd/CKToolkit.exe', 'publish/sc/CKToolkit.exe')) {
+            $version = Invoke-CliJson $exe @('version', '--json')
+            if (-not $version.ok -or $version.command -ne 'version' -or
+                $version.data.version -ne $env:CKTOOLKIT_VERSION) {
+              throw "$exe version JSON 與 release 版本不符。"
+            }
+
+            $tweaks = Invoke-CliJson $exe @('trainer', 'list-tweaks', '--json')
+            $flat = @($tweaks.data.tweaks)
+            $train = @($flat | Where-Object id -eq 'train_speed')
+            $hero = @($flat | Where-Object id -eq 'hero_max_army')
+            if (-not $tweaks.ok -or $tweaks.command -ne 'trainer list-tweaks' -or
+                $tweaks.data.totalTweaks -ne 29 -or $train.Count -ne 1 -or
+                -not $train[0].scopedSupported -or
+                (@($train[0].scopes) -join ',') -ne 'self,enemy' -or
+                $hero.Count -ne 1 -or $hero[0].scopedSupported) {
+              throw "$exe scoped tweak CLI metadata 不符合目前公開契約。"
+            }
+
+            $invalid = Invoke-CliJson -Exe $exe `
+              -Arguments @('unknown-release-smoke', '--json') -ExpectedExitCode 2
+            if ($invalid.ok -or $invalid.command -ne 'unknown-release-smoke' -or
+                @($invalid.errors).Count -lt 1) {
+              throw "$exe 無效命令未維持 exit 2／JSON error envelope 契約。"
+            }
+            Write-Host "$exe CLI smoke test 通過。"
+          }
+
       - name: Stage release assets
         shell: pwsh
         run: |
+          $tag = '${{ github.ref_name }}'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item publish\fd\CKToolkit.exe dist\CKToolkit-${{ github.ref_name }}-win-x64.exe
-          Copy-Item publish\sc\CKToolkit.exe dist\CKToolkit-${{ github.ref_name }}-win-x64-self-contained.exe
+          $frameworkExe = "dist\CKToolkit-$tag-win-x64.exe"
+          $selfContainedExe = "dist\CKToolkit-$tag-win-x64-self-contained.exe"
+          Copy-Item publish\fd\CKToolkit.exe $frameworkExe
+          Copy-Item publish\sc\CKToolkit.exe $selfContainedExe
+          Copy-Item ckperf-release-sha256.txt dist\CKPerf-SHA256.txt
 
           # 雜湊檔用 sha256sum 的格式，任何平台都能 `sha256sum -c` 直接驗。
-          $lines = Get-ChildItem dist -Filter *.exe | Sort-Object Name | ForEach-Object {
+          $lines = Get-Item $frameworkExe, $selfContainedExe | Sort-Object Name | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) *$($_.Name)"
           }
           [System.IO.File]::WriteAllText("$PWD\dist\SHA256SUMS.txt", ($lines -join "`n") + "`n")
@@ -70,7 +224,7 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: 'dist/*.exe'
+          subject-path: 'dist/CKToolkit-${{ github.ref_name }}-win-x64*.exe'
 
       # 用內建的 gh CLI 而非第三方 action：發布這一步握有 contents: write，
       # 沒必要為了省幾行 YAML 就多引入一個需要信任的相依。
@@ -103,6 +257,7 @@ jobs:
             '```'
             ''
             '`SHA256SUMS.txt` 為 sha256sum 格式，可直接 `sha256sum -c SHA256SUMS.txt`。'
+            '`CKPerf-SHA256.txt` 記錄正式 EXE 內嵌之 source-built `ckperf.dll` 雜湊；可與執行期展開檔比對。'
             ''
             '## 系統需求'
             ''
@@ -112,5 +267,17 @@ jobs:
           )
           [System.IO.File]::WriteAllText("$PWD\release-notes.md", ($notes -join "`n") + "`n")
 
-          $assets = (Get-ChildItem dist | ForEach-Object { $_.FullName })
+          # dist 可能同時有原生建置的 ckperf/ 子目錄或先前建置殘留；只允許這四個
+          # 明確 staged 的發布資產，不能用 Get-ChildItem 把其他檔案意外公開。
+          $assets = @(
+            "$PWD\dist\CKToolkit-$tag-win-x64.exe"
+            "$PWD\dist\CKToolkit-$tag-win-x64-self-contained.exe"
+            "$PWD\dist\SHA256SUMS.txt"
+            "$PWD\dist\CKPerf-SHA256.txt"
+          )
+          foreach ($asset in $assets) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+              throw "缺少發布資產：$asset"
+            }
+          }
           gh release create $tag $assets --title "CK-RageOfWar Toolkit $tag" --notes-file release-notes.md

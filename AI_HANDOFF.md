@@ -14,6 +14,25 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
+## 目前目標：以可對外發布為標準驗收 GUI／CLI（2026-08-28）
+
+- 使用者已用 Steam 重新安裝遊戲，要求確認目前 GUI 與 CLI 修改確實存在且可用；本輪不得啟動遊戲，真實遊戲驗收由使用者自行執行。
+- 使用者明確要求 AGY 與 Claude CLI 作為外部子代理，且核准其工作區權限；外部代理不得 commit／push／reset，也不得啟動遊戲。
+- 動工時 `master` 工作樹乾淨、相對 `origin/master` ahead 3；三個本地提交涵蓋 ISSUE-048～050 的 `.cktw`、scoped CLI／Pipeline 與 GUI 編輯器，共影響 17 個檔案。
+- 主機 `agent_delegation` MCP 未連接；沙箱內 `status.ps1` 無法取得三家即時額度（Codex auth、AGY CSRF、Claude usage endpoint），這是 `unavailable` 而非已證實耗盡。依使用者明確要求，改用 AGY／Claude CLI 包裝器直接試跑；若 CLI 回報 auth、quota 或 timeout，必須如實記錄且不使用 API key fallback。
+- AGY 第一次沙箱內呼叫未啟動模型：沙箱拒絕存取 `%USERPROFILE%\.gemini\antigravity-cli`，最後報 authentication timeout。改走主機層的同一唯讀審查時，安全審核要求使用者再明確授權把私有 repository／反組譯內容提供給 AGY 外部服務，故主機層呼叫被拒絕，未取得審查輸出、未修改專案檔案。另已確認已安裝 `agy.ps1` 使用 `-PrintTimeout`，不是技能範例中的 `-TimeoutSec`。
+- Claude CLI 唯讀審查亦未啟動：`claude.ps1` 立即回傳 `401 OAuth access token has expired`，需使用者執行 `claude auth login` 後才能重試；未取得輸出、未修改檔案。外部代理尚未完成前，主代理先繼續非遊戲的建置、SelfTest、CLI／GUI 與發布產物驗證。
+- 主代理非遊戲驗證：`dotnet build CKToolkit.sln -c Release --no-restore` 0 warning／0 error；完整 SelfTest 40 組全綠。真實 WinExe 以同步 `Start-Process -Wait`＋stdout/stderr 重導向驗證 `version --json` exit 0、版本 1.0.3，`trainer list-tweaks --json` exit 0 且實際輸出 29 項與 scoped metadata。PowerShell 直接用 call operator `& CKToolkit.exe ...` 不會等待 GUI subsystem 行程，stdout／`$LASTEXITCODE` 皆不可依賴；發布 smoke test 必須使用同步 Process API。
+- Steam 重新安裝後的唯讀 `verify --game <實際路徑> --json` exit 0：五個目標檔全部 `vanilla`、`allRecognised=true`；`allMatchesConfig=false` 是因現行設定仍期望 LAA／語言包／trainer 等修補。verify 前後五檔 SHA-256、長度與 LastWriteTimeUtc 全部不變，確認零寫入。
+- GUI 非遊戲驗證：SelfTest Group 40 已建立 TrainerPage handle 並驗證分流表格／三語／往返；主機實際啟動 self-contained 1.0.4 GUI，行程可回應、MainWindowHandle 非 0、標題為「CK-RageOfWar 工具包 v1.0.4」，隨即關閉。Computer Use 仍未取得截圖，因此不得描述為完整目視／互動驗收；未啟動遊戲。
+- 發布工作流已修正 ISSUE-031 與 ISSUE-043：建置前強制 tag ref 精確等於 `v<CKToolkit.csproj Version>`；在同一 release job 以 MSBuild `Release|Win32` 從 `src/CKPerf` 重建 DLL，用該次產物替換 embedded resource 後才 publish，並發布獨立 CKPerf 雜湊。本機重建的 167,936-byte DLL 與簽入資產 SHA-256 均為 `25EAFE5710695DE3642828A889D0749DDF0D8714139BEF9966BDBB3CCCFF6B97`。
+- framework-dependent 與 self-contained 兩種 single-file publish 均成功；兩個真實 WinExe 的同步 ProcessStartInfo smoke test 均通過 `version --json`、`trainer list-tweaks --json` 及無效命令 exit 2／JSON envelope，stderr 均空。發布 staging 模擬曾發現 `dist` 有舊 EXE／DLL／PDB／config 殘留；workflow 已改為只上傳兩個 tagged EXE、`SHA256SUMS.txt`、`CKPerf-SHA256.txt` 四個白名單檔案，雜湊也只包含兩個 tagged EXE。
+- 最終 Release build 0 warning／0 error，完整 SelfTest 41 組全綠。`release.yml` 各 PowerShell 區塊經本機 PowerShell parser 通過，`git diff --check` 通過；專用 GitHub Actions YAML parser 未安裝，而 GitHub tag job 尚未遠端執行。
+- 新登記並修正 ISSUE-051：`v1.0.3` 已指向舊 release，不得對含後續 scoped／GUI 提交的目前 master 重用。新版本已升為 1.0.4，同步 `CKToolkit.csproj`、CLI 與三語 GUI 標題；兩種 publish EXE 的 `version --json` 均為 1.0.4，GUI 主視窗標題也為 v1.0.4。下一次可發布 tag 是 `v1.0.4`。
+- Claude CLI 認證已恢復，成功完成一次獨立唯讀發布稽核；它確認 1.0.4、GUI 未支援項隱藏、CLI／Pipeline fail-closed 與 release 白名單均無其他阻擋，但提出 `.cktw` 先於 `.ckhr` 反轉可能破壞複合還原，已登記 ISSUE-052。主代理交叉閱讀發現 `.ckhr` raw size 為 0，故 Claude 所述的 retained-raw guard 並非當然會觸發；必須用組合回歸測試實證，不可直接接受或否定。
+- AGY CLI 第二次以不含 repository 內容的 `READY` 提示測試，仍因未登入 Antigravity、沙箱拒絕寫入 `%USERPROFILE%\.gemini\antigravity-cli` 而在 60 秒認證逾時；沒有模型輸出、沒有修改檔案。由於 AGY 無法執行，後續最小代碼工作交由已登入的 Claude CLI 子代理，仍禁止遊戲與 Git 寫入。
+- ISSUE-052（`.cktw`＋`.ckhr` 複合反轉）：Claude 編碼子代理新增 SelfTest Group 41 `ScopedTweaksAndHiResCompositeReversal`，主代理補齊 `local.pak` 斷言後兩次獨立執行均全綠。測試以 `PatchPipeline` 真實順序同時套用 scoped tweaks 與 HiRes 1920，覆蓋 inspect／verify、同設定重套、設定更新、直接 Normalise、RestoreAll 與 tamper 拒絕；兩附加節區均消失，五個目標檔逐位元等於原版。結果證偽最初 retained-raw blocker 推論，不需要修改 production code；ISSUE-052 已轉 ⏳ 已修碼 · 待實測。這仍是合成證據，不是真實遊戲驗收。
+
 ## 最新進度：`scopedTweaks` JSON 與 CLI 已接通目前安全子集（2026-08-27）
 
 - `TrainerConfig` 新增向後相容的 `scopedTweaks: { id: { scope: value } }`；明確 scope 優先，缺項回退舊 `tweaks[id]`，再回退原廠值。金錢舊值維持原先 townhall 路徑、食物舊值維持 village 路徑，只有明確值會開啟另一聚落類型。

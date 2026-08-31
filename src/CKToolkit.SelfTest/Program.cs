@@ -59,6 +59,8 @@ namespace CKToolkit.SelfTest;
 ///   32. TrainerScriptsAndDataPakReversal: 作弊腳本、Tweak 定義與 data.pak 精確反轉
 ///   33. CliTrainerAndProfileCommands: trainer list-cheats, list-tweaks, set 參數驗證、重複按鍵拒絕、遊戲目錄零寫入與 profile 取樣分析器指令測試
 ///   40. TrainerScopedTweaksGui: scoped tweaks GUI 建立、三語字串、往返儲存、範圍拒絕與未完成項目隱藏
+///   41. ScopedTweaksAndHiResCompositeReversal: .cktw scoped payload 與 HiRes 1920 .ckhr 依 PatchPipeline
+///       疊加順序套到同一 EXE，證明 inspect 同時辨識、重套/設定更新、正規化/RestoreAll 後兩節區消失且逐位元組還原 (ISSUE-052)
 ///
 ///   解耦後的迴歸防線:
 ///   34. 語系身分單一來源（pack.json gameLangFolder/gameLangKey 為唯一權威，verify 期望值與實際簽章必須對得上）
@@ -136,6 +138,7 @@ internal static class Program
         RunGroup("38. StabilityProductOptions", TestStabilityProductOptions);
         RunGroup("39. SaveManager", () => SaveManagerSelfTests.Run(Check));
         RunGroup("40. TrainerScopedTweaksGui", TestTrainerScopedTweaksGui);
+        RunGroup("41. ScopedTweaksAndHiResCompositeReversal", TestScopedTweaksAndHiResCompositeReversal);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -3860,6 +3863,190 @@ internal static class Program
         Check("超界 scoped 值不會寫入 rejected config",
             rejectedConfig.ScopedTweaks.Count == 0 &&
             !rejectedConfig.ScopedTweaks.ContainsKey("train_speed"));
+    }
+
+    // --- 41. scoped tweaks (.cktw) + HiRes 1920 (.ckhr) 複合套用與精確反轉 (ISSUE-052) ---
+    // 逆向工程稽核疑慮：PatchState.NormaliseExe 先反轉 .cktw（截尾至記錄的原始 EXE 長度）、
+    // 後移除 .ckhr。由於 .ckhr 是 SizeOfRawData=0 的未初始化節區、且套用順序為
+    // TrainerModule(Order 50, .cktw) → PerfModule(Order 100, .ckhr)，.ckhr 的節區標頭排在
+    // .cktw 之後。本測試以 PatchPipeline 的真實疊加順序把兩者套到同一個合成 Steam EXE，
+    // 證明 inspect 同時辨識、重套/設定更新可行、restore 後兩個附加節區都消失且逐位元組等於原版。
+    private static void TestScopedTweaksAndHiResCompositeReversal()
+    {
+        Console.WriteLine("\n41. scoped tweaks (.cktw) + HiRes 1920 (.ckhr) 複合套用與精確反轉測試 (ISSUE-052)");
+
+        string tempGameDir = Path.Combine(
+            Path.GetTempPath(), "cktoolkit_cktw_ckhr_" + Guid.NewGuid().ToString("N")[..8]);
+
+        try
+        {
+            Directory.CreateDirectory(tempGameDir);
+
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+            string exePath = Path.Combine(tempGameDir, GamePaths.ExeFileName);
+            File.WriteAllBytes(exePath, vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
+
+            var pipeline = PatchPipeline.CreateDefault();
+
+            ToolkitConfig BuildConfig(decimal selfTrain) => new()
+            {
+                Perf = new PerfConfig
+                {
+                    Laa = true,
+                    VideoFix = true,
+                    Hires = 1920,
+                    KeepRes = true,
+                    Resolution = "1920x1080",
+                    AddRes = ["1920x1080"],
+                    DesktopMode = "autoSwitch"
+                },
+                Trainer = new TrainerConfig
+                {
+                    Enabled = true,
+                    Tweaks = new Dictionary<string, decimal>(StringComparer.Ordinal),
+                    ScopedTweaks = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.Ordinal)
+                    {
+                        ["train_speed"] = new(StringComparer.Ordinal)
+                        {
+                            ["self"] = selfTrain,
+                            ["enemy"] = 0.5m
+                        },
+                        ["gold_production"] = new(StringComparer.Ordinal)
+                        {
+                            ["selfTownhall"] = 60m,
+                            ["enemyVillage"] = 15m
+                        }
+                    }
+                }
+            };
+
+            ToolkitConfig config = BuildConfig(2.5m);
+            Check("複合設定同時要求 .cktw scoped payload 與 HiRes 1920",
+                ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer) && config.Perf.Hires >= 1600);
+
+            // 1. 首次 ApplyAll：兩個 EXE 修補依 PatchPipeline 疊加順序套用
+            var apply1 = pipeline.ApplyAll(tempGameDir, config);
+            Check("步驟 1 複合 ApplyAll 成功", apply1.Success, apply1.ErrorMessage);
+            Check("步驟 1 Exe 被寫入", apply1.Value?.Files[GamePaths.ExeFileName].Written == true);
+
+            byte[] patchedExe = File.ReadAllBytes(exePath);
+            var patchedPe = PeFile.Parse(patchedExe);
+            int cktwIndex = patchedPe.FindSection(ScopedTweakPatch.SectionName);
+            int ckhrIndex = patchedPe.FindSection(ZoomTables.SectionName);
+            Check("步驟 1 EXE 同時含 .cktw 與 .ckhr 兩個附加節區", cktwIndex >= 0 && ckhrIndex >= 0);
+            Check("步驟 1 .ckhr 排在 .cktw 之後（TrainerModule Order 50 先於 PerfModule Order 100）",
+                ckhrIndex > cktwIndex);
+            Check("步驟 1 .ckhr 為 SizeOfRawData=0 的未初始化節區",
+                patchedPe.Sections[ckhrIndex].SizeOfRawData == 0);
+
+            // inspect 同時辨識兩者
+            var patchedState = PatchState.Inspect(GameFile.Exe, patchedExe);
+            Check("步驟 1 inspect 判定 EXE 為 PatchedByUs", patchedState.IsPatched);
+            Check("步驟 1 inspect 同時列出 hires_zoom 與 scoped_tweaks",
+                patchedState.AppliedPatches.Contains("hires_zoom") &&
+                patchedState.AppliedPatches.Contains("scoped_tweaks"));
+            Check("步驟 1 ZoomTables.IsApplied 與 ScopedTweakPatch.IsApplied 皆為 true",
+                ZoomTables.IsApplied(patchedExe) && ScopedTweakPatch.IsApplied(patchedExe));
+            Check("步驟 1 .cktw payload 內容與設定相符",
+                ScopedTweakPatch.MatchesLegacySettings(patchedExe, config.Trainer));
+
+            // 2. verify 同時接受兩者
+            var verify1 = pipeline.Verify(tempGameDir, config);
+            Check("步驟 2 Verify 成功", verify1.Success);
+            var verifyExe = verify1.Value!.Files[GamePaths.ExeFileName];
+            Check("步驟 2 Verify 回報 EXE hires_zoom 與 scoped_tweaks 皆已套用且與設定相符",
+                verifyExe.AppliedPatches.Contains("hires_zoom") &&
+                verifyExe.AppliedPatches.Contains("scoped_tweaks") &&
+                verifyExe.MatchesConfig);
+
+            // 3. 相同設定重套：冪等，不重寫任何檔案
+            var apply2 = pipeline.ApplyAll(tempGameDir, config);
+            Check("步驟 3 相同設定重套成功", apply2.Success);
+            Check("步驟 3 重套為冪等（零贅餘寫入）", apply2.Value?.FilesWritten.Count == 0);
+
+            // 4. 直接對已套用 .cktw+.ckhr 的 EXE 原地更新 scoped 設定（不動節區）
+            ScopedTweakPatch.TryBuildSettings(BuildConfig(3.0m).Trainer, out var updatedSettings);
+            byte[] inPlaceUpdated = ScopedTweakPatch.Apply(
+                patchedExe, updatedSettings.Command, updatedSettings.Production,
+                updatedSettings.Population, updatedSettings.Capacity,
+                updatedSettings.InitialGold, updatedSettings.UnitScalars);
+            var inPlacePe = PeFile.Parse(inPlaceUpdated);
+            Check("步驟 4 .cktw 原地設定更新後兩節區仍在且 .ckhr 仍在 .cktw 之後",
+                inPlacePe.FindSection(ScopedTweakPatch.SectionName) >= 0 &&
+                inPlacePe.FindSection(ZoomTables.SectionName) >
+                inPlacePe.FindSection(ScopedTweakPatch.SectionName));
+            Check("步驟 4 原地更新後 .cktw 承載新的 train_speed self 值",
+                ScopedTweakPatch.ReadInfo(inPlaceUpdated).Settings.SelfTrainSpeedQ16 == updatedSettings.Command.SelfTrainSpeedQ16 &&
+                ScopedTweakPatch.ReadInfo(inPlaceUpdated).Settings.SelfTrainSpeedQ16 != ScopedTweakPatch.ReadInfo(patchedExe).Settings.SelfTrainSpeedQ16);
+            Check("步驟 4 原地更新後 HiRes .ckhr 仍為已套用狀態", ZoomTables.IsApplied(inPlaceUpdated));
+
+            // 5. 透過 pipeline 更新設定（會先完整正規化再重疊加）
+            var apply3 = pipeline.ApplyAll(tempGameDir, BuildConfig(3.0m));
+            Check("步驟 5 pipeline 設定更新成功", apply3.Success, apply3.ErrorMessage);
+            byte[] updatedExe = File.ReadAllBytes(exePath);
+            Check("步驟 5 更新後 EXE 仍同時含兩節區且 .cktw 承載新值",
+                ZoomTables.IsApplied(updatedExe) && ScopedTweakPatch.IsApplied(updatedExe) &&
+                ScopedTweakPatch.MatchesLegacySettings(updatedExe, BuildConfig(3.0m).Trainer));
+
+            // 6. 直接以 PatchState.NormaliseExe 反轉爭議路徑（.cktw 先、.ckhr 後）
+            var normalised = PatchState.Normalise(GameFile.Exe, updatedExe);
+            Check("步驟 6 NormaliseExe 成功", normalised.Success, normalised.ErrorMessage);
+            var normalisedPe = PeFile.Parse(normalised.Value!);
+            Check("步驟 6 正規化後 .cktw 與 .ckhr 兩個附加節區都消失",
+                normalisedPe.FindSection(ScopedTweakPatch.SectionName) < 0 &&
+                normalisedPe.FindSection(ZoomTables.SectionName) < 0);
+            Check("步驟 6 NormaliseExe 輸出逐位元組等於原版 EXE",
+                normalised.Value!.SequenceEqual(vanillaExeBytes));
+            Check("步驟 6 正規化後 ScopedTweakPatch/ZoomTables 皆回報原版",
+                ScopedTweakPatch.IsOriginal(normalised.Value!) && ZoomTables.IsOriginal(normalised.Value!));
+
+            // 7. RestoreAll：五檔逐位元組還原
+            var restore = pipeline.RestoreAll(tempGameDir);
+            Check("步驟 7 RestoreAll 成功", restore.Success, restore.ErrorMessage);
+            Check("步驟 7 Celtic kings.exe 逐位元組與原版一致",
+                File.ReadAllBytes(exePath).SequenceEqual(vanillaExeBytes));
+            Check("步驟 7 data.pak 逐位元組與原版一致",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)).SequenceEqual(vanillaDataPakBytes));
+            Check("步驟 7 local.pak 逐位元組與原版一致",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName)).SequenceEqual(vanillaLocalPakBytes));
+            Check("步驟 7 vxSettings.ini 逐位元組與原版一致",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName)).SequenceEqual(vanillaVxBytes));
+            Check("步驟 7 Launcher 逐位元組與原版一致",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName)).SequenceEqual(vanillaLauncherBytes));
+            Check("步驟 7 還原後 inspect 判定 EXE 為 Vanilla",
+                PatchState.Inspect(GameFile.Exe, File.ReadAllBytes(exePath)).IsVanilla);
+
+            // 8. 反轉保護：.cktw 與 .ckhr 都在時，竄改 .cktw command hook 仍必須讓複合反轉拒絕
+            byte[] tampered = (byte[])patchedExe.Clone();
+            var tamperedPe = PeFile.Parse(tampered);
+            tamperedPe.WriteBytesAtVa(ScopedTweakPatch.CommandDelaySiteVa, [0x90]);
+            byte[] tamperedBytes = tamperedPe.ToBytes();
+            bool tamperRejected;
+            try
+            {
+                var tamperResult = PatchState.Normalise(GameFile.Exe, tamperedBytes);
+                tamperRejected = !tamperResult.Success;
+            }
+            catch
+            {
+                tamperRejected = true;
+            }
+            Check("步驟 8 竄改 .cktw command hook 後複合反轉被拒（篡改拒絕未因 .ckhr 而失守）",
+                tamperRejected);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+        }
     }
 
     #region Fixture Helpers
