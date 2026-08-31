@@ -33,6 +33,124 @@
 - AGY CLI 第二次以不含 repository 內容的 `READY` 提示測試，仍因未登入 Antigravity、沙箱拒絕寫入 `%USERPROFILE%\.gemini\antigravity-cli` 而在 60 秒認證逾時；沒有模型輸出、沒有修改檔案。由於 AGY 無法執行，後續最小代碼工作交由已登入的 Claude CLI 子代理，仍禁止遊戲與 Git 寫入。
 - ISSUE-052（`.cktw`＋`.ckhr` 複合反轉）：Claude 編碼子代理新增 SelfTest Group 41 `ScopedTweaksAndHiResCompositeReversal`，主代理補齊 `local.pak` 斷言後兩次獨立執行均全綠。測試以 `PatchPipeline` 真實順序同時套用 scoped tweaks 與 HiRes 1920，覆蓋 inspect／verify、同設定重套、設定更新、直接 Normalise、RestoreAll 與 tamper 拒絕；兩附加節區均消失，五個目標檔逐位元等於原版。結果證偽最初 retained-raw blocker 推論，不需要修改 production code；ISSUE-052 已轉 ⏳ 已修碼 · 待實測。這仍是合成證據，不是真實遊戲驗收。
 
+## 最新進度：scoped tweak 哨兵修正與單值頁多人提示（ISSUE-057／058）（2026-08-31）
+
+- 使用者問「永久規則修改會不會跟敵我分流衝突」。查證結論：對 21 個已接通的 ID **不會雙重套用**，`ShouldRouteToScopedPatch` 與 `TrainerInstaller` 的 `continue` 構成互斥路由，且每次 apply 都先 `Normalise` 回原版再重疊，不會跨次累積。但衍生出兩個要記錄的問題。
+- **ISSUE-057（已修碼 · 待實測）**：`HeroMaxArmy`／`UnitFeeds` 的「未設定」哨兵只擋 key 不存在，而 `TrainerPage.SaveConfig` 對 `Tweaks.All` 的每一列都無條件寫入 `config.Tweaks`（含等於原廠預設的列）。因此只要用 GUI 存過設定，`unit_feeds` 就被讀成明確三態 2、`hero_max_army` 讀成 50，`UnitScalars` 恆常非 `Disabled` → 使用者什麼都沒調也會套上 `.cktw`，且 `0x0050B3DA` 的 helper 會強制所有走 `CVXUnit::ProcessFood` 的物件進食，連 class XML 寫死 `feeds=0` 的動物／幽靈／運輸車都被拉進飢餓計時器。修法：兩個本地函式改為以 `Tweaks.ById[id].Default` 比對，等於預設即回 0 哨兵；共用的 `GetScopedFallbackValue`／`Scoped(...)` 一行未動。新增兩個測試（「GUI 全預設存檔不得產生 scoped payload」與反向的「明確 scoped unit_feeds 生效且未指定的 scope 維持 0 哨兵」）。Release build 0 警告／0 錯誤，完整 SelfTest 全綠——合成證據，飢餓行為仍待實機。
+- **ISSUE-058（未修復／調查中）**：七個聚落容量／初始金錢 tweak 的 GUI 名稱都寫著「（僅限新建聚落）」，但那個限制只對 data.pak 路徑成立；走 `.cktw` 後容量 helper 每個 income tick 重寫 resource object `+0x0C/+0x10` 與 `+0x3A`，**連地圖擺好的聚落也會被改**。這是既有設計行為不是實作缺陷，但標籤對不上；要先決定產品行為再改字串。
+- 單值「永久規則調整」分頁新增多人須知 `Gui_Trainer_TweaksScopeNotice`（三語）：這些 ID 在單值頁調成非原廠值一樣會路由到 `.cktw`，多人連線會退回原版且不再寫 data.pak——對只用單值頁的使用者是相對舊版的行為改變。項目數由執行期計算，`SupportedScopes` 增修後不會過期。
+- `docs/scoped-tweaks-design.md` 已補：§4.1 容量範圍落差警告、§4.2.1 哨兵判定條件（新規則：日後任何「未設定」哨兵都必須同時擋掉 key 不存在與值等於預設）、§5 GUI 段落（順帶修正 `hero_max_army` 仍被描述為未完成的舊敘述）。
+
+---
+
+## 最新進度：面板實機可用；生成位置改走 8 位元組記憶體精準定位（2026-08-31）
+
+- **ISSUE-054 面板已實機驗證可用**：使用者確認點面板按鈕確實觸發作弊。
+- 使用者回報兩點需改良，均已修碼（ISSUE-055，待實測）：
+  1. **生成位置錯誤。** 根因逆向查清：`MousePtm()` handler 在 .text VA `0x005CBD40`，
+     **不呼叫 `GetCursorPos`**，只是把 `[[0x008AAB80] + 0x20]` 的 8 個位元組推進 VM 堆疊
+     （`a1 80 ab 8a 00` / `8d 48 20` / `8b 31`）。那是滑鼠移動訊息更新的快取，
+     游標移向面板的路上會一路蓋掉它。只有 `spawn_unit` 與 `spawn_item` 受影響。
+  2. **視窗不能縮放。** 已改 `SizableToolWindow`＋單欄 100% 寬 `TableLayoutPanel`；
+     原本按鈕的 220px 最小寬度會卡住縮放，只改邊框樣式沒有用。
+- **使用者授權修改器可用記憶體存取（2026-08-31）**，但實際需要的遠比注入少：
+  新增 `Core/Runtime/GameMemory.cs`，只對遊戲行程做 8 位元組的 RPM/WPM。
+  不注入 DLL、不改指令、不碰磁碟。已在 **AGENTS.md §2.9** 立為唯一例外並明訂邊界，
+  GUI 的 `Gui_Trainer_Hint` 三語同步改成準確說法。
+- **關鍵設計**：不自己算「螢幕像素 → 地圖座標」（那要重建相機轉換），
+  而是讓遊戲自己算——游標停在目標上 300ms 就把引擎算好的值讀下來鎖定，
+  按下按鈕時原樣寫回再送鍵。所以寫入的永遠是引擎自己產生的座標。
+  用「停住」而非「最後一次在畫面上的位置」判定，是因為游標移向面板必經遊戲畫面。
+- **拒絕路徑**：寫入前核對 `MousePtm` handler 開頭 `A1 80 AB 8A 00 8D 48 20` 與全域指標
+  合理性，對不上就整條停用、退回 3 秒倒數模式。位址以目標行程模組基底換算。
+- Release build 0 警告 0 錯誤；SelfTest Group 42 十項全綠。
+- **委派紀錄（重要）**：AGY 完成了面板初版，但擅自做了兩件規格外的事——
+  刪掉 `MainForm.cs` 的設計註解（違反 AGENTS.md §3），
+  以及把 `strings.zh-TW.json` 裡 24 條既有字串改寫成中國用語
+  （儲存→保存、紀錄→記錄、復原→恢復、覆寫→覆蓋、背景→後台、執行期→運行時、
+  進入點→入口點、實作→實現）。兩者都已逐條比對 HEAD 還原。
+  **委派後必須逐檔看 `git diff` 的刪除行，不能只看它回報的檔案清單。**
+
+## 最新進度：筆電熱鍵死路確認、AGENTS.md 放寬輔助視窗、PostMessage 探針建立（2026-08-31）
+
+- 起因：使用者的筆電沒有小鍵盤，也不想用 F1~F12，現有兩種按鍵模式對他都不成立。
+- **遊戲實際佔用的按鍵已查清**（來源：`assets/langpacks/*/help.json` 的 "General shortcuts" 段，30 種在地化一致）：
+  `Space` `Tab` `` ` `` `/` `Esc` `Enter`、`F1` `F2` `F3` `F5`~`F10`、`Pause` `+` `-` `*`、
+  `Digit 1-9`（叫回編隊，`Ctrl+Digit` 記憶編隊）、`Home` `Page Up` `Page Down` `Insert` `Delete`。
+  另掃 `data.pak` 內各介面 ini 的 `key="x"`，單位指令熱鍵佔掉 23 個字母，只剩 `q` `y` `z`。
+- 由此確認兩件事：**數字列 1~9 不能用**（派送不看修飾鍵，`Ctrl+1` 編隊也會誤觸），
+  且 `Cheats.GameReservedKeys` 漏了 `F2`／`F3`／`Ins`／`Del`，而原版模式的出廠預設正好綁在這四顆上 → 登記 **ISSUE-053**。
+- 筆電熱鍵死路本身與三條出路登記為 **ISSUE-054**（代按熱鍵 → 遊戲內嵌面板 → 直接呼叫腳本編譯器 `0x005E0340`）。
+- **AGENTS.md §1 已放寬**（使用者決定，2026-08-31）：允許同一行程開啟輔助性置頂小視窗（修改器面板），
+  條件是由主視窗自己開關、關掉不留常駐、不另發佈成獨立 exe、不重複主視窗的設定功能。仍然禁止第二個 exe／第二套工具。
+- 建立 `tools/trainer/postmessage_probe.py`（tools/ oracle，不參與建置）：找出 `Celtic kings.exe` 視窗後，
+  以 `post`／`send`／`char`／`sendinput`／`keybd` 五種方式代按指定鍵碼，後兩種是「真實輸入」對照組，
+  用來把「通道不通」與「作弊根本沒綁到」區分開。lParam 位元編碼與延伸鍵旗標已離線驗證
+  （`numpad1` scan=0x4F ext=0、`del` scan=0x53 ext=1）。**尚未實機執行**，等使用者在遊戲中跑完回報。
+- 有理由相信代按可行：`Celtic kings.exe` 匯入表無 DirectInput、無 `GetAsyncKeyState`，
+  只有 `PeekMessageA`／`RegisterClassA`／`DefWindowProcA`／`SetCapture`／`GetKeyState`，輸入是古典訊息式。
+  引擎鍵盤處理在 `.text` VA `0x0047D380`（虛擬函式，無直接呼叫者），scdebug 派送在 `0x005E76A5` 對 `0x008AF108` 的 map 查表。
+- **委派紀錄**：AGY 回報已建立該探針（569 行），檔案也確實出現在磁碟並可讀，但數分鐘後自行消失，
+  全機搜尋與 git 均無此檔。判定為 AGY 寫進沙箱副本後清除；改由主代理自行實作。委派後務必確認檔案仍在。
+- **實機結果（2026-08-31）：代按熱鍵通道成立。** 測試時遊戲是 Steam 重裝後的原版狀態
+  （exe 按鍵表未patch、scdebug.xml 只有原廠五筆），故改用原廠 `Mul`（極速切換，VK `0x6A`）測試，
+  走的是同一條派送路徑。`PostMessageW` 兩次回傳 1、`GetLastError=0`，使用者確認遊戲速度確實切換。
+  **送出當下遊戲並非前景視窗，引擎照樣處理**——面板不需要搶焦點、不需要注入。
+  目標視窗類別 `OSWndClass`／標題 `Celtic`；同 pid 另有 `MSCTFIME UI` 與 `IME` 兩個 client 0x0 的輔助視窗，選窗要排除。
+## 最新進度：遊戲中修改器置頂面板實作完成（ISSUE-054 轉 ⏳）（2026-08-31）
+
+- 依 `spec-ingame-panel.md` 規格與 AGENTS.md §1 輔助視窗例外，完整實作免搶焦點的置頂修改器面板（`InGamePanelForm`）。
+- **`GameWindow.cs`**（`src/CKToolkit/Core/Runtime/GameWindow.cs`，182 行）：
+  - 封裝 Win32 P/Invoke（`[LibraryImport]` source generator）：`EnumWindows`、`GetWindowThreadProcessId`、`OpenProcess`、`QueryFullProcessImageNameW`、`GetClientRect`、`GetWindowRect`、`MapVirtualKeyW`、`PostMessageW`、`CloseHandle`。
+  - `Find()`：列舉所有頂層視窗，篩選執行檔為 `celtic kings.exe` 且 client area > 0（排除 `MSCTFIME UI` 與 `IME` 等 0x0 輔助視窗），選取客戶區面積最大者作為遊戲主視窗。
+  - `BuildLParam()`：實作標準 Win32 鍵盤 lParam 位元編碼（`1 | (scan << 16) | (ext ? 1<<24 : 0)`，KeyUp 時 `|= (1<<30) | (1<<31)`）。
+  - `PostKey()`：依序以 `PostMessageW` 投遞 `WM_KEYDOWN` 與 `WM_KEYUP`（不睡、不搶焦點）。
+  - `TryGetWindowRect()`：安全取得遊戲視窗螢幕座標。
+- **`KeyMap.cs`**：
+  - 新增 `VirtualKeyFor(string key, bool numpadKeys)` 查表，將 scdebug key id 解析為對應的 Win32 虛擬鍵碼（VK）。
+- **`InGamePanelForm.cs`**（`src/CKToolkit/Gui/InGamePanelForm.cs`，161 行）：
+  - 繼承 `Form`，設定 `FormBorderStyle = FixedToolWindow`、`TopMost = true`、`ShowInTaskbar = false`。
+  - 覆寫 `CreateParams`：加入 `WS_EX_NOACTIVATE (0x08000000)` 與 `WS_EX_TOOLWINDOW (0x00000080)`；覆寫 `ShowWithoutActivation => true`，確保點擊面板按鈕不奪取遊戲焦點。
+  - 依傳入的 `TrainerConfig.Cheats`（僅已啟用者）動態產生按鈕；若未啟用任何作弊則顯示提示。
+  - 每秒 Timer 檢查遊戲視窗連線狀態並更新綠／紅燈狀態列。
+  - 實作 `PositionNearGame()`：將面板貼齊遊戲視窗右上角外側（若超出螢幕則貼齊內側）。
+  - 關閉時自動 Dispose 計時器與釋放資源，不留任何後台常駐。
+- **`TrainerPage.cs`**：
+  - 在「啟動遊戲」旁新增「遊戲中面板」按鈕（`_openPanel`）與 `OpenPanelRequested` 事件。
+- **`MainForm.cs`**：
+  - 管理單一 `_panel` 執行個體，`OpenInGamePanel()` 呼叫時先同步當前 `TrainerPage` 設定再顯示。
+- **`I18n`**：
+  - `strings.zh-TW.json`、`strings.zh-CN.json`、`strings.en.json` 同步新增 6 個鍵：`Gui_Trainer_OpenPanel`、`Gui_Panel_Title`、`Gui_Panel_GameConnected`、`Gui_Panel_GameNotFound`、`Gui_Panel_NoCheats`、`Gui_Panel_SendFailed`。
+- **`SelfTest`**：
+  - 新增 Group 42 `InGamePanelAndKeyPosting`（驗證 `VirtualKeyFor`、`BuildLParam` 與 `InGamePanelForm` handle/CreateParams 建構）。
+- ISSUE-054 轉為 `⏳ 已修碼 · 待實測`。
+
+## 歷史進度：wagon_build_time 廢棄下架與向後相容過濾完成（ISSUE-050 轉 ⏳）（2026-08-31）
+
+- 依使用者明確指示與 ISSUE-050 逆向結論，將證實無效的 `wagon_build_time` 自 Tweak 清單正式移除，並建立向後相容防護機制。
+- **`Tweaks.cs`**：將 `wagon_build_time` 自 `All` 移除，新增 `public static readonly IReadOnlySet<string> Retired` 白名單集合（包含 `"wagon_build_time"`）。
+- **`ToolkitConfig.cs`**：`FromJson` 反序列化末尾自動自 `Trainer.Tweaks` 與 `Trainer.ScopedTweaks` 清理 `Tweaks.Retired` 廢棄項目，防止舊設定檔反覆將無效鍵值寫回磁碟。
+- **`PatchPipeline.cs`**：`ValidateConfig` 遇到 `Tweaks.Retired` 項目靜默忽略（`continue`），避免升級後使用者每次 apply 失敗；非白名單之未知垃圾 ID 仍維持 fail-closed 拒絕（`ExitCodes.InvalidArgs`）。
+- **`CliHost.cs`**：`trainer set --tweak` 與 `--scoped-tweak` 若指定廢棄 ID，明確報錯 `Error_TrainerRetiredTweak` 並傳回 `ExitCodes.InvalidArgs` (2)。
+- **`I18n`**：三語字典同步新增 `Error_TrainerRetiredTweak`（zh-TW / zh-CN / en），鍵集與 `{0}` 佔位符 100% 一致。
+- **`ScopedTweakPatch.cs`**：維持 11-hook / 67-config 二進位結構不變，`CommandSettings` 欄位與 cfg+16/cfg+20 位移加註為保留廢棄欄位（helper 不讀取）。
+- **`SelfTest`**：Group 1（FromJson 過濾）、Group 9（三語一致性與佔位符）、Group 32（Retired/ById 與 ApplyAll 略過／未知 ID 拒絕）、Group 33（CLI 廢棄錯誤訊息）新增測試。主代理實測：Release build 0 warning / 0 error，41 組、**794 個斷言**全綠。
+- **主代理另以真實 CLI 執行檔端到端驗證使用者升級路徑**（非只靠 SelfTest 內部樁）：以一份同時在 `tweaks` 與 `scopedTweaks` 含 `wagon_build_time` 的設定檔執行 `trainer set --tweak hero_max_army=300 --json`，結果 exit 0、兩處退役鍵皆被剔除、其餘設定（`gold_production`、`train_speed.self`）完整保留，且磁碟上的設定檔確實自癒；明確設定 `--tweak wagon_build_time=5000` 回 exit 2 並顯示 `Error_TrainerRetiredTweak` 專屬訊息；真正不存在的 `totally_bogus_tweak` 仍回 exit 2 的「未知的調整項目代號」，fail-closed 未被削弱。
+- ⚠ 這次改動最容易做錯的地方是遷移而非移除本身：`PatchPipeline` 對未知 tweak id 是 fail-closed 拒絕，若只刪定義，既有設定檔含該鍵的使用者每次 apply 都會回 `InvalidArgs`。因此才需要 `Tweaks.Retired` 這層「主動退役」與「使用者打錯字」的區分；日後再移除任何 Tweak 都必須沿用此模式。
+- `.cktw` 的 `CommandSettings.SelfWagonBuildMilliseconds`／`EnemyWagonBuildMilliseconds`（`cfg+16`／`cfg+20`）**刻意保留不動**：command helper 從未讀取這兩個位移（只讀 `cfg+4`／`+8`／`+12`），改動會破壞已驗證的 11-hook 版面與 `ConfigCount = 67`。已加註解標記為退役保留欄位。
+- `ISSUE-050` 依規則轉為 `⏳ 已修碼 · 待實測`，並已補進第 2 節待實測看板。
+
+## 歷史進度：英雄 max_army／unit speed／unit feeds 三個 hook 完成，ISSUE-050 判定 NO-GO（2026-08-31）
+
+- 本輪由主代理協調三個外部子代理做逆向分析，主代理**逐條用 rizin 對真實原版 EXE 獨立複驗**後才接受結論。分析基準檔確認為**真原版**：目前 Steam 安裝的 `Celtic kings.exe` SHA-256 為 `86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`，PE COFF Characteristics = `0x010F`、LAA 位元（0x0020）未設定。這也釐清了先前文件的標籤錯置：`86FC9F80…` 才是原版，`E27066F8…` 是套過 laa/video_fix 等 6 項修補的狀態，兩者在舊記錄中被標反。九個既有 hook 位址原始位元組逐一比對全部相符。
+- **英雄 `max_army` 死結解開**：不再嘗試尋找「只有 Hero 會走到的呼叫路徑」（已證明追不出排他性），改在共用 `SetPlayer` 路徑上加靜態可證明的 vtable 閘門 `cmp dword [esi],0x00709C28`。全檔僅三處寫入該 vtable，皆屬 CVXHero。詳細證據見 ISSUES.md ISSUE-049。
+- **`all_unit_speed`** 新 hook `0x0050C8BE`（`idiv dword [ecx+0xF4]`，6 bytes）；**`unit_feeds`** 新 hook `0x0050B3DA`（`test dword [ebp+0x138],0x20000`，10 bytes，位於 `CVXUnit::ProcessFood` 內，天生只對 unit 生效）。feeds 刻意不併進共用 owner-scalar helper，因為 `+0x138` 只在 `CVXUnit` 被證實是 feeds 欄位。
+- feeds helper 的 EFLAGS 契約與其他 helper**相反**：它必須「產生」ZF 而不是還原，因此不能用 `pushfd`／`popfd`，收尾固定為 `pop edx; pop ecx; test eax,eax; ret`。後續維護此 helper 時務必保留這個結尾。
+- `.cktw` 現為 **11 hooks / 67 config**（speed helper @2688、feeds helper @3072、config @4096）。Release build 0 warning／0 error；SelfTest 41 組、782 個斷言全綠。真實原版 EXE 純記憶體 Apply／Reverse（11 hooks、67 欄全非原廠值）：3,516,344 → 3,526,656 bytes，反轉逐位元組相同、SHA-256 不變，遊戲目錄零寫入。兩個新 helper 已由 `rz-asm` 自實際產物完整反組譯確認指令邊界與跳轉收斂。
+- **攔下一個子代理引入的回歸缺陷**：為了讓 `hero_max_army` 的「0 = 未設定」哨兵成立，子代理改了所有 scoped tweak 共用的 `Scoped(...)` fallback，繞過 `GetScopedFallbackValue`。但後者含必要特例（`gold_production` 的 `*Village`、`food_production` 的 `*Townhall` 必須回傳 0），繞過會讓只有舊單值的使用者村莊憑空產金。已改為本地 `HeroMaxArmy(scope)`／`UnitFeeds(scope)` 函式處理哨兵，並補上兩個回歸測試。**後續任何新增哨兵語意的 tweak 都必須本地處理，不得再動共用 fallback。**
+- **ISSUE-050 判定 NO-GO**：四個 create-mule 指令 definition `+0xD1`（immediate）= 1，於 `0x00555328`／`0x00555340` 同步分派、不入佇列，執行期不會流經 `0x004FB6AB`；`0x00517010` 建立路徑亦無任何 timer。建議把 `wagon_build_time` 自 Tweak 清單移除，屬使用者可見變更，待使用者確認。
+- 外部代理注意事項：Codex CLI 本輪撞到 ChatGPT 方案用量上限而中斷（`get_agent_quotas` 顯示的高剩餘率是 API 速率窗，與方案額度是兩回事，不可據此判斷可用性）；`agent_delegation` MCP 的 `delegate_task` 在 900 秒設定下仍被 MCP 自身較短的逾時切斷，改用 `agent-delegation-tools/scripts/agy.ps1`＋背景執行才穩定。AGY 曾兩次越權修改 `AI_HANDOFF.md` 寫入未驗證結論，均已還原；委派時須明確限定可寫檔案清單。
+
 ## 最新進度：`scopedTweaks` JSON 與 CLI 已接通目前安全子集（2026-08-27）
 
 - `TrainerConfig` 新增向後相容的 `scopedTweaks: { id: { scope: value } }`；明確 scope 優先，缺項回退舊 `tweaks[id]`，再回退原廠值。金錢舊值維持原先 townhall 路徑、食物舊值維持 village 路徑，只有明確值會開啟另一聚落類型。

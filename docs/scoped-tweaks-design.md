@@ -136,6 +136,17 @@ loss percent `0x005026EF`、loss interval `0x00502716`。四處執行時 `ECX` �
   `base+0xCD4+slot*0x254` 公式取得 owner pointer，再分 self/enemy × townhall/village。
 - 容量與初始金錢各有獨立 enable；多人、缺少引擎指標、非法 owner slot 或非兩種聚落時均用原值。
 
+⚠️ **這七項的影響範圍在兩條路徑上不一樣，GUI 標籤目前只描述舊路徑**（`ISSUE-058`）。
+`townhall_maxgold`／`townhall_maxfood`／`townhall_max_population`／`townhall_start_gold`／
+`village_maxgold`／`village_maxfood`／`village_max_population` 在 `Tweaks.cs` 的名稱都帶著
+「（僅限新建聚落）」並重述 `MapPlacedSettlementNote`——那個限制只對 data.pak 路徑成立，因為
+class XML 的 `settlement_maxgold` 等屬性只有建構子讀得到。但這七項同時在 `SupportedScopes` 內，
+一旦調成非原廠值就整項改走 `.cktw`：容量 helper 每個 income tick 都重寫 resource object
+`+0x0C/+0x10` 與中央建築 `+0x3A`，**連地圖／戰役預先擺好的聚落也會被改**。這是上一條 bullet
+刻意設計的行為（正因如此 disabled 時才必須完全不寫），不是實作缺陷，但使用者看到的標籤會對不上。
+初始金錢的落差方向相反：只 hook `0x0050132E`，地圖／存檔傳入明確 current-gold 時會繞過。
+修字串之前要先決定產品行為（分路徑敘述 vs. 讓 scoped 也只作用於新建聚落），細節見 `ISSUE-058`。
+
 ### 4.2 共享 class 屬性
 
 涵蓋：英雄帶兵上限、英雄基礎血量／速度／視野、聚落預設容量／人口，以及單位血量、攻擊、
@@ -195,7 +206,77 @@ owner 變更後從原版 class 值重新計算，避免乘上目前值而重複�
      時間點；這台機器沒有裝遊戲，無法做這一步的動態驗證，純靜態繼續往上追呼叫鏈的投資報酬
      已经很低。**這是有具體數字支撐的暫緩，不是遺漏**；下一步需要在有裝遊戲的機器上掛偵錯器
      實測，而不是繼續猜測呼叫鏈。
-- **unit speed／`feeds`**：仍由共享 class 即時讀取，尚未找到 instance factor 或最小 hook 點。
+- ~~**unit speed／`feeds`**：仍由共享 class 即時讀取，尚未找到 instance factor 或最小 hook 點。~~
+  **已於 2026-08-31 解決，見下方 §4.2.1。**
+
+### 4.2.1 2026-08-31：max_army／speed／feeds 三項完成
+
+**英雄 `max_army`（class `+0x288` → instance `+0x198`）**——上方 2026-08-25 的「證據不足以安全套用」結論已被推翻，
+但推翻它的不是找到更好的呼叫路徑（那條路的排他性確實追不出來），而是換了一個問題：
+與其尋找「只有 Hero 會執行到的位址」，不如在共用路徑上加一道**靜態可證明的型別閘門**。
+
+CVXHero 主 vtable 為 `0x00709C28`。全檔 3,516,344 bytes 只有三處寫入此常數，且三處全屬 CVXHero：
+
+| 位址 | 位元組 | 角色 |
+|---|---|---|
+| `0x00489328` | `C7 06 28 9C 70 00` | 工廠 |
+| `0x004E2387` | `C7 06 28 9C 70 00` | 建構子 |
+| `0x004E24C9` | `C7 07 28 9C 70 00` | 解構子 |
+
+（raw byte scan 的三個 file offset 561962／926601／926923 換算 VA 後與上表精確吻合，不存在第四處。）
+
+因此 `cmp dword [esi], 0x00709C28` 是 100% 精確的英雄判別式；352／364 bytes 的小型物件在閘門就被擋掉，
+先前的 heap overflow 風險完全消除。hook 點 `[esi]` 保證為有效 vtable —— 原廠自己在 `0x004F477D`
+執行 `call dword [eax+0xA0]`。`+0x198` 的身分由存檔序列化決定性證明：`0x004E47FA` push 字串 `"maxarmy"`、
+`0x004E47FF` `lea ecx,[edi+0x198]`；活躍讀取者為 `0x004E2A42`、`0x0050BCD7`，非死欄位。
+
+⚠️ **語意**：`hero_max_army` 是 `AttrTweak`（原廠 50、範圍 1..2000），helper 寫入**絕對值**，
+不做 Q16.16 縮放。這與同一個 helper 內的血量／攻防／視野（倍率）不同，維護時勿照抄。
+
+**`all_unit_speed`** —— hook `0x0050C8BE`，原始 6 bytes `F7 B9 F4 00 00 00` = `idiv dword [ecx+0xF4]`。
+`0x0050C8AE mov ecx,[esi+0x3A]` 取得 class，`esi` 為 unit instance，故可經 `+0x6E` 取 owner。
+class `+0xF4` 在此是**除數**（值越大移動越快），倍率套用在除數上，與直接縮放 XML `speed` 屬性等價。
+helper 必須先把 `EDX:EAX` 被除數壓堆疊才能做 `mul`，算完 `pop edx; pop eax` 還原後才 `idiv ebx`；
+含溢位保護（`cmp edx,0x10000; jae`）與除零保護（`test eax,eax; jz`），任一 fail-closed 條件成立即用原版除數。
+
+**`unit_feeds`** —— hook `0x0050B3DA`，原始 10 bytes `F7 85 38 01 00 00 00 00 02 00` =
+`test dword [ebp+0x138],0x20000`，位於 `CVXUnit::ProcessFood`（`0x0050B3D0`；`0x0050B3D8 mov ebp,ecx`
+證實 thiscall、`ebp` 必為 unit）。instance `+0x138` bit 17 的語意由原廠建構子決定：
+`0x0050A9D7 mov ecx,[eax+0x29C]` 讀 class feeds，接著 `and eax,0xFFFDFFFF` 清除、視情況 `or eax,0x20000` 設定。
+
+**刻意不把 feeds 併進 `0x004F479D` 的 owner-scalar helper**：那條 `SetPlayer` 共用路徑上流過建築與
+聚落子物件，而 `+0x138` 只在 `CVXUnit` 被證實是 feeds 欄位；對其他物件翻該位元沒有證據支持。
+設定採三態（0=保持原版、1=不進食、2=進食）。
+
+⚠️ **EFLAGS 契約與其他 helper 相反**：原廠 `test` 產生的 ZF 必須活到 `0x0050B3EA` 的
+`je 0x0050BAEC`（中間 `push esi`／`push edi`／`mov` 均不影響旗標），所以這個 helper 的職責是
+**產生**旗標而非還原旗標，**不得**使用 `pushfd`／`popfd`，收尾固定為
+`pop edx; pop ecx; test eax,eax; ret`（ZF=1 = 不進食）。EAX 在該處為死值：未採用路徑於
+`0x0050B407 xor eax,eax` 先寫後讀，採用路徑 `0x0050BAEC` 直接進 epilogue。
+
+⚠️ **哨兵必須本地處理**：`hero_max_army` 與 `unit_feeds` 都用一個「未設定」哨兵值，
+這類邏輯一律寫在 `TryBuildSettings` 內的本地函式（`HeroMaxArmy`／`UnitFeeds`），
+**不得**修改共用的 `GetScopedFallbackValue` 或 `Scoped(...)`。後者含必要特例
+（`gold_production` 的 `*Village`、`food_production` 的 `*Townhall` 必須回傳 0），
+繞過它會讓只有舊單值的使用者村莊憑空產金；此回歸已發生過一次並補上測試。
+
+⚠️ **哨兵的判定條件是「值等於原廠預設」，不是「key 不存在」**（2026-08-31，`ISSUE-057`）。
+初版兩個本地函式只擋 key 不存在，但 `TrainerPage.SaveConfig` 對 `Tweaks.All` 的**每一列**
+無條件寫入 `config.Tweaks[tweak.Id] = value;`（含完全沒改、等於原廠預設的列），所以只要用
+GUI 存過一次設定，這兩個 key 就永遠存在、哨兵永遠不成立。後果不是小事：`unit_feeds` 的原廠
+預設 1 會被讀成明確三態 2，`0x0050B3DA` 的 helper 於是對所有走到 `CVXUnit::ProcessFood` 的
+物件強制設定「會進食」，連 class XML 寫死 `feeds=0` 的動物、幽靈與運輸車都被拉進飢餓計時器；
+同時 `hero_max_army` 被讀成 50，`UnitScalars` 恆常非 `Disabled`，使用者什麼都沒調也會套上
+`.cktw`。修正後兩個函式都以 `Tweaks.ById[id].Default` 比對，等於預設即回 0 哨兵；明確的
+`ScopedTweaks` 值不受影響（那是刻意設定，即使等於預設也照寫）。
+回歸測試「GUI 全預設存檔不得產生 scoped payload」直接用
+`Tweaks.All.ToDictionary(t => t.Id, t => t.Default)` 重現 GUI 的存檔內容，是這條規則的守門測試；
+另有反向測試「明確 scoped unit_feeds 生效且未指定的 scope 維持 0 哨兵」擋住修過頭。
+**日後新增任何用哨兵表示「未設定」的欄位，都必須同時擋掉這兩種情況。**
+
+仍未完成：GaulPower／RomanPower 種族倍率（無證據，明確擱置）、`hero_maxhealth`／`hero_speed`／
+`hero_sight` 等英雄專屬絕對值（現已可用同一 vtable 閘門技術解，尚未實作）、
+`hero_health_per_level`／`hero_exp_divider`（見 §4.3）。
 
 驗證現況：`dotnet build` 0 warning/0 error；SelfTest 40 組全綠，新增 owner-scalar hook CALL 目標、
 設定表往返、helper register-preserve 契約、fail-closed 鏈、class→instance 欄位複製（含視野）等
@@ -253,6 +334,19 @@ parser 區域變數與 finalize 的延後 stack cleanup 已逐指令對齊，def
 腳本中沒有讀取者，四個 create-mule command 也沒有 `execdelay`。scoped 實作必須替這四個
 command 建立真實的 delay 路徑，不能沿用目前無效的 VXCONST 改寫。
 
+**2026-08-31 追加調查：判定 NO-GO，引擎不存在可用路徑。** 四個 create-mule 指令的 definition
+`+0xD1`（immediate）為 1；命令分派在 `0x00555328 mov al,[esi+0xD1]` 讀取該旗標後，於
+`0x00555340 call dword [eax+0x6C]` 直接在當前 frame 同步分派，**完全不進入物件命令佇列**，
+因此執行期不會流經 `0x004FB6AB`（那是駐列命令的延遲讀取點）。聚落端 `0x00517010` 亦為純同步建立：
+扣資源 → 配置 CVXWagon → 設定載重 → 指派 owner（`0x00517088 mov eax,[eax+0x90]`）→ 生成至地圖，
+全程沒有任何 timer、cooldown 或延遲狀態機。
+
+三條替代方案均不可行：改 XML 旗標成非 immediate 會破壞 VS 腳本回傳 handle 的契約與多人資料一致性；
+在同步函式內阻塞會凍結主迴圈；在 `.cktw` 自建非同步計時佇列則無法序列化進存檔，且聚落被佔領／
+摧毀時會產生懸空指標。
+
+結論：`WagonBuildTime` 是原廠早期企劃遺留的死常數。`wagon_build_time` 已自修改器 Tweak 清單正式廢棄並移除（`Tweaks.Retired`），向後相容過濾已實作於 `ToolkitConfig.FromJson` 與 `PatchPipeline`，CLI 嘗試設定該項目將明確回傳 `Error_TrainerRetiredTweak`（ExitCode 2）。
+
 ## 5. UI 與 CLI
 
 - 一般項目顯示「我方值」「敵方值」兩欄。
@@ -261,14 +355,23 @@ command 建立真實的 delay 路徑，不能沿用目前無效的 VXCONST 改�
 - CLI 已使用穩定格式：`--scoped-tweak <id>.<scope>=<value>`；`list-tweaks --json` 回報 `scopedSupported` 與合法 `scopes`。
 - 只有 hook 與回歸測試都完成的項目才可在 GUI 啟用；其餘保持隱藏或唯讀並標示調查中。
 
-目前設定檔、Pipeline 驗證與 CLI 已接通 18 個有 hook 的 ID。一般項目使用 `self`／`enemy`；
+目前設定檔、Pipeline 驗證與 CLI 已接通 21 個有 hook 的 ID（2026-08-31）。一般項目使用 `self`／`enemy`；
 `gold_production`、`food_production` 與四個人口項目使用 `selfTownhall`、`selfVillage`、
 `enemyTownhall`、`enemyVillage`。容量 ID 已在名稱區分 townhall/village，因此各使用 `self`／
 `enemy`。未知 ID、尚未完成的 ID、未知 scope 或超出原 tweak 範圍會在寫入遊戲前 fail-closed。
-GUI 修改器頁已新增「敵我／聚落分流」子分頁：只列出有 hook 的 18 個 ID（自動依 2／4 scope
-分到單值與聚落兩個表格），未完成的 ID（如 `hero_max_army`）完全不產生可儲存的列。欄位空白或
-等於「原始值」欄不寫入；明確值寫入 `trainer.scopedTweaks` 並只進 `.cktw`。SelfTest Group 40
-覆蓋建立、三語字串、往返、fallback 略過與範圍拒絕。現有單值 Tweak 欄位則保留向後相容。
+GUI 修改器頁已新增「敵我／聚落分流」子分頁：只列出有 hook 的 21 個 ID（自動依 2／4 scope
+分到單值與聚落兩個表格），未完成的 ID（種族倍率、英雄專屬絕對值與英雄成長常數）完全不產生
+可儲存的列——`hero_max_army` 已於 2026-08-31 完成（見 §4.2.1），現在會出現在單值表格中。
+欄位空白或等於「原始值」欄不寫入；明確值寫入 `trainer.scopedTweaks` 並只進 `.cktw`。
+SelfTest Group 40 覆蓋建立、三語字串、往返、fallback 略過與範圍拒絕。
+現有單值 Tweak 欄位則保留向後相容。
+
+單值的「永久規則調整」分頁另有一則多人須知（`Gui_Trainer_TweaksScopeNotice`，三語）：這些
+ID 只要在單值頁被調成非原廠值，`ShouldRouteToScopedPatch` 一樣會把整項路由到 `.cktw`，於是
+**多人連線時會退回原版數值**，而且不再寫入共用 `data.pak`——對只用單值頁、從沒開過分流分頁的
+使用者來說，這是相對舊版的行為改變，必須在該頁講清楚。提示中的項目數是執行期以
+`Tweaks.All.Count(t => ScopedTweakPatch.GetSupportedScopes(t.Id).Count > 0)` 算出來的，
+`SupportedScopes` 增修後不會過期。
 
 ## 5.1 `.cktw` command helper（已接入 Pipeline，尚未完成全部 scoped surface）
 
@@ -285,20 +388,32 @@ GUI 修改器頁已新增「敵我／聚落分流」子分頁：只列出有 hoo
   `+0xCF/+0xD0` 選擇 Q16.16 倍率；用 64-bit numerator 除法、overflow clamp 與最小 1 tick
   防止 wrap／除零／非零指令變成零延遲。
 - 設定表：command 6 欄、gold/food production 8 欄、人口 16 欄、容量 enable+12 欄、
-  初始金錢 enable+4 欄、unit scalar enable+12 欄，共 61 欄。
+  初始金錢 enable+4 欄、unit scalar enable+12 欄、英雄 max_army 2 欄、unit speed 2 欄、
+  unit feeds 2 欄，共 **67 欄**（2026-08-31）。
+- 版面配置（2026-08-31）：owner-scalar helper @2176、speed helper @2688、feeds helper @3072、
+  設定表 @4096。`ConfigOffset` 與 `ConfigCount` 均寫在 payload header 且由 `IsApplied` 驗證，
+  因此舊版已套用的 `.cktw` 會被判定為不相符 —— 這是既有設計預期內的行為，沿用既有混合狀態拒絕邏輯。
 
-SelfTest 已驗證八個 CALL 目標、command helper 多人與 owner/flag 關鍵指令、settlement helper 的
+SelfTest 已驗證十一個 CALL 目標、command helper 多人與 owner/flag 關鍵指令、settlement helper 的
 `ret 4`／`test eax,eax` 呼叫端契約、`+0x32/+0x36/+0x90` 分型與 owner 位移、人口 helper 的
-MOV flags／IMUL 契約、容量索引／enable、constructor owner stack、owner-scalar 與 61 欄設定往返及原地更新、
+MOV flags／IMUL 契約、容量索引／enable、constructor owner stack、owner-scalar 與 67 欄設定往返及原地更新、
+Hero vtable 閘門與 max_army 絕對值寫入（且不含縮放指令）、speed helper 的被除數還原與除零 fallback、
+feeds helper 的 ZF 契約（不含 `popfd`、結尾為 `test eax,eax` + `ret`）、
 範圍拒絕、重複套用冪等、
 hook/helper 混合狀態拒絕，以及移除 raw section 後逐位元組回到合成原版。
-另以目前真實 Steam EXE 在記憶體中完成 Apply／Reverse（未寫磁碟）：3,516,344 bytes 附加
-`.cktw` 後為 3,522,560 bytes，反轉後 byte-exact，前後 SHA-256 均為
-`E27066F82510DA7B400FB341906B86B5CFFF1795BA1C2D76CFF48D07C070C440`。
-`verify` 現在會比對 `.cktw` 完整設定與 `data.pak` trainer marker payload；`RunManifest` 也會
-分開列出遊戲檔案實際狀態與本次期望設定。騾車尚無可用 command delay，英雄／種族／speed／
-feeds 等永久 Tweak hook 亦未完成；因此目前仍不能宣稱全部永久 Tweak 已分流。CLI、JSON 與
-GUI「敵我／聚落分流」子分頁均已接入目前完成子集（SelfTest Group 40）；仍待真實遊戲敵我／
+另有兩個回歸測試守住哨兵語意：「舊單值遷移不得把生產值外溢到另一個聚落類型」與
+「未設定 `hero_max_army` 時 scoped payload 維持 0 哨兵」。
+
+另以真實原版 Steam EXE 在記憶體中完成 Apply／Reverse（未寫磁碟，11 hooks／67 欄全部給非原廠值）：
+3,516,344 bytes 附加 `.cktw` 後為 3,526,656 bytes，反轉後 byte-exact，前後 SHA-256 均為
+`86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`。
+（註：先前版本此處記錄的 `E27066F8…` 被標為「原版基準」是錯的，那是套過 laa/video_fix 等
+6 項修補的狀態；`86FC9F80…` 才是 LAA 未設定的真原版。）
+
+`verify` 會比對 `.cktw` 完整設定與 `data.pak` trainer marker payload；`RunManifest` 也會
+分開列出遊戲檔案實際狀態與本次期望設定。騾車 command delay 已判定引擎無路徑（見 §4.4），
+種族倍率與英雄成長常數等永久 Tweak hook 仍未完成；因此目前仍不能宣稱全部永久 Tweak 已分流。
+CLI、JSON 與 GUI「敵我／聚落分流」子分頁均已接入目前完成子集；仍待真實遊戲敵我／
 聚落／多人實機驗收。
 
 ## 6. 驗證門檻

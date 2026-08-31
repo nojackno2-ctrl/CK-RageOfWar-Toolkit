@@ -139,6 +139,7 @@ internal static class Program
         RunGroup("39. SaveManager", () => SaveManagerSelfTests.Run(Check));
         RunGroup("40. TrainerScopedTweaksGui", TestTrainerScopedTweaksGui);
         RunGroup("41. ScopedTweaksAndHiResCompositeReversal", TestScopedTweaksAndHiResCompositeReversal);
+        RunGroup("42. InGamePanelAndKeyPosting", TestInGamePanelAndKeyPosting);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -281,6 +282,29 @@ internal static class Program
         Check("Trainer scopedTweaks 巢狀設定完整還原",
             restored.Trainer.ScopedTweaks["train_speed"]["enemy"] == 0.75m &&
             restored.Trainer.ScopedTweaks["gold_production"]["selfTownhall"] == 48m);
+
+        string legacyWithRetiredJson = """
+        {
+          "trainer": {
+            "enabled": true,
+            "tweaks": {
+              "wagon_build_time": 7000,
+              "train_speed": 2
+            },
+            "scopedTweaks": {
+              "wagon_build_time": { "self": 5000 },
+              "train_speed": { "self": 2 }
+            }
+          }
+        }
+        """;
+        var legacyCleaned = ToolkitConfig.FromJson(legacyWithRetiredJson);
+        Check("FromJson 自動過濾 tweaks 中的廢棄 tweak ID",
+            !legacyCleaned.Trainer.Tweaks.ContainsKey("wagon_build_time") &&
+            legacyCleaned.Trainer.Tweaks.ContainsKey("train_speed"));
+        Check("FromJson 自動過濾 scopedTweaks 中的廢棄 tweak ID",
+            !legacyCleaned.Trainer.ScopedTweaks.ContainsKey("wagon_build_time") &&
+            legacyCleaned.Trainer.ScopedTweaks.ContainsKey("train_speed"));
     }
 
     // --- 2. IniFile 往返與節區操作測試 --------------------------------------
@@ -713,6 +737,15 @@ internal static class Program
             missingInZh.Count == 0 ? null : $"缺少：{string.Join(", ", missingInZh)}");
         Check("繁體中文所有鍵皆存在於簡體中文表", missingInCn.Count == 0,
             missingInCn.Count == 0 ? null : $"缺少：{string.Join(", ", missingInCn)}");
+
+        Check("三語皆包含 Error_TrainerRetiredTweak",
+            zh.ContainsKey("Error_TrainerRetiredTweak") &&
+            cn.ContainsKey("Error_TrainerRetiredTweak") &&
+            en.ContainsKey("Error_TrainerRetiredTweak"));
+        Check("Error_TrainerRetiredTweak 在三語皆含 {0} 佔位符",
+            zh["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal) &&
+            cn["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal) &&
+            en["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal));
     }
 
     // --- 10. Perf: LargeAddressAware 個別精確反轉測試 -----------------------
@@ -2575,7 +2608,10 @@ internal static class Program
             (1u << 16) + (1u << 15), 1u << 16,
             1u << 16, 1u << 16,
             1u << 16, 1u << 16,
-            (1u << 16) + (1u << 14), 1u << 16);
+            (1u << 16) + (1u << 14), 1u << 16,
+            100, 50,
+            (1u << 16) + (1u << 15), (1u << 16) / 2,
+            1, 2);
         byte[] scopedPatched = ScopedTweakPatch.Apply(
             scopedVanilla, commandSettings, productionSettings, populationSettings,
             capacitySettings, initialGoldSettings, unitScalarSettings);
@@ -2616,6 +2652,12 @@ internal static class Program
         byte[] ownerScalarHook = scopedPe.ReadBytesAtVa(
             ScopedTweakPatch.OwnerScalarSiteVa, ScopedTweakPatch.OwnerScalarOriginal.Length);
         uint ownerScalarTarget = (uint)(ScopedTweakPatch.OwnerScalarSiteVa + 5 + BitConverter.ToInt32(ownerScalarHook, 1));
+        byte[] speedHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.SpeedSiteVa, ScopedTweakPatch.SpeedOriginal.Length);
+        uint speedTarget = (uint)(ScopedTweakPatch.SpeedSiteVa + 5 + BitConverter.ToInt32(speedHook, 1));
+        byte[] feedsHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.FeedsSiteVa, ScopedTweakPatch.FeedsOriginal.Length);
+        uint feedsTarget = (uint)(ScopedTweakPatch.FeedsSiteVa + 5 + BitConverter.ToInt32(feedsHook, 1));
         byte[] scopedHelper = scopedPe.ReadBytesAtVa(scopedInfo.HelperVa, checked((int)scopedInfo.HelperSize));
         byte[] scopedGoldHelper = scopedPe.ReadBytesAtVa(
             scopedInfo.GoldHelperVa, checked((int)scopedInfo.GoldHelperSize));
@@ -2637,12 +2679,16 @@ internal static class Program
             scopedInfo.InitialGoldHelperVa, checked((int)scopedInfo.InitialGoldHelperSize));
         byte[] scopedOwnerScalarHelper = scopedPe.ReadBytesAtVa(
             scopedInfo.OwnerScalarHelperVa, checked((int)scopedInfo.OwnerScalarHelperSize));
+        byte[] scopedSpeedHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.SpeedHelperVa, checked((int)scopedInfo.SpeedHelperSize));
+        byte[] scopedFeedsHelper = scopedPe.ReadBytesAtVa(
+            scopedInfo.FeedsHelperVa, checked((int)scopedInfo.FeedsHelperSize));
 
         Check("ScopedTweakPatch 建立版本化 .cktw 與單人限定 manifest",
             ScopedTweakPatch.IsApplied(scopedPatched) &&
             scopedPe.FindSection(ScopedTweakPatch.SectionName) >= 0 &&
             scopedInfo.Flags == ScopedTweakPatch.FlagSinglePlayerOnly &&
-            scopedInfo.Hooks == 9);
+            scopedInfo.Hooks == 11);
         Check("ScopedTweakPatch command hook CALL 指向 .cktw helper",
             scopedHook[0] == 0xE8 && scopedHook[^1] == 0x90 &&
             helperTarget == scopedInfo.HelperVa);
@@ -2666,6 +2712,12 @@ internal static class Program
         Check("ScopedTweakPatch owner-scalar hook 指向專用 helper",
             ownerScalarHook[0] == 0xE8 && ownerScalarHook[^1] == 0x90 &&
             ownerScalarTarget == scopedInfo.OwnerScalarHelperVa);
+        Check("ScopedTweakPatch speed hook 指向專用 helper",
+            speedHook[0] == 0xE8 && speedHook[^1] == 0x90 &&
+            speedTarget == scopedInfo.SpeedHelperVa);
+        Check("ScopedTweakPatch feeds hook 指向專用 helper 並以 NOP 填充",
+            feedsHook[0] == 0xE8 && feedsHook.AsSpan(5).ToArray().All(b => b == 0x90) &&
+            feedsTarget == scopedInfo.FeedsHelperVa);
         Check("ScopedTweakPatch helper 保存旗標/暫存器並回復後 RET",
             scopedHelper.AsSpan(0, 7).SequenceEqual(new byte[] { 0x9C, 0x51, 0x52, 0x53, 0x56, 0x57, 0x55 }) &&
             scopedHelper.AsSpan(scopedHelper.Length - 8).SequenceEqual(new byte[] { 0x5D, 0x5F, 0x5E, 0x5B, 0x5A, 0x59, 0x9D, 0xC3 }));
@@ -2688,7 +2740,7 @@ internal static class Program
             scopedInfo.Capacity == capacitySettings);
         Check("ScopedTweakPatch 初始金錢 enable 與四 scope 完整往返",
             scopedInfo.InitialGold == initialGoldSettings);
-        Check("ScopedTweakPatch 單位血量/攻擊/防禦 enable 與敵我倍率完整往返",
+        Check("ScopedTweakPatch 單位血量/攻擊/防禦/帶兵上限 enable 與敵我倍率/整數完整往返",
             scopedInfo.UnitScalars == unitScalarSettings);
         Check("ScopedTweakPatch settlement helper 保留原呼叫端堆疊/條件旗標語意",
             scopedGoldHelper.AsSpan(scopedGoldHelper.Length - 9)
@@ -2764,6 +2816,34 @@ internal static class Program
         Check("ScopedTweakPatch owner-scalar helper 讀 class 視野並寫回 instance +B0",
             ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x87, 0xFC, 0x00, 0x00, 0x00]) &&
             ContainsSequence(scopedOwnerScalarHelper, [0x89, 0x86, 0xB0, 0x00, 0x00, 0x00]));
+        Check("ScopedTweakPatch owner-scalar helper 包含 Hero vtable 特徵比對與 max_army 寫入",
+            ContainsSequence(scopedOwnerScalarHelper, [0x81, 0x3E, 0x28, 0x9C, 0x70, 0x00]) &&
+            ContainsSequence(scopedOwnerScalarHelper, [0x89, 0x86, 0x98, 0x01, 0x00, 0x00]));
+        Check("ScopedTweakPatch owner-scalar helper 讀取 max_army 設定不經乘除直接寫入",
+            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x04, 0x9D]) &&
+            !ContainsSequence(scopedOwnerScalarHelper, [0x89, 0x86, 0x98, 0x01, 0x00, 0x00, 0xF7]));
+        Check("ScopedTweakPatch speed helper 保留 EBX/ECX/EDX/EAX 並執行 Q16 除數縮放與除以零保護",
+            scopedSpeedHelper.AsSpan(0, 4).SequenceEqual(new byte[] { 0x53, 0x51, 0x50, 0x52 }) &&
+            ContainsSequence(scopedSpeedHelper, [0x8B, 0x99, 0xF4, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedSpeedHelper, [0x39, 0x46, 0x6E]) &&
+            ContainsSequence(scopedSpeedHelper, [0x8B, 0x0C, 0x95]) &&
+            ContainsSequence(scopedSpeedHelper, [0xF7, 0xE1]) &&
+            ContainsSequence(scopedSpeedHelper, [0x81, 0xFA, 0x00, 0x00, 0x01, 0x00]) &&
+            ContainsSequence(scopedSpeedHelper, [0xB9, 0x00, 0x00, 0x01, 0x00, 0xF7, 0xF1]) &&
+            scopedSpeedHelper.AsSpan(scopedSpeedHelper.Length - 7)
+                .SequenceEqual(new byte[] { 0x5A, 0x58, 0xF7, 0xFB, 0x59, 0x5B, 0xC3 }));
+        Check("ScopedTweakPatch feeds helper 包含三態分支且無 popfd 以 test eax,eax 結束",
+            scopedFeedsHelper.AsSpan(0, 2).SequenceEqual(new byte[] { 0x51, 0x52 }) &&
+            ContainsSequence(scopedFeedsHelper, [0x39, 0x45, 0x6E]) &&
+            ContainsSequence(scopedFeedsHelper, [0x8B, 0x0C, 0x95]) &&
+            ContainsSequence(scopedFeedsHelper, [0x83, 0xF9, 0x01]) &&
+            ContainsSequence(scopedFeedsHelper, [0x83, 0xF9, 0x02]) &&
+            ContainsSequence(scopedFeedsHelper, [0x31, 0xC0]) &&
+            ContainsSequence(scopedFeedsHelper, [0xB8, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedFeedsHelper, [0x8B, 0x85, 0x38, 0x01, 0x00, 0x00, 0x25, 0x00, 0x00, 0x02, 0x00]) &&
+            !scopedFeedsHelper.Contains((byte)0x9D) &&
+            scopedFeedsHelper.AsSpan(scopedFeedsHelper.Length - 5)
+                .SequenceEqual(new byte[] { 0x5A, 0x59, 0x85, 0xC0, 0xC3 }));
 
         byte[] scopedReapplied = ScopedTweakPatch.Apply(
             scopedPatched, commandSettings, productionSettings, populationSettings,
@@ -2799,7 +2879,13 @@ internal static class Program
         {
             SelfHealthQ16 = 3u << 16,
             EnemyDefenseQ16 = (1u << 16) / 4,
-            EnemyVisionQ16 = (1u << 16) / 2
+            EnemyVisionQ16 = (1u << 16) / 2,
+            SelfMaxArmy = 200,
+            EnemyMaxArmy = 80,
+            SelfSpeedQ16 = 3u << 16,
+            EnemySpeedQ16 = (1u << 16) / 2,
+            SelfFeeds = 2,
+            EnemyFeeds = 1
         };
         byte[] scopedUpdated = ScopedTweakPatch.Apply(
             scopedPatched, updatedCommandSettings, updatedProductionSettings,
@@ -2872,6 +2958,40 @@ internal static class Program
         catch (ArgumentOutOfRangeException) { unsafeUnitScalarRejected = true; }
         Check("ScopedTweakPatch 拒絕超出 0.01x~100x 的單位倍率", unsafeUnitScalarRejected);
 
+        bool unsafeSpeedRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings, capacitySettings, initialGoldSettings,
+                unitScalarSettings with { SelfSpeedQ16 = 600 });
+        }
+        catch (ArgumentOutOfRangeException) { unsafeSpeedRejected = true; }
+        Check("ScopedTweakPatch 拒絕超出 0.01x~100x 的單位速度倍率", unsafeSpeedRejected);
+
+        bool unsafeFeedsRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings, capacitySettings, initialGoldSettings,
+                unitScalarSettings with { SelfFeeds = 3 });
+        }
+        catch (ArgumentOutOfRangeException) { unsafeFeedsRejected = true; }
+        Check("ScopedTweakPatch 拒絕超出 0..2 的單位進食設定", unsafeFeedsRejected);
+
+        Check("ScopedTweakPatch 允許 0、1、2000 之帶兵上限",
+            ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings, populationSettings, capacitySettings, initialGoldSettings, unitScalarSettings with { SelfMaxArmy = 0, EnemyMaxArmy = 1 }) is not null &&
+            ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings, populationSettings, capacitySettings, initialGoldSettings, unitScalarSettings with { SelfMaxArmy = 2000, EnemyMaxArmy = 2000 }) is not null);
+
+        bool unsafeMaxArmyRejected = false;
+        try
+        {
+            _ = ScopedTweakPatch.Apply(scopedVanilla, commandSettings, productionSettings,
+                populationSettings, capacitySettings, initialGoldSettings,
+                unitScalarSettings with { SelfMaxArmy = 2001 });
+        }
+        catch (ArgumentOutOfRangeException) { unsafeMaxArmyRejected = true; }
+        Check("ScopedTweakPatch 拒絕超出 2000 之帶兵上限", unsafeMaxArmyRejected);
+
         byte[] ownerScalarMixed = (byte[])scopedPatched.Clone();
         PeFile ownerScalarMixedPe = PeFile.Parse(ownerScalarMixed);
         ownerScalarMixedPe.WriteBytesAtVa(ScopedTweakPatch.OwnerScalarSiteVa, [0x90]);
@@ -2879,6 +2999,22 @@ internal static class Program
         try { _ = ScopedTweakPatch.Reverse(ownerScalarMixedPe.ToBytes()); }
         catch (InvalidOperationException) { ownerScalarMixedRejected = true; }
         Check("ScopedTweakPatch 拒絕遭修改的 owner-scalar hook 狀態", ownerScalarMixedRejected);
+
+        byte[] speedMixed = (byte[])scopedPatched.Clone();
+        PeFile speedMixedPe = PeFile.Parse(speedMixed);
+        speedMixedPe.WriteBytesAtVa(ScopedTweakPatch.SpeedSiteVa, [0x90]);
+        bool speedMixedRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(speedMixedPe.ToBytes()); }
+        catch (InvalidOperationException) { speedMixedRejected = true; }
+        Check("ScopedTweakPatch 拒絕遭修改的 speed hook 狀態", speedMixedRejected);
+
+        byte[] feedsMixed = (byte[])scopedPatched.Clone();
+        PeFile feedsMixedPe = PeFile.Parse(feedsMixed);
+        feedsMixedPe.WriteBytesAtVa(ScopedTweakPatch.FeedsSiteVa, [0x90]);
+        bool feedsMixedRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(feedsMixedPe.ToBytes()); }
+        catch (InvalidOperationException) { feedsMixedRejected = true; }
+        Check("ScopedTweakPatch 拒絕遭修改的 feeds hook 狀態", feedsMixedRejected);
 
         byte[] scopedMixed = (byte[])scopedPatched.Clone();
         PeFile scopedMixedPe = PeFile.Parse(scopedMixed);
@@ -2920,7 +3056,113 @@ internal static class Program
         Check("舊版 supported tweak 可建立雙方相同的 scoped payload",
             ScopedTweakPatch.TryBuildLegacySettings(supportedLegacyConfig, out var legacySettings) &&
             legacySettings.Command.SelfTrainSpeedQ16 == 2u << 16 &&
-            legacySettings.Command.EnemyTrainSpeedQ16 == 2u << 16);
+            legacySettings.Command.EnemyTrainSpeedQ16 == 2u << 16 &&
+            legacySettings.UnitScalars.SelfMaxArmy == 100 &&
+            legacySettings.UnitScalars.EnemyMaxArmy == 100);
+
+        var supportedSpeedFeedsConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = new Dictionary<string, decimal>(StringComparer.Ordinal)
+            {
+                ["all_unit_speed"] = 2m,
+                ["unit_feeds"] = 0m
+            }
+        };
+        Check("舊版 speed 與 feeds tweak 可建立對應 scoped payload",
+            ScopedTweakPatch.TryBuildLegacySettings(supportedSpeedFeedsConfig, out var speedFeedsSettings) &&
+            speedFeedsSettings.UnitScalars.SelfSpeedQ16 == 2u << 16 &&
+            speedFeedsSettings.UnitScalars.EnemySpeedQ16 == 2u << 16 &&
+            speedFeedsSettings.UnitScalars.SelfFeeds == 1 &&
+            speedFeedsSettings.UnitScalars.EnemyFeeds == 1);
+
+        var unsetFeedsConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = new Dictionary<string, decimal>(StringComparer.Ordinal)
+            {
+                ["all_unit_speed"] = 1.5m
+            }
+        };
+        Check("未設定 unit_feeds 時 scoped payload 維持 0（原版 fallback）",
+            ScopedTweakPatch.TryBuildLegacySettings(unsetFeedsConfig, out var unsetFeedsSettings) &&
+            unsetFeedsSettings.UnitScalars.SelfFeeds == 0 &&
+            unsetFeedsSettings.UnitScalars.EnemyFeeds == 0);
+
+        // 回歸測試：舊單值遷移時，金錢只能走 townhall 路徑、食物只能走 village 路徑。
+        // 只有明確 scoped 值才可以開啟另一個聚落類型，否則村莊會憑空開始產金。
+        var legacyProductionOnlyConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = new Dictionary<string, decimal>(StringComparer.Ordinal)
+            {
+                ["gold_production"] = 500m,
+                ["food_production"] = 400m
+            }
+        };
+        Check("舊單值遷移不得把生產值外溢到另一個聚落類型",
+            ScopedTweakPatch.TryBuildLegacySettings(legacyProductionOnlyConfig, out var legacyProductionSettings) &&
+            legacyProductionSettings.Production.SelfTownhallGold == 500 &&
+            legacyProductionSettings.Production.EnemyTownhallGold == 500 &&
+            legacyProductionSettings.Production.SelfVillageGold == 0 &&
+            legacyProductionSettings.Production.EnemyVillageGold == 0 &&
+            legacyProductionSettings.Production.SelfVillageFood == 400 &&
+            legacyProductionSettings.Production.EnemyVillageFood == 400 &&
+            legacyProductionSettings.Production.SelfTownhallFood == 0 &&
+            legacyProductionSettings.Production.EnemyTownhallFood == 0);
+
+        // 回歸測試：hero_max_army 的 0 哨兵不得被原廠預設 50 取代，否則使用者
+        // 沒設定時也會強制寫入 50，蓋掉劇本／mod 對 HERO.SC.XML 的合法修改。
+        var noHeroTweakConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = new Dictionary<string, decimal>(StringComparer.Ordinal)
+            {
+                ["train_speed"] = 2m
+            }
+        };
+        Check("未設定 hero_max_army 時 scoped payload 維持 0 哨兵",
+            ScopedTweakPatch.TryBuildLegacySettings(noHeroTweakConfig, out var noHeroSettings) &&
+            noHeroSettings.UnitScalars.SelfMaxArmy == 0 &&
+            noHeroSettings.UnitScalars.EnemyMaxArmy == 0);
+
+        // 回歸測試：GUI 的 SaveConfig 會把「每一列」tweak（含完全沒改、等於原廠預設的列）
+        // 都寫進 trainer.Tweaks。哨兵若只擋「key 不存在」，使用者只要用 GUI 存過一次設定，
+        // unit_feeds 就會被讀成明確三態 2（強制進食）、hero_max_army 讀成 50，
+        // UnitScalars 恆常非 Disabled，導致什麼都沒調也會套上 .cktw。
+        var guiAllDefaultsConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = Tweaks.All.ToDictionary(t => t.Id, t => t.Default, StringComparer.Ordinal),
+            ScopedTweaks = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.Ordinal)
+        };
+        Check("GUI 全預設存檔不得產生 scoped payload",
+            !ScopedTweakPatch.TryBuildLegacySettings(guiAllDefaultsConfig, out var guiDefaultsSettings) &&
+            guiDefaultsSettings.UnitScalars == ScopedTweakPatch.UnitScalarSettings.Disabled &&
+            guiDefaultsSettings.Command == ScopedTweakPatch.CommandSettings.Vanilla &&
+            guiDefaultsSettings.Production == ScopedTweakPatch.ProductionSettings.Vanilla &&
+            guiDefaultsSettings.Population == ScopedTweakPatch.PopulationSettings.Vanilla &&
+            guiDefaultsSettings.Capacity == ScopedTweakPatch.CapacitySettings.Disabled &&
+            guiDefaultsSettings.InitialGold == ScopedTweakPatch.InitialGoldSettings.Disabled);
+
+        // 明確的 scoped 值即使搭配全預設的舊單值也照樣生效，未指定的 scope 仍維持 0 哨兵。
+        var explicitFeedsConfig = new TrainerConfig
+        {
+            Enabled = true,
+            Tweaks = Tweaks.All.ToDictionary(t => t.Id, t => t.Default, StringComparer.Ordinal),
+            ScopedTweaks = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.Ordinal)
+            {
+                ["unit_feeds"] = new Dictionary<string, decimal>(StringComparer.Ordinal)
+                {
+                    ["enemy"] = 0m
+                }
+            }
+        };
+        Check("明確 scoped unit_feeds 生效且未指定的 scope 維持 0 哨兵",
+            ScopedTweakPatch.TryBuildLegacySettings(explicitFeedsConfig, out var explicitFeedsSettings) &&
+            explicitFeedsSettings.UnitScalars.EnemyFeeds == 1 &&
+            explicitFeedsSettings.UnitScalars.SelfFeeds == 0);
+
         byte[] legacyExe = ScopedTweakPatch.Apply(
             scopedVanilla,
             legacySettings.Command,
@@ -2985,7 +3227,9 @@ internal static class Program
         Check("支援 scope metadata 只公開已完成的 hook",
             ScopedTweakPatch.GetSupportedScopes("gold_production").SequenceEqual(
                 ["selfTownhall", "selfVillage", "enemyTownhall", "enemyVillage"]) &&
-            ScopedTweakPatch.GetSupportedScopes("hero_max_army").Count == 0);
+            ScopedTweakPatch.GetSupportedScopes("hero_max_army").SequenceEqual(["self", "enemy"]) &&
+            ScopedTweakPatch.GetSupportedScopes("all_unit_speed").SequenceEqual(["self", "enemy"]) &&
+            ScopedTweakPatch.GetSupportedScopes("unit_feeds").SequenceEqual(["self", "enemy"]));
 
         var neutralisedLegacyConfig = new TrainerConfig
         {
@@ -3124,6 +3368,26 @@ internal static class Program
                 manifest.Contains("--- 修改器（本次期望設定） ---", StringComparison.Ordinal) &&
                 manifest.Contains("food_fill[F1]", StringComparison.Ordinal) &&
                 !manifest.Contains("實際作弊      food_fill", StringComparison.Ordinal));
+
+            // 廢棄 Tweak 與無效 Tweak 驗證 (ISSUE-050)
+            Check("Tweaks.ById 不包含 wagon_build_time", !Tweaks.ById.ContainsKey("wagon_build_time"));
+            Check("Tweaks.Retired 包含 wagon_build_time", Tweaks.Retired.Contains("wagon_build_time"));
+
+            var retiredConfig = ToolkitConfig.CreateDefault();
+            retiredConfig.Trainer.Enabled = true;
+            retiredConfig.Trainer.Tweaks["wagon_build_time"] = 7000;
+            retiredConfig.Trainer.ScopedTweaks["wagon_build_time"] =
+                new Dictionary<string, decimal>(StringComparer.Ordinal) { ["self"] = 5000 };
+            var retiredApplyResult = verifyPipeline.ApplyAll(verifyTempDir, retiredConfig);
+            Check("PatchPipeline 套用含廢棄 Tweak (wagon_build_time) 的設定時成功（靜默忽略）",
+                retiredApplyResult.Success);
+
+            var bogusConfig = ToolkitConfig.CreateDefault();
+            bogusConfig.Trainer.Enabled = true;
+            bogusConfig.Trainer.Tweaks["totally_bogus_tweak"] = 123;
+            var bogusApplyResult = verifyPipeline.ApplyAll(verifyTempDir, bogusConfig);
+            Check("PatchPipeline 遇到純垃圾 Tweak ID 嚴格 fail-closed 拒絕並回傳 InvalidArgs",
+                !bogusApplyResult.Success && bogusApplyResult.ExitCode == ExitCodes.InvalidArgs);
         }
         finally
         {
@@ -3593,11 +3857,11 @@ internal static class Program
                     .ToArray();
                 JsonElement listedTrain = listedTweaks.Single(t => t.GetProperty("id").GetString() == "train_speed");
                 JsonElement listedHero = listedTweaks.Single(t => t.GetProperty("id").GetString() == "hero_max_army");
-                Check("CLI list-tweaks 公開合法 scope 且不宣稱 hero_max_army 已支援",
+                Check("CLI list-tweaks 公開合法 scope 且確認 hero_max_army 已支援",
                     listedTrain.GetProperty("scopedSupported").GetBoolean() &&
                     listedTrain.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()).SequenceEqual(["self", "enemy"]) &&
-                    !listedHero.GetProperty("scopedSupported").GetBoolean() &&
-                    listedHero.GetProperty("scopes").GetArrayLength() == 0);
+                    listedHero.GetProperty("scopedSupported").GetBoolean() &&
+                    listedHero.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()).SequenceEqual(["self", "enemy"]));
             }
 
             using (var stdout = new StringWriter())
@@ -3605,6 +3869,19 @@ internal static class Program
             {
                 int exitCode = CliHost.Execute(
                     ["trainer", "set", "--scoped-tweak", "hero_max_army.self=100", "--config", configPath, "--json"],
+                    stdout,
+                    stderr);
+                Check("CLI scoped tweak 支援 hero_max_army 並正確寫入設定",
+                    exitCode == ExitCodes.Success &&
+                    ToolkitConfig.Load(configPath).Trainer.ScopedTweaks.TryGetValue("hero_max_army", out var heroMap) &&
+                    heroMap.TryGetValue("self", out decimal selfVal) && selfVal == 100m);
+            }
+
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(
+                    ["trainer", "set", "--scoped-tweak", "hero_maxhealth.self=1000", "--config", configPath, "--json"],
                     stdout,
                     stderr);
                 Check("CLI scoped tweak 拒絕尚未完成 owner-aware hook 的項目", exitCode == ExitCodes.InvalidArgs);
@@ -3648,6 +3925,29 @@ internal static class Program
                 Check("CLI trainer set 拒絕未知調整代號 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
                 var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
                 Check("JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+            }
+
+            // 4b. trainer set 拒絕廢棄的調整代號 (wagon_build_time) -> exit code 2 且回傳 Error_TrainerRetiredTweak
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--tweak", "wagon_build_time=5000", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 拒絕廢棄調整代號 wagon_build_time (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                string expectedErrMsg = Strings.Get("Error_TrainerRetiredTweak", "wagon_build_time");
+                Check("CLI trainer set 回傳 Error_TrainerRetiredTweak 錯誤訊息",
+                    env is not null && !env.Ok && env.Errors.Any(e => e.Contains(expectedErrMsg, StringComparison.Ordinal)));
+            }
+
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--scoped-tweak", "wagon_build_time.self=5000", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set scoped 拒絕廢棄調整代號 wagon_build_time (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
+                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                string expectedErrMsg = Strings.Get("Error_TrainerRetiredTweak", "wagon_build_time");
+                Check("CLI trainer set scoped 回傳 Error_TrainerRetiredTweak 錯誤訊息",
+                    env is not null && !env.Ok && env.Errors.Any(e => e.Contains(expectedErrMsg, StringComparison.Ordinal)));
             }
 
             // 5. trainer set 拒絕超出範圍的 tweak 數值 -> exit code 2
@@ -3810,9 +4110,8 @@ internal static class Program
             grid.Rows.Cast<DataGridViewRow>().Single(row => row.Tag is Tweak tweak && tweak.Id == id);
 
         bool heroVisible = simpleGrid.Rows.Cast<DataGridViewRow>()
-                .Concat(settlementGrid.Rows.Cast<DataGridViewRow>())
                 .Any(row => row.Tag is Tweak tweak && tweak.Id == "hero_max_army");
-        Check("未完成的 hero_max_army 不會出現在任一 scoped grid", !heroVisible);
+        Check("hero_max_army 在簡單 (self/enemy) scoped grid 中可見", heroVisible);
 
         var config = new TrainerConfig { Enabled = true };
         config.ScopedTweaks["train_speed"] = new Dictionary<string, decimal>(StringComparer.Ordinal)
@@ -4049,6 +4348,93 @@ internal static class Program
         }
     }
 
+    private static void TestInGamePanelAndKeyPosting()
+    {
+        // 1. VirtualKeyFor 查表
+        Check("VirtualKeyFor F1 (numpad on)", KeyMap.VirtualKeyFor("F1", numpadKeys: true) == 0x61);
+        Check("VirtualKeyFor F1 (numpad off)", KeyMap.VirtualKeyFor("F1", numpadKeys: false) == 0x70);
+        Check("VirtualKeyFor Add (numpad on)", KeyMap.VirtualKeyFor("Add", numpadKeys: true) == 0x6B);
+        Check("VirtualKeyFor invalid key", KeyMap.VirtualKeyFor("NotAKey", numpadKeys: true) is null);
+
+        // 2. BuildLParam 編碼
+        Check("BuildLParam down non-ext", GameWindow.BuildLParam(0x37, extended: false, keyUp: false) == 0x00370001);
+        Check("BuildLParam up non-ext", unchecked((uint)GameWindow.BuildLParam(0x37, extended: false, keyUp: true)) == 0xC0370001);
+        Check("BuildLParam down ext", GameWindow.BuildLParam(0x53, extended: true, keyUp: false) == 0x01530001);
+
+        // 3. Panel 表單建構（無遊戲時不崩潰、有 Handle、關閉不留常駐）
+        var config = new TrainerConfig { Enabled = true };
+        using var panel = new InGamePanelForm(config);
+        _ = panel.Handle; // 強制建立 handle 驗證 CreateParams
+        Check("InGamePanelForm created", panel.Text.Length > 0);
+
+        // 4. 游標位置類作弊的清單只有這兩個（AGENTS.md §2.9 的唯一來源）
+        Check("CursorPositionCheats 恰為 spawn_unit 與 spawn_item",
+            Cheats.CursorPositionCheats.Count == 2
+            && Cheats.CursorPositionCheats.Contains(Cheats.SpawnUnitId)
+            && Cheats.CursorPositionCheats.Contains(Cheats.SpawnItemId));
+
+        // 5. GameMemory 在對不上時必須拒絕，而不是回傳一個能亂寫的控制代碼。
+        //    pid 0 是 System Idle Process，永遠開不起來。
+        IntPtr h = GameMemory.Open(0, out _, out string? problem0);
+        Check("GameMemory 對無效 pid 拒絕連線", h == IntPtr.Zero && problem0 is not null);
+
+        //    自己這個行程開得起來，但裡面沒有 Celtic kings.exe 模組，必須據此拒絕。
+        uint ownPid = (uint)Environment.ProcessId;
+        IntPtr h2 = GameMemory.Open(ownPid, out _, out string? problem1);
+        Check("GameMemory 對沒有遊戲模組的行程拒絕連線",
+            h2 == IntPtr.Zero && problem1 is not null && problem1.Contains("Celtic kings.exe"));
+
+        // 6. 生成參數對話框的數量／等級上限必須跟著 Cheats 定義走。
+        //    這一列的控制項是為了排版手刻的，範圍曾經寫死在 CheatParamsDialog 裡，
+        //    導致 Cheats.cs 把上限從 50 改成 1000 之後對話框仍然停在 50。
+        CheckSpawnDialogRange(Cheats.SpawnUnitId, "count", 1000);
+        CheckSpawnDialogRange(Cheats.SpawnItemId, "count", 20);
+        CheckSpawnDialogRange(Cheats.SpawnUnitId, "level", 1000);
+
+        // 7. 遊戲速度作弊：倍率必須乘上引擎基準 1000，非法清單要退回出廠值而不是產生空的 if 鏈。
+        var speedCheat = Cheats.ById[Cheats.GameSpeedId];
+        string speedScript = speedCheat.Script("1", new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["speeds"] = "1,10,100",
+        });
+        Check("game_speed 腳本呼叫 SetSpeed", speedScript.Contains("SetSpeed(s);", StringComparison.Ordinal));
+        Check("game_speed 1 倍 = 1000", speedScript.Contains("s = 1000;", StringComparison.Ordinal));
+        Check("game_speed 10 倍 = 10000", speedScript.Contains("s = 10000;", StringComparison.Ordinal));
+        Check("game_speed 100 倍 = 100000", speedScript.Contains("s = 100000;", StringComparison.Ordinal));
+        Check("game_speed 使用每位玩家的環境變數循環",
+            speedScript.Contains("EnvReadInt", StringComparison.Ordinal)
+            && speedScript.Contains("EnvWriteInt", StringComparison.Ordinal));
+
+        string junkScript = speedCheat.Script("1", new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["speeds"] = "abc,0,999999",
+        });
+        Check("game_speed 非法倍率清單退回出廠值", junkScript.Contains("s = 1000;", StringComparison.Ordinal));
+    }
+
+    /// <summary>把對話框實際長出來的 NumericUpDown 上限，跟作弊定義的上限比對。</summary>
+    private static void CheckSpawnDialogRange(string cheatId, string paramName, decimal expectedMax)
+    {
+        var cheat = Cheats.ById[cheatId];
+        var definition = cheat.Parameters.First(p => p.Name == paramName);
+        Check($"{cheatId}.{paramName} 定義上限為 {expectedMax}", definition.Maximum == expectedMax);
+
+        using var dialog = new CheatParamsDialog(cheat, null);
+        _ = dialog.Handle;
+        var spinners = Descendants(dialog).OfType<NumericUpDown>()
+                                          .Where(n => n.Maximum == expectedMax).ToList();
+        Check($"{cheatId} 對話框有上限 {expectedMax} 的 {paramName} 欄位", spinners.Count > 0);
+    }
+
+    private static IEnumerable<Control> Descendants(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+            foreach (var grandChild in Descendants(child)) yield return grandChild;
+        }
+    }
+
     #region Fixture Helpers
 
     private static bool ContainsSequence(byte[] haystack, byte[] needle) =>
@@ -4171,6 +4557,12 @@ internal static class Program
         int scopedOwnerScalarOff = (int)(ScopedTweakPatch.OwnerScalarSiteVa - 0x00400000);
         ScopedTweakPatch.OwnerScalarOriginal.CopyTo(
             pe.AsSpan(scopedOwnerScalarOff, ScopedTweakPatch.OwnerScalarOriginal.Length));
+        int scopedSpeedOff = (int)(ScopedTweakPatch.SpeedSiteVa - 0x00400000);
+        ScopedTweakPatch.SpeedOriginal.CopyTo(
+            pe.AsSpan(scopedSpeedOff, ScopedTweakPatch.SpeedOriginal.Length));
+        int scopedFeedsOff = (int)(ScopedTweakPatch.FeedsSiteVa - 0x00400000);
+        ScopedTweakPatch.FeedsOriginal.CopyTo(
+            pe.AsSpan(scopedFeedsOff, ScopedTweakPatch.FeedsOriginal.Length));
 
         return pe;
     }

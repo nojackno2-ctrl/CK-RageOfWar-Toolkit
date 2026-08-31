@@ -200,6 +200,22 @@ public sealed class CheatParamsDialog : Form
         return panel;
     }
 
+    /// <summary>
+    /// 從作弊自己的 <see cref="CheatParam"/> 定義取出範圍與預設值。
+    ///
+    /// 這一列的「數量」與「初始等級」不是由通用參數迴圈產生的，是為了排版另外手刻的
+    /// 控制項；早先它們的 Minimum/Maximum 直接寫死在這裡，結果改了 Cheats.cs 的上限
+    /// 對話框卻不動（生成單位上限從 50 提高到 1000 時就是這樣）。範圍一律回頭問定義，
+    /// 才不會有第二份會過期的來源。
+    /// </summary>
+    private (decimal Min, decimal Max, decimal Default) RangeOf(string paramName, decimal fallbackDefault)
+    {
+        var def = _cheat.Parameters.FirstOrDefault(p => p.Name == paramName);
+        if (def is null) return (1, 1, fallbackDefault);
+        decimal value = Convert.ToDecimal(def.Default, CultureInfo.InvariantCulture);
+        return (def.Minimum, def.Maximum, Math.Clamp(value, def.Minimum, def.Maximum));
+    }
+
     private Control BuildSpawnUnitContent()
     {
         bool isZh = Strings.IsChinese;
@@ -229,18 +245,19 @@ public sealed class CheatParamsDialog : Form
             Font = new Font(Font, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
         };
+        var countRange = RangeOf("count", 5);
         var countNum = new NumericUpDown
         {
-            Minimum = 1,
-            Maximum = 50,
-            Value = 5,
-            Width = 65,
+            Minimum = countRange.Min,
+            Maximum = countRange.Max,
+            Value = countRange.Default,
+            Width = 75,
             Margin = new Padding(0, 1, 16, 0),
         };
         if (_parameters.TryGetValue("count", out string? countStr) &&
             int.TryParse(countStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int cVal))
         {
-            countNum.Value = Math.Clamp(cVal, 1, 50);
+            countNum.Value = Math.Clamp(cVal, countRange.Min, countRange.Max);
         }
         _inputControls["count"] = countNum;
 
@@ -251,18 +268,19 @@ public sealed class CheatParamsDialog : Form
             Font = new Font(Font, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
         };
+        var levelRange = RangeOf("level", 1);
         var levelNum = new NumericUpDown
         {
-            Minimum = 1,
-            Maximum = 1000,
-            Value = 1,
-            Width = 70,
+            Minimum = levelRange.Min,
+            Maximum = levelRange.Max,
+            Value = levelRange.Default,
+            Width = 75,
             Margin = new Padding(0, 1, 16, 0),
         };
         if (_parameters.TryGetValue("level", out string? levelStr) &&
             int.TryParse(levelStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int lVal))
         {
-            levelNum.Value = Math.Clamp(lVal, 1, 1000);
+            levelNum.Value = Math.Clamp(lVal, levelRange.Min, levelRange.Max);
         }
         _inputControls["level"] = levelNum;
 

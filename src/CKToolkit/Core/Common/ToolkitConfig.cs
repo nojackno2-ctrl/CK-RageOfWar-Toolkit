@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
@@ -175,8 +176,31 @@ public sealed class ToolkitConfig
 
     public static ToolkitConfig CreateDefault() => new();
 
-    public static ToolkitConfig FromJson(string json) =>
-        JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+    public static ToolkitConfig FromJson(string json)
+    {
+        var config = JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+        CleanRetiredTweaks(config);
+        return config;
+    }
+
+    private static void CleanRetiredTweaks(ToolkitConfig config)
+    {
+        if (config.Trainer == null) return;
+        if (config.Trainer.Tweaks != null && config.Trainer.Tweaks.Count > 0)
+        {
+            foreach (string retired in Tweaks.Retired)
+            {
+                config.Trainer.Tweaks.Remove(retired);
+            }
+        }
+        if (config.Trainer.ScopedTweaks != null && config.Trainer.ScopedTweaks.Count > 0)
+        {
+            foreach (string retired in Tweaks.Retired)
+            {
+                config.Trainer.ScopedTweaks.Remove(retired);
+            }
+        }
+    }
 
     public string ToJson() =>
         JsonSerializer.Serialize(this, JsonOpts);

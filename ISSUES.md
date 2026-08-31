@@ -57,12 +57,59 @@
 | [ISSUE-046](#issue-046-設定內容錯誤會讓-apply-以未處理例外中止並留下半套用的遊戲) | **設定內容錯誤會讓 `apply` 以未處理例外中止並留下半套用的遊戲** | ⏳ 待實測 | 傳入未知作弊代號或極端異常參數執行 apply。 | 最外層例外邊界攔截並回傳合規 JsonEnvelope 錯誤，零磁碟寫入。 |
 | [ISSUE-051](#issue-051-新功能仍使用已發布的-v103-版本識別) | **新功能仍使用已發布的 v1.0.3 版本識別** | ⏳ 待實測 | 建置後檢查 CLI `version --json`、GUI 標題與新 tag。 | 三處版本皆為 1.0.4，發布工作流只接受 `v1.0.4` tag。 |
 | [ISSUE-052](#issue-052-cktw-與-ckhr-複合反轉順序缺少交叉回歸測試) | **`.cktw` 與 `.ckhr` 複合反轉順序缺少交叉回歸測試** | ⏳ 待實測 | 同時套用 scoped tweaks 與 HiRes 1920，重套、更新後 RestoreAll。 | Group 41 證明五檔逐位元還原，竄改 hook 仍拒絕反轉。 |
+| [ISSUE-050](#issue-050-wagon_build_time-只改寫無任何讀取者的-vxconst-常數已安全廢棄並移除) | **`wagon_build_time` 已判定無引擎路徑並移除** | ⏳ 待實測 | 用含舊 `wagon_build_time` 的既有設定檔升級後執行 apply／修改器頁操作。 | apply 不因殘留舊鍵失敗、設定檔自動移除該鍵；修改器清單不再出現「運輸車建造時間」。 |
+| [ISSUE-054](#issue-054-筆電無小鍵盤又不使用-f1f12-時修改器幾乎無鍵可綁) | **筆電無小鍵盤又不使用 F1~F12 時，修改器幾乎無鍵可綁** | ⏳ 待實測 | 點擊修改器頁「遊戲中面板」或開啟置頂面板，在遊戲中點擊面板作弊按鈕。 | 遊戲視窗接收到對應鍵碼並觸發作弊，視窗不搶焦點，關閉後無殘留常駐。 |
+| [ISSUE-055](#issue-055-面板代按熱鍵時-mouseptm-快取已被游標移動蓋掉生成位置錯誤) | **面板代按熱鍵時生成位置錯誤** | ⏳ 待實測 | 把地圖捲到目標位於畫面中央，開啟面板點「在滑鼠位置生成單位」；另測數量設為 1000。 | 單位生成在畫面中央而不是面板邊緣，面板顯示「已生成於 (x, y)」；游標瞬間歸位；面板可縮放。 |
+| [ISSUE-056](#issue-056-修改器缺少遊戲速度調整) | **修改器加入遊戲速度調整** | ⏳ 待實測 | 面板速度欄填 5 按「套用」；另啟用「循環切換遊戲速度」作弊後連按其熱鍵。 | 速度即時變化，面板顯示結果訊息；循環作弊依序切換 1/2/5/10 倍並在畫面印出目前倍率。 |
+| [ISSUE-057](#issue-057-未設定的-unit_feeds-與-hero_max_army-仍被寫進-cktw-並強制單位進食) | **未設定的 `unit_feeds`／`hero_max_army` 仍被寫進 `.cktw` 並強制單位進食** | ⏳ 待實測 | 開啟修改器但不調任何數值，用 GUI 存檔後 apply；再進遊戲觀察狼／熊等動物與運輸車。 | EXE 不含 `.cktw` 節區（`verify` 判定 vanilla）；動物與運輸車不會挨餓或掉血，行為與原版一致。 |
 
 ---
 
 ## 3. 🔴 未修復／進行中調查清冊 (Open Issues)
 
 > 說明：以下為目前已知、尚未完全修復或正在進行深入逆向工程調查之問題項目。
+
+---
+
+### ISSUE-058: 聚落容量與初始金錢 tweak 走 scoped 路徑後不再只影響新建聚落
+
+- **問題編號**: `ISSUE-058`
+- **發現日期**: 2026-08-31
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `townhall_maxgold`／`townhall_maxfood`／`townhall_max_population`／`townhall_start_gold`／`village_maxgold`／`village_maxfood`／`village_max_population` 這七項在 GUI 的名稱都帶著「（僅限新建聚落）」，說明文字也重述了 `MapPlacedSettlementNote`。該限制只對舊的 data.pak 路徑成立。
+  - 這七項同時也在 `ScopedTweakPatch.SupportedScopes` 內。一旦被調成非原廠值（或有任何明確 scoped 值），`ShouldRouteToScopedPatch` 會把它整項改走 `.cktw`，class XML 不再被改寫，於是標籤與實際行為對不上：同一個數字，換路徑後影響範圍變大。
+- **逆向分析與根因**:
+  - 舊路徑改的是 `BASETOWNHALL.SC.XML`／`BASEVILLAGE.SC.XML` 的 `settlement_maxgold` 等屬性，只有建構子讀得到，所以地圖／戰役預先擺好的聚落不受影響。
+  - scoped 路徑則是在 gold income helper 進入時（該處仍持有 `EAX=resource*`、`ESI=central building*`）以 `owner*2+type` 索引更新 resource object `+0x0C/+0x10` 與中央建築 `+0x3A`，每個 income tick 都會重寫，因此**連地圖擺好的聚落也會被改**。這是 §4.1 刻意設計的行為（capacity disabled 時完全不寫，才保留戰役地圖 override），不是實作缺陷。
+  - `townhall_start_gold` 的落差方向相反：scoped 路徑只 hook `0x0050132E`，該站僅在 constructor 收到 current-gold override `-1` 時執行，地圖／存檔傳入明確值會繞過。
+- **驗證狀態與實測指引**:
+  - 需要決定產品行為再改字串，不是單純改標籤：(a) 保留現狀但把「僅限新建聚落」改成分路徑敘述；(b) 讓 scoped 路徑也只作用於新建聚落，以維持與舊行為一致。目前傾向 (a)，因為 scoped 路徑的涵蓋範圍其實是使用者要的。
+  - 實測要點：在戰役地圖上調高 `townhall_maxgold` 後確認**已存在**的城鎮容量有無變化，並確認關閉該值後回到原版容量。
+
+---
+
+### ISSUE-053: 遊戲保留按鍵表漏列 F2／F3／Del／Ins，原版模式預設綁定直接撞到存讀檔
+
+- **問題編號**: `ISSUE-053`
+- **發現日期**: 2026-08-31
+- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **問題現象**:
+  - `Cheats.GameReservedKeys` 只收了 `F1`／`F5`~`F10`（來源是 `data/interface/cmdbar/*.ini` 的 HelpText），但遊戲自己的說明清單還用了 `F2`（存檔）、`F3`（讀檔）、`Ins`／`Del`（依經驗值選取 50% 單位）。
+    - 因此 `DescribeConflict` 對這四顆鍵回報「無衝突」，`FreeKeys(false)` 宣稱原版模式有 8 顆自由鍵，實際只有 `F4`／`F11`／`F12`／`Backspace` 4 顆。
+    - 更嚴重的是原版模式的出廠預設正好踩在上面：`Cheats.cs:409` (`F2`)、`:415` (`F3`)、`:488` (`Del`)、`:516` (`Ins`)。使用者關掉小鍵盤模式後，按存檔就會觸發作弊。
+- **逆向分析與根因**:
+  - 完整清單來自遊戲內建說明 "General shortcuts" 段（`assets/langpacks/*/help.json`，30 種在地化一致）：
+    `Space`（地圖）、`Tab`（跳到最近通知）、`` ` ``（血條）、`/`（分數）、`Esc`、`Enter`（聊天／主控台）、
+    `F1` `F2` `F3` `F5` `F6` `F7` `F8` `F9` `F10`、`Pause` `+` `-` `*`（速度）、
+    `Digit 1-9`（叫回編隊，`Ctrl+Digit` 記憶編隊）、`Home` `Page Up` `Page Down` `Insert` `Delete`（選取過濾）。
+    - 另從 `data.pak` 內各介面 ini 的 `key="x"` 掃出單位指令熱鍵佔用 23 個字母：
+      `a b c d e f g h i j k l m n o p r s t u v w x`，只剩 `q` `y` `z` 沒被用。
+  - 引擎的 scdebug 派送只比對虛擬鍵碼、完全不看修飾鍵，所以 `Ctrl+1` 送進來的仍是 `VK_1`，
+    數字列 1~9 一旦綁上作弊，連編隊都會誤觸——數字列整排不可用。
+- **驗證狀態與實測指引**:
+  - 需補齊 `GameReservedKeys`（至少加入 `F2`／`F3`／`Ins`／`Del`），並重新指派原版模式的預設鍵。
+    - 補齊後原版模式自由鍵只剩 4 顆，`FreeKeys` 的數量註解與 GUI 提示文字要一併更新。
 
 ---
 
@@ -164,6 +211,14 @@
   - 2026-08-27 目前 `.cktw` 為 9-hook／61-config，並已接通向後相容的 `trainer.scopedTweaks` JSON 與 CLI：`trainer set --scoped-tweak <id>.<scope>=<value>` 可保存目前 18 個已完成 hook 的明確值，`trainer list-tweaks --json` 會回報 `scopedSupported`／合法 `scopes`。明確值優先，缺少 scope 回退舊單值再回退原版；未知／未支援 ID、未知 scope 與超界值均在五檔寫入前拒絕。
   - scoped-only 設定已驗證只進 `.cktw`，不會另寫共享 `data.pak`；Release build 0 warning／0 error、完整 SelfTest 40 組全綠。
   - 2026-08-28 GUI scoped 編輯器完成：修改器頁新增「敵我／聚落分流」子分頁，只列出 18 個有 hook 的 ID（自動分成 self/enemy 單值表與四聚落 scope 表），`hero_max_army` 等未完成 ID 完全不產生可儲存的列；欄位空白或等於「原始值」不落盤，明確值寫入 `trainer.scopedTweaks`。SelfTest Group 40 覆蓋 TrainerPage handle、14 個 scoped i18n key 的 en／zh-TW／zh-CN 非空翻譯、`train_speed`／`gold_production` round-trip、fallback scope 不落盤、超界值拒絕與未完成 ID 隱藏；Debug build 與 SelfTest 全綠。這仍只是本地／合成證據，未改變 ISSUE-049 的 🔴 狀態。
+  - **2026-08-31 英雄 `max_army` 的 heap overflow 死結已解開**：先前擱置的理由是 `max_army` 在 instance `+0x198`（byte 408..411），而通用 `Object::SetPlayer` hook `0x004F479D` 會流經最小僅 352 bytes 的物件，無條件寫入必然越界。解法不是去找「只有 Hero 會走到的呼叫路徑」（那條路已證明追不出排他性），而是在共用路徑上加一道**靜態可證明的 vtable 閘門**。證據（全部以 rizin 對真實原版 EXE `86FC9F80…` 逐位元組複驗）：CVXHero 主 vtable 為 `0x00709C28`，全檔 3,516,344 bytes 只有三處寫入該常數，且三處全屬 CVXHero —— 工廠 `0x00489328`（`C7 06 28 9C 70 00`）、建構子 `0x004E2387`（同）、解構子 `0x004E24C9`（`C7 07 28 9C 70 00`）；raw byte scan 找到的三個 file offset 561962／926601／926923 換算 VA 後與這三處精確吻合，無第四處。`+0x198` 確為 max_army 由存檔序列化決定性證明：`0x004E47FA` push 字串 `"maxarmy"`、`0x004E47FF` `lea ecx,[edi+0x198]`；活躍讀取者為 `0x004E2A42` `cmp ecx,[eax+0x198]` 與 `0x0050BCD7` `mov eax,[ebx+0x198]`，非死欄位。英雄物件容量充足：工廠 `0x0048931E` 寫 `word [esi+0x1A8]`、建構子 `0x004E23DE` 寫 `dword [esi+0x1AA]`。hook 點 `[esi]` 必為有效 vtable：原廠自己在 `0x004F477D` 執行 `call dword [eax+0xA0]`。
+  - 實作已併入既有 owner-scalar helper（33 bytes）：`mov eax,[ebx*4+cfg+244]` → `test eax,eax` → `jz done`（0 = 未設定，保持原版）→ `cmp dword [esi],0x00709C28` → `jne done` → `mov [esi+0x198],eax`。**這是絕對值寫入，不做 Q16.16 縮放** —— `hero_max_army` 是 `AttrTweak`（原廠 50、範圍 1..2000），與血量／攻防／視野的倍率語意不同。0 作為「未設定」哨兵是安全的（合法值不含 0），且該哨兵在 `TryBuildSettings` 的本地 `HeroMaxArmy(scope)` 函式內處理，**不得**改動共用的 `GetScopedFallbackValue`：後者對 `gold_production` 的 `*Village`、`food_production` 的 `*Townhall` 必須回傳 0（原版村莊不產金、要塞不產食），繞過它會讓只有舊單值的使用者村莊憑空產金。此回歸已補測試「舊單值遷移不得把生產值外溢到另一個聚落類型」與「未設定 `hero_max_army` 時 scoped payload 維持 0 哨兵」。
+  - **2026-08-31 unit `speed` 與 `feeds` 亦完成**，兩者各自新增獨立 hook：
+    - `all_unit_speed`（`MultiplierTweak`，Q16.16 倍率）hook 於 `0x0050C8BE`，原始 6 bytes `F7 B9 F4 00 00 00` = `idiv dword [ecx+0xF4]`。上下文 `0x0050C8AE mov ecx,[esi+0x3A]` 取 class、`esi` 為 unit instance（可經 `+0x6E` 取 owner）。class `+0xF4` 在此是**除數**（值越大移動越快），因此倍率套用在除數上，與直接縮放 XML `speed` 屬性等價。helper 必須先把 `EDX:EAX` 被除數壓堆疊才能做 `mul`，算完 `pop edx; pop eax` 還原後才 `idiv ebx`；含溢位保護（`cmp edx,0x10000; jae`）與除零保護（`test eax,eax; jz`），任一 fail-closed 條件成立即使用原版除數。
+    - `unit_feeds`（`AttrTweak`，範圍 0..1 的布林）hook 於 `0x0050B3DA`，原始 10 bytes `F7 85 38 01 00 00 00 00 02 00` = `test dword [ebp+0x138],0x20000`，位於 `CVXUnit::ProcessFood`（`0x0050B3D0`，`0x0050B3D8 mov ebp,ecx` 證實 thiscall、`ebp` 必為 unit）。instance `+0x138` bit 17 的語意由原廠建構子 `0x0050A9D7 mov ecx,[eax+0x29C]`（class feeds）後 `and eax,0xFFFDFFFF` ／ `or eax,0x20000` 決定。**刻意不採用「併進 `0x004F479D` owner-scalar helper」的作法**：那條共用路徑上流過建築與聚落子物件，而 `+0x138` 只在 `CVXUnit` 被證實是 feeds 欄位，對其他物件翻該位元沒有證據支持。設定採三態（0=保持原版、1=不進食、2=進食），沿用與 `hero_max_army` 相同的本地哨兵函式。
+    - 此 hook 的 EFLAGS 契約與其他 helper 相反：原廠 `test` 產生的 ZF 必須活到 `0x0050B3EA` 的 `je 0x0050BAEC`（中間 `push esi`／`push edi`／`mov` 均不影響旗標），因此 helper **不得**用 `pushfd`／`popfd` 收尾，而是以 `pop edx; pop ecx; test eax,eax; ret` 讓最後一條影響旗標的指令產生正確 ZF（ZF=1 = 不進食）。EAX 在該處確認為死值：未採用路徑於 `0x0050B407 xor eax,eax` 先寫後讀，採用路徑 `0x0050BAEC` 直接進 epilogue。
+  - `.cktw` 現為 **11 hooks / 67 config**（版面：speed helper @2688、feeds helper @3072、config @4096）。兩個新 helper 已由 `rz-asm` 自實際產物完整反組譯：speed helper 8 個條件跳轉全部收斂於單一 `use_base`、feeds helper 三態分支與 fallback 均落在合法指令邊界。Release build 0 warning／0 error；完整 SelfTest 41 組、782 個斷言全綠。對真實原版 EXE 做純記憶體 Apply／Reverse（11 hooks、67 欄全部給非原廠值）：3,516,344 → 3,526,656 bytes，反轉後逐位元組相同、SHA-256 仍為 `86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`，遊戲目錄零寫入。
+  - 仍未完成因而維持 🔴：GaulPower／RomanPower 種族倍率（無反組譯證據，明確擱置）、`hero_maxhealth`／`hero_speed`／`hero_sight` 等英雄專屬絕對值（現已可用同一 vtable 閘門技術解，但尚未實作）、`hero_health_per_level`／`hero_exp_divider`（§4.3，尚未定位 owner-aware 計算點）。`wagon_build_time` 見 ISSUE-050，已判定引擎無可用路徑並正式廢棄移除。
 - **完成標準**:
   - 建立向後相容的 scoped-tweak 設定格式；舊版單一值遷移時必須同時套到我方與敵方，保持既有行為。
   - 每個 UI 可選欄位均必須有真實 owner-aware 引擎路徑、已知原始位元組、偵測簽章與精確反轉；未完成 hook 的項目不得先露出可儲存的假控制項。
@@ -173,10 +228,143 @@
 
 ---
 
-### ISSUE-050: `wagon_build_time` 只改寫無任何讀取者的 VXCONST 常數
+## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
+
+> 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+
+---
+
+### ISSUE-056: 修改器缺少遊戲速度調整
+
+- **問題編號**: `ISSUE-056`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 使用者要求修改器加入遊戲速度調整，且必須能在面板中動態調整，而不只是熱鍵循環。
+- **逆向分析與根因**:
+  - 一度考慮直接寫記憶體，實際反組譯後判定**不可行**：
+    `SetSpeed` 的 handler 在 .text VA `0x00595530`，它不把值存進變數，而是配置一個
+    0x10 位元組的命令物件（vtable `0x0070BEF4`）、把速度放進 `[obj+0xC]`，
+    再經 `[[0x008AA6C8]+0xCD0]` 丟進 `0x0056FE10` 的命令佇列（RTS 為連線／重播
+    決定性的典型設計）。`GetSpeed`（VA `0x005955B0`）讀的 `[[0x008AA6C8]+0xC58]` 只是結果。
+  - 直接寫那個位址會繞過引擎自己的簿記，值不會真的改變節奏。因此速度一律讓引擎自己執行
+    `SetSpeed(n)`，**不擴張 AGENTS.md §2.9 的記憶體存取範圍**。
+- **修復方案與實作細節**:
+  - 新增作弊 `game_speed`「循環切換遊戲速度」：按一下切到清單裡的下一個倍率
+    （可選 1/2/3/5/10/20/50/100，出廠 `1,2,5,10`），沿用 `EnvReadInt`／`EnvWriteInt`
+    的每位玩家環境變數循環慣用法。腳本產生 `SetSpeed(n * 1000)`——引擎原生基準是 1000。
+    預設關閉，`defaultKey: "Mul"`／`numpadKey: "Ins"`（`Ins` 是小鍵盤模式僅剩的空槽之一）。
+  - 面板加入速度列：數值 1~100 加「套用」按鈕，走既有的
+    `Core/Perf/GameSpeed`（主控台路徑，引擎自己執行 `SetSpeed`）。
+    1 倍走 `GameSpeed.Restore`——`Apply` 對 1 以下是 no-op，那是分析器「只加速」的語意。
+  - SelfTest 新增 6 項：腳本含 `SetSpeed(s);`、1/10/100 倍分別等於 1000/10000/100000、
+    使用環境變數循環、非法倍率清單退回出廠值而不是產生空的 if 鏈。
+- **實機驗收結果與紀錄**:
+  - 待使用者實機確認：面板套用是否即時生效、主控台輸入列痕跡是否可接受、
+    循環作弊是否正確依序切換、高倍率下是否觸發 ISSUE-005 的模擬端卡頓。
+
+---
+
+### ISSUE-055: 面板代按熱鍵時 MousePtm 快取已被游標移動蓋掉，生成位置錯誤
+
+- **問題編號**: `ISSUE-055`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 使用者實機確認 ISSUE-054 的面板可用之後回報：「在滑鼠位置生成單位」生成的位置不對。
+- **逆向分析與根因**:
+  - `MousePtm()` 的 handler 在 .text VA `0x005CBD40`，**不呼叫 `GetCursorPos`**，
+    只是把 `[[0x008AAB80] + 0x20]` 這 8 個位元組（x/y）推進 VM 堆疊：
+
+    ```asm
+    005CBD40  a1 80 ab 8a 00   mov eax, [0x008AAB80]
+    005CBD45  8d 48 20         lea ecx, [eax + 0x20]
+    005CBD4F  8b 31            mov esi, [ecx]
+    005CBD59  83 00 08         add dword ptr [eax], 8
+    ```
+
+  - 那是由滑鼠移動訊息更新的快取。游標從目標點移到面板按鈕的路上會經過遊戲畫面，
+    一路更新該快取，按下按鈕時讀到的是面板邊緣的座標。
+  - 只有 `spawn_unit` 與 `spawn_item` 使用 `MousePtm()`，其餘作弊不受影響。
+- **修復方案與實作細節**:
+  - 新增 `Core/Runtime/GameMemory.cs`：對遊戲行程做 8 位元組的
+    `ReadProcessMemory`／`WriteProcessMemory`（AGENTS.md §2.9 的唯一例外）。
+    不注入 DLL、不改任何指令、不碰磁碟。
+  - **生成位置固定為遊戲畫面中央**（使用者決定，2026-08-31；先前的「游標停留選點」
+    方案已捨棄，因為對使用者而言捲動地圖比停留選點直覺得多）。
+    按下按鈕時把游標暫移到畫面中央讓引擎自行換算，取樣到穩定值後游標立刻歸位，
+    再把取樣值寫回快取釘住才送鍵——歸位本身會產生一次滑鼠移動並蓋掉快取，
+    所以順序必須是「歸位 → 寫回 → 送鍵」。
+  - 生成單位的數量上限由 50 提高到 1000（使用者決定，2026-08-31）；
+    生成物品維持 20 不變（使用者決定，2026-08-31）。
+    超規格風險沿用既有的風險橫幅告知，不另設限。
+  - **連帶修掉一個既有缺陷**：`CheatParamsDialog` 的「每次生成數量」與「初始等級」
+    是為了排版手刻的控制項，Minimum/Maximum 直接寫死在對話框裡，沒有讀
+    `CheatParam` 定義。因此改了 `Cheats.cs` 的上限，對話框仍然停在 50
+    （使用者實測截圖確認）。已改為一律回頭問定義（`RangeOf`），
+    並在 SelfTest 加入「對話框實際長出來的 NumericUpDown 上限必須等於定義上限」
+    的回歸測試，涵蓋 spawn_unit.count=1000、spawn_item.count=20、spawn_unit.level=1000。
+  - 寫入前核對 `MousePtm` handler 開頭 `A1 80 AB 8A 00 8D 48 20` 與全域指標合理性；
+    對不上就整條路徑停用，退回 3 秒倒數模式（倒數期間使用者自行把游標移到目標）。
+  - 位址一律以目標行程模組基底換算，不寫死絕對位址。
+  - 面板同時改為可縮放（`SizableToolWindow`，最小 150x120），按鈕容器改用單欄
+    100% 寬的 `TableLayoutPanel`，按鈕隨視窗伸縮。
+  - Release build 0 警告 0 錯誤；SelfTest Group 42 擴充至 10 項全綠，
+    含 `CursorPositionCheats` 清單、`GameMemory` 對無效 pid 與無遊戲模組行程的拒絕路徑。
+- **實機驗收結果與紀錄**:
+  - 待使用者實機確認：生成位置是否等於畫面中央、游標是否瞬間歸位、
+    數量 1000 是否能承受、面板縮放是否正常、關閉面板後是否無殘留。
+
+---
+
+### ISSUE-054: 筆電無小鍵盤又不使用 F1~F12 時，修改器幾乎無鍵可綁
+
+- **問題編號**: `ISSUE-054`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 現有兩種模式對筆電都不成立：小鍵盤模式把 12 個作弊搬到筆電沒有的實體鍵上；
+    原版模式在補齊 ISSUE-053 之後只剩 `F4`／`F11`／`F12`／`Backspace`，而筆電的 F 鍵通常還要壓 Fn。
+- **逆向分析與根因**:
+  - 根因是引擎只認 20 個硬編按鍵 id 且不看修飾鍵，無論怎麼重新對應都是在同一個小池子裡搬。
+  - 可行的出路（依成本排序）：
+    1. **代按熱鍵**：由工具用 Win32 訊息把已綁定的鍵碼送進遊戲，使用者改點面板按鈕。
+       `Celtic kings.exe` 匯入表無 DirectInput、無 `GetAsyncKeyState`，只有
+       `PeekMessageA`／`RegisterClassA`／`DefWindowProcA`／`SetCapture`／`GetKeyState`，
+       輸入是古典訊息式，posted message 理論上收得到。
+    2. **遊戲內嵌面板**：引擎無 GPU 路徑，整個畫面經單一 `GDI32!SetDIBitsToDevice`
+       （`.text` VA `0x0044F536`）輸出，CKPerf 已 hook 該 IAT slot（`frames.cpp`），
+       可在同一個 HDC 上繪製；滑鼠靠 subclass WndProc 攔截即可不外洩給遊戲。
+    3. **直接呼叫腳本編譯器** `0x005E0340`（主控台按 Enter 那條路徑），
+       完全繞開 scdebug.xml 與 `KeyMap` 的 exe 補丁，20 鍵上限隨之消失。
+- **驗證狀態與實測指引**:
+  - 已新增 `tools/trainer/postmessage_probe.py`（tools/ oracle，不參與建置），
+    以 `post`／`send`／`char`／`sendinput`／`keybd` 五種送法對遊戲視窗代按指定鍵碼，
+    用來把「通道不通」與「作弊根本沒綁到」區分開。
+  - **路線 1（代按熱鍵）已實機驗證通過（2026-08-31）**：
+    - 測試當下遊戲是 Steam 重裝後的原版狀態（exe 按鍵表 `F1` imm 仍是 `0x70`、
+      `data.pak` 的 scdebug.xml 只有原廠 `Add`／`Sub`／`Pause`／`Tab`／`Mul` 五筆），
+      所以改用原廠綁定的 `Mul`（極速切換，VK `0x6A`）測試——它走的是完全相同的派送路徑。
+    - `PostMessageW(WM_KEYDOWN/WM_KEYUP, 0x6A, lParam=0x00370001/0xC0370001)`
+      兩次皆回傳 1、`GetLastError=0`，使用者實機確認遊戲速度確實切換。
+    - **關鍵：送出當下遊戲並非前景視窗，引擎照樣處理了。**
+      面板因此不需要 `SetForegroundWindow`、不需要搶焦點、不需要注入 DLL。
+    - 目標視窗：類別 `OSWndClass`、標題 `Celtic`，同 pid 另有兩個 IME 輔助視窗
+      （`MSCTFIME UI`／`IME`，client 皆為 0x0），選窗邏輯必須排除它們。
+  - **程式碼修復完成（2026-08-31）**：
+    - 實作 `src/CKToolkit/Core/Runtime/GameWindow.cs`（Win32 P/Invoke、視窗列舉、lParam 位元編碼、`PostKey`）。
+    - 實作 `src/CKToolkit/Core/Trainer/KeyMap.cs` 中的 `VirtualKeyFor` 查表。
+    - 實作 `src/CKToolkit/Gui/InGamePanelForm.cs`（`WS_EX_NOACTIVATE` 置頂不搶焦點工具面板，動態產生作弊按鈕與連線狀態燈號）。
+    - 整合於 `TrainerPage.cs`（「遊戲中面板」按鈕）與 `MainForm.cs`（開關控制與非模態顯示）。
+    - 新增 SelfTest Group 42 `InGamePanelAndKeyPosting` 測試鍵碼映射、lParam 編碼與 Panel 表單建構。
+  - 待實機測試：在遊戲執行中開啟面板，點擊作弊按鈕驗收作弊觸發與焦點狀態。
+
+---
+
+### ISSUE-050: `wagon_build_time` 只改寫無任何讀取者的 VXCONST 常數，已安全廢棄並移除
 - **問題編號**: `ISSUE-050`
 - **發現日期**: 2026-08-24
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
 - **問題現象**:
   - `Tweaks.cs` 把 `wagon_build_time` 實作成 `VXCONST.INI` 的 `WagonBuildTime`，UI／CLI 會接受並寫入 marker，但調整後不會改變騾車建立時間。
 - **逆向證據**:
@@ -184,15 +372,18 @@
   - `Settlement::CreateMuleFood/Gold` 的 VS handler 位於 `0x00517430`／`0x00517630`，共同呼叫 `0x00517010` 直接建立騾車，沒有等待 `WagonBuildTime`。
   - `0x005171A0` 所讀的 VXCONST key 是 `MinResQtyToTransport`，用途是最低運輸資源量，不是建立時間。
   - `COMMANDS.XML` 的 `createfoodmule1/2`、`creategoldmule1/2` 四個指令均沒有 `execdelay`。
-- **修復方向**:
-  - 在 `ISSUE-049` scoped command hook 中替四個建立騾車指令建立真正的 per-owner delay 路徑，或移除這個無效 Tweak；在取得可驗證的引擎路徑前不得繼續顯示為可用永久設定。
-  - 增加測試，證明每個永久 Tweak 不只改到檔案，還有對應的引擎讀取／hook manifest。
-
----
-
-## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
-
-> 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+  - **2026-08-31 追加調查，判定引擎無可用路徑（NO-GO）**：四個 create-mule 指令的 definition `+0xD1`（immediate）為 1，命令分派在 `0x00555328 mov al,[esi+0xD1]` 讀取該旗標後，於 `0x00555340 call dword [eax+0x6C]` 直接在當前 frame 同步分派，**完全不進入物件命令佇列**，因此執行期不會流經既有的 owner-aware delay hook `0x004FB6AB`（該處是駐列命令的延遲讀取點）。聚落端 `0x00517010` 亦為純同步建立：扣資源 → 配置 CVXWagon → 設定載重 → 指派 owner（`0x00517088 mov eax,[eax+0x90]` 取 `Settlement+0x90` owner 指標）→ 生成至地圖，全程沒有任何 timer、cooldown 或延遲狀態機可供利用。上述位址均已用 rizin 對真實原版 EXE 複驗。
+  - 三條替代方案均不可行：改 XML 旗標成非 immediate 會破壞 VS 腳本回傳 handle 的契約與多人資料一致性；在同步函式內阻塞會凍結主迴圈；在 `.cktw` 自建非同步計時佇列則無法序列化進存檔，且聚落被佔領／摧毀時會產生懸空指標。
+- **修復方案與實作細節**:
+  - **`Tweaks.cs`**：將 `wagon_build_time` 自 `All` 移除，加入 `Tweaks.Retired` 靜態白名單集合。
+  - **`ToolkitConfig.cs`**：`FromJson` 反序列化末尾自動自 `Trainer.Tweaks` 與 `Trainer.ScopedTweaks` 清理 `Tweaks.Retired` 項目，避免舊設定檔升級時造成無效資料反覆落盤。
+  - **`PatchPipeline.cs`**：`ValidateConfig` 遇到 `Tweaks.Retired` 項目靜默略過（continue），維持舊設定檔套用相容性；非白名單之未知 ID 仍維持 fail-closed 拒絕。
+  - **`CliHost.cs`**：`trainer set --tweak` 與 `--scoped-tweak` 若指定已廢棄 ID，明確報錯 `Error_TrainerRetiredTweak` 並傳回 `ExitCodes.InvalidArgs` (2)。
+  - **`I18n`**：三語字典同步新增 `Error_TrainerRetiredTweak`（zh-TW / zh-CN / en）。
+  - **`ScopedTweakPatch.cs`**：保留 `CommandSettings` 欄位與 cfg+16/cfg+20 位移以維護二進位結構佈局與 `ConfigCount = 67`，並註記為廢棄保留位。
+  - **`SelfTest`**：Group 1（過濾往返）、Group 9（三語一致性）、Group 32（Retired/ById 與 ApplyAll 略過／未知 ID 拒絕）、Group 33（CLI 廢棄錯誤訊息）新增測試，41 組全數綠燈通過。
+- **驗證狀態與實測指引**:
+  - 待使用者在真實遊戲實機確認升級後舊設定檔套用順暢且無副作用。
 
 ---
 
@@ -664,6 +855,25 @@
   - 新增 SelfTest Group 41 `ScopedTweaksAndHiResCompositeReversal`：以 `PatchPipeline` 真實順序套用 scoped tweaks 與 HiRes 1920，驗證 inspect／verify、同設定重套、設定更新、直接 Normalise 與 RestoreAll。
   - Group 41 實跑全綠：`.cktw` 與 `.ckhr` 都消失，`Celtic kings.exe`、Launcher、`data.pak`、`local.pak`、`vxSettings.ini` 五檔逐位元等於原版；竄改 `.cktw` command hook 後複合反轉仍拒絕。不需要修改 production code，本項修正是永久補上交叉回歸防線。
   - 最終 Release build 0 警告／0 錯誤，完整 SelfTest 41 組全綠。這是合成證據，不代表 scoped hooks 已在真實遊戲實測。
+
+---
+
+### ISSUE-057: 未設定的 unit_feeds 與 hero_max_army 仍被寫進 .cktw 並強制單位進食
+- **問題編號**: `ISSUE-057`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 只要 `trainer.enabled=true`，即使使用者一個數值都沒調，`.cktw` 節區仍會被套用，且 `unit_feeds` 被寫成三態 2（明確進食）、`hero_max_army` 被寫成 50。
+  - 後果是 `CVXUnit::ProcessFood`（hook `0x0050B3DA`）對所有走到該路徑的物件強制設定「會進食」，連 class XML 寫死 `feeds=0` 的動物、幽靈與運輸車都被納入飢餓計時器——相對原版的行為回歸。
+- **逆向分析與根因**:
+  - `ScopedTweakPatch.TryBuildSettings` 內的本地函式 `HeroMaxArmy`／`UnitFeeds` 用「舊單值 key 不存在」當作「使用者未設定」的哨兵（0 = 保持原版）。這兩項不能走共用的 `GetScopedFallbackValue`，因為那裡的原廠預設分別是 50 與 1（進食），會被誤讀成明確設定。
+  - 但 `TrainerPage.SaveConfig` 對 `Tweaks.All` 的**每一列**無條件寫入 `config.Tweaks[tweak.Id] = value;`，包含完全沒改、等於原廠預設的列。因此只要用 GUI 存過一次設定，這兩個 key 就永遠存在，哨兵永遠不成立。
+  - 既有的兩個哨兵回歸測試用的是「key 不存在」的合成 config，剛好繞開 GUI 這條路徑，所以測不到。
+- **修復方案與自動化驗證**:
+  - 兩個本地函式改為「舊單值等於該 `Tweak` 的 `Default` 時一律視為未設定，回 0 哨兵」；明確的 `ScopedTweaks` 值不受影響，共用的 `GetScopedFallbackValue`／`Scoped(...)` 完全沒動（`gold_production` 的 `*Village`、`food_production` 的 `*Townhall` 必須回 0 的特例維持原樣）。
+  - 新增回歸測試「GUI 全預設存檔不得產生 scoped payload」：用 `Tweaks.All.ToDictionary(t => t.Id, t => t.Default)` 重現 GUI 的存檔內容，斷言 `TryBuildSettings` 回 `false`，且 Command／Production／Population／Capacity／InitialGold／UnitScalars 六組全部等於 `Vanilla`／`Disabled`。修正前此測試會失敗。
+  - 另新增反向測試「明確 scoped unit_feeds 生效且未指定的 scope 維持 0 哨兵」，守住「修過頭把明確值也一起濾掉」的風險：`enemy=0` 仍寫入三態 1，`self` 維持 0。
+  - Release build 0 警告／0 錯誤，完整 SelfTest 全綠。這是合成證據，飢餓行為仍需真實遊戲驗收。
 
 ---
 

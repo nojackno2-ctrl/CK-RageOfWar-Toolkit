@@ -149,9 +149,6 @@ public static class Tweaks
             + "注意引擎每次至少削 1 點（0x50270C 寫死的下限），所以設 0 也停不下來，"
             + "要真的留住人口得靠上面的流失間隔。",
             "PopulationDecreasePercent", 10, 0, 100),
-        new IniTweak("wagon_build_time", GroupEconomy, "運輸車建造時間（毫秒）",
-            "原版 7000。",
-            "WagonBuildTime", 7000, 1, 10000000),
 
         // --- 生產與研究 ---
         new CommandDelayTweak("train_speed", GroupProduction, "單位生產速度倍率",
@@ -199,6 +196,16 @@ public static class Tweaks
 
     public static readonly IReadOnlyDictionary<string, Tweak> ById =
         All.ToDictionary(t => t.Id, StringComparer.Ordinal);
+
+    /// <summary>
+    /// 歷代版本曾支援但經逆向工程證實無效或已廢棄的 Tweak ID 清單。
+    /// 這些 ID 在舊設定檔中仍可能存在，必須被靜默忽略以維持向後相容性，
+    /// 避免升級後使用者每次 apply 都失敗。
+    /// wagon_build_time：VXCONST 的 WagonBuildTime 在 EXE 與 VS 腳本中皆無讀取；
+    /// create-mule 指令為 immediate 立即生成，且聚落建置路徑亦無 timer（ISSUE-050）。
+    /// </summary>
+    public static readonly IReadOnlySet<string> Retired =
+        new HashSet<string>(StringComparer.Ordinal) { "wagon_build_time" };
 
     /// <summary>依定義順序分組。</summary>
     public static IReadOnlyList<(string Group, IReadOnlyList<Tweak> Items)> Groups()

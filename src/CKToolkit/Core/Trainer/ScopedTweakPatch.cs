@@ -93,6 +93,30 @@ public static class ScopedTweakPatch
     public const uint InstanceDefenseSlashOffset = 0xC8;
     public const uint InstanceDefensePierceOffset = 0xCC;
 
+    // CVXHero 的 vtable（靜態常數，唯一保證不變的特徵；建置於 0x00489328、建構子 0x004E2387、
+    // 開啟檔案 0x004E24C9，均為 CVXHero；因此 [esi] == 此值 100% 確定為英雄）。
+    // 此處直接改寫 max_army（instance +0x198，byte 408..411，遠小於 352 bytes 的
+    // 物件尾端，避開了導致破壞的 heap overflow 危機）。
+    public const uint HeroVtableVa = 0x00709C28;
+    public const uint ClassMaxArmyOffset = 0x288;
+    public const uint InstanceMaxArmyOffset = 0x198;
+
+    // Unit speed calculation (ESI = CVXUnit* instance, ECX = unit class*):
+    //   0050C8BD cdq
+    //   0050C8BE idiv dword [ecx+F4]   ; divisor: speed
+    //   0050C8C4 lea  eax, [eax+eax*4]
+    public const uint SpeedSiteVa = 0x0050C8BE;
+    public static readonly byte[] SpeedOriginal = [0xF7, 0xB9, 0xF4, 0x00, 0x00, 0x00];
+    public const uint SpeedOffset = 0xF4;
+
+    // Unit food processing (CVXUnit::ProcessFood, EBP = CVXUnit* this):
+    //   0050B3DA test dword [ebp+138], 0x20000
+    public const uint FeedsSiteVa = 0x0050B3DA;
+    public static readonly byte[] FeedsOriginal =
+        [0xF7, 0x85, 0x38, 0x01, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00];
+    public const uint FeedsFlagOffset = 0x138;
+    public const uint FeedsFlagBit = 0x20000;
+
     private const uint Magic = 0x57544B43; // "CKTW" little-endian
     private const uint CommandHelperOffset = HeaderSize;
     private const uint GoldHelperOffset = 384;
@@ -103,10 +127,17 @@ public static class ScopedTweakPatch
     private const uint PopulationLossIntervalHelperOffset = 1664;
     private const uint InitialGoldHelperOffset = 1920;
     private const uint OwnerScalarHelperOffset = 2176;
-    private const uint ConfigOffset = 3072;
-    private const uint ConfigCount = 61;
-    private const uint HookCount = 9;
+    private const uint SpeedHelperOffset = 2688;
+    private const uint FeedsHelperOffset = 3072;
+    private const uint ConfigOffset = 4096;
+    private const uint ConfigCount = 67;
+    private const uint HookCount = 11;
 
+    /// <summary>
+    /// Command 相關設定。<see cref="SelfWagonBuildMilliseconds"/> 與 <see cref="EnemyWagonBuildMilliseconds"/>
+    /// （對應 config 表 cfg+16 / cfg+20）為廢棄欄位（保留位，對應 ISSUE-050），
+    /// helper 不讀取，僅保留用以維持二進位結構佈局與 ConfigCount = 67 之一致性。
+    /// </summary>
     public sealed record CommandSettings(
         uint SelfTrainSpeedQ16,
         uint EnemyTrainSpeedQ16,
@@ -206,7 +237,13 @@ public static class ScopedTweakPatch
         uint SelfRomanPowerQ16,
         uint EnemyRomanPowerQ16,
         uint SelfVisionQ16,
-        uint EnemyVisionQ16)
+        uint EnemyVisionQ16,
+        uint SelfMaxArmy,
+        uint EnemyMaxArmy,
+        uint SelfSpeedQ16,
+        uint EnemySpeedQ16,
+        uint SelfFeeds,
+        uint EnemyFeeds)
     {
         public static UnitScalarSettings Disabled { get; } = new(
             false,
@@ -215,7 +252,10 @@ public static class ScopedTweakPatch
             1u << 16, 1u << 16,
             1u << 16, 1u << 16,
             1u << 16, 1u << 16,
-            1u << 16, 1u << 16);
+            1u << 16, 1u << 16,
+            0, 0,
+            1u << 16, 1u << 16,
+            0, 0);
     }
 
     /// <summary>
@@ -255,7 +295,10 @@ public static class ScopedTweakPatch
             ["village_maxfood"] = SelfEnemyScopes,
             ["all_unit_health"] = SelfEnemyScopes,
             ["all_unit_attack"] = SelfEnemyScopes,
-            ["all_unit_defense"] = SelfEnemyScopes
+            ["all_unit_defense"] = SelfEnemyScopes,
+            ["hero_max_army"] = SelfEnemyScopes,
+            ["all_unit_speed"] = SelfEnemyScopes,
+            ["unit_feeds"] = SelfEnemyScopes
         };
 
     /// <summary>回傳目前已有 owner-aware hook 與反轉測試的合法 scope。</summary>
@@ -362,6 +405,53 @@ public static class ScopedTweakPatch
             return GetScopedFallbackValue(trainer, id, scope);
         }
 
+        // hero_max_army 用 0 當「未設定」哨兵（合法值只有 1..2000），所以不能走
+        // GetScopedFallbackValue：那個函式在沒有舊單值時會回傳原廠預設 50，等於把
+        // 「使用者根本沒設定」寫成一個明確的 50，會蓋掉劇本或第三方 mod 對
+        // HERO.SC.XML max_army 的合法修改。這裡改成本地判定，維持
+        // 明確 scoped 值 -> 舊單值 -> 0（保持原版）的順序，且不影響其他 ID 的
+        // fallback 規則（例如 gold_production 的村莊 scope 仍必須回傳 0）。
+        uint HeroMaxArmy(string scope)
+        {
+            if (trainer.ScopedTweaks.TryGetValue("hero_max_army", out Dictionary<string, decimal>? scoped) &&
+                scoped is not null && scoped.TryGetValue(scope, out decimal explicitValue))
+            {
+                return checked((uint)decimal.Truncate(explicitValue));
+            }
+            // 舊單值等於原廠預設時同樣視為「未設定」。GUI 的 SaveConfig 會把每一列
+            // tweak（含完全沒改的列）都寫進 trainer.Tweaks，只擋「key 不存在」的話，
+            // 使用者只要存過一次設定就會恆常寫入 50。
+            if (!trainer.Tweaks.TryGetValue("hero_max_army", out decimal legacy) ||
+                (Tweaks.ById.TryGetValue("hero_max_army", out Tweak? heroDefinition) &&
+                 legacy == heroDefinition.Default))
+            {
+                return 0u;
+            }
+            return checked((uint)decimal.Truncate(legacy));
+        }
+
+        // unit_feeds 三態定義：0=保持原版（fallback 0）、1=不進食（寫入 1）、2=進食（寫入 2）。
+        // definition.Default 為 1（進食），不能走 GetScopedFallbackValue，否則未設定時
+        // 會被誤判為明確進食（三態 2）而破壞 feeds=0 單位的原版設定。
+        // 同理，舊單值等於原廠預設 1 時也必須當成「未設定」：GUI 的 SaveConfig 會把每一列
+        // tweak 都寫進 trainer.Tweaks，若把它讀成明確三態 2，動物／幽靈／貨車這些在
+        // class XML 寫死 feeds=0 的物件會在 ProcessFood 被強制進食。
+        uint UnitFeeds(string scope)
+        {
+            if (trainer.ScopedTweaks.TryGetValue("unit_feeds", out Dictionary<string, decimal>? scoped) &&
+                scoped is not null && scoped.TryGetValue(scope, out decimal explicitValue))
+            {
+                return explicitValue == 0m ? 1u : 2u;
+            }
+            if (!trainer.Tweaks.TryGetValue("unit_feeds", out decimal legacy) ||
+                (Tweaks.ById.TryGetValue("unit_feeds", out Tweak? feedsDefinition) &&
+                 legacy == feedsDefinition.Default))
+            {
+                return 0u;
+            }
+            return legacy == 0m ? 1u : 2u;
+        }
+
         uint Integer(string id, string scope, decimal fallback) =>
             checked((uint)decimal.Truncate(Scoped(id, scope, fallback)));
 
@@ -393,6 +483,7 @@ public static class ScopedTweakPatch
         decimal unitHealth = Legacy("all_unit_health", 1m);
         decimal unitAttack = Legacy("all_unit_attack", 1m);
         decimal unitDefense = Legacy("all_unit_defense", 1m);
+        decimal unitSpeed = Legacy("all_unit_speed", 1m);
 
         settings = new LegacySettings(
             new CommandSettings(
@@ -449,7 +540,10 @@ public static class ScopedTweakPatch
                 Q16("all_unit_attack", "self", unitAttack), Q16("all_unit_attack", "enemy", unitAttack),
                 Q16("all_unit_defense", "self", unitDefense), Q16("all_unit_defense", "enemy", unitDefense),
                 1u << 16, 1u << 16, 1u << 16, 1u << 16,
-                1u << 16, 1u << 16));
+                1u << 16, 1u << 16,
+                HeroMaxArmy("self"), HeroMaxArmy("enemy"),
+                Q16("all_unit_speed", "self", unitSpeed), Q16("all_unit_speed", "enemy", unitSpeed),
+                UnitFeeds("self"), UnitFeeds("enemy")));
 
         settings = settings with
         {
@@ -528,6 +622,10 @@ public static class ScopedTweakPatch
         uint InitialGoldHelperSize,
         uint OwnerScalarHelperVa,
         uint OwnerScalarHelperSize,
+        uint SpeedHelperVa,
+        uint SpeedHelperSize,
+        uint FeedsHelperVa,
+        uint FeedsHelperSize,
         uint Flags,
         uint Hooks,
         CommandSettings Settings,
@@ -560,7 +658,11 @@ public static class ScopedTweakPatch
                    pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length)
                      .AsSpan().SequenceEqual(InitialGoldOriginal) &&
                    pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length)
-                     .AsSpan().SequenceEqual(OwnerScalarOriginal);
+                     .AsSpan().SequenceEqual(OwnerScalarOriginal) &&
+                   pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length)
+                     .AsSpan().SequenceEqual(SpeedOriginal) &&
+                   pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length)
+                     .AsSpan().SequenceEqual(FeedsOriginal);
         }
         catch { return false; }
     }
@@ -632,6 +734,8 @@ public static class ScopedTweakPatch
         ValidateOriginalSite(pe, PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal, "population-loss-interval");
         ValidateOriginalSite(pe, InitialGoldSiteVa, InitialGoldOriginal, "initial-gold");
         ValidateOriginalSite(pe, OwnerScalarSiteVa, OwnerScalarOriginal, "owner-scalars");
+        ValidateOriginalSite(pe, SpeedSiteVa, SpeedOriginal, "all-unit-speed");
+        ValidateOriginalSite(pe, FeedsSiteVa, FeedsOriginal, "unit-feeds");
 
         CommandSettings effective = ValidateSettings(settings ?? CommandSettings.Vanilla);
         ProductionSettings effectiveProduction = production ?? ProductionSettings.Vanilla;
@@ -664,6 +768,8 @@ public static class ScopedTweakPatch
             sectionVa + ConfigOffset, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx);
         byte[] initialGoldHelper = BuildInitialGoldHelper(sectionVa + ConfigOffset);
         byte[] ownerScalarHelper = BuildOwnerScalarHelper(sectionVa + ConfigOffset);
+        byte[] speedHelper = BuildSpeedHelper(sectionVa + ConfigOffset);
+        byte[] feedsHelper = BuildFeedsHelper(sectionVa + ConfigOffset);
         if (helper.Length > GoldHelperOffset - CommandHelperOffset ||
             goldHelper.Length > FoodHelperOffset - GoldHelperOffset ||
             foodHelper.Length > PopulationGrowthAmountHelperOffset - FoodHelperOffset ||
@@ -672,7 +778,9 @@ public static class ScopedTweakPatch
             lossPercentHelper.Length > PopulationLossIntervalHelperOffset - PopulationLossPercentHelperOffset ||
             lossIntervalHelper.Length > InitialGoldHelperOffset - PopulationLossIntervalHelperOffset ||
             initialGoldHelper.Length > OwnerScalarHelperOffset - InitialGoldHelperOffset ||
-            ownerScalarHelper.Length > ConfigOffset - OwnerScalarHelperOffset)
+            ownerScalarHelper.Length > SpeedHelperOffset - OwnerScalarHelperOffset ||
+            speedHelper.Length > FeedsHelperOffset - SpeedHelperOffset ||
+            feedsHelper.Length > ConfigOffset - FeedsHelperOffset)
             throw new InvalidOperationException(".cktw helper 超出保留空間。");
 
         pe.WriteUInt32AtVa(sectionVa + 40, checked((uint)helper.Length));
@@ -689,6 +797,8 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(sectionVa + PopulationLossIntervalHelperOffset, lossIntervalHelper);
         pe.WriteBytesAtVa(sectionVa + InitialGoldHelperOffset, initialGoldHelper);
         pe.WriteBytesAtVa(sectionVa + OwnerScalarHelperOffset, ownerScalarHelper);
+        pe.WriteBytesAtVa(sectionVa + SpeedHelperOffset, speedHelper);
+        pe.WriteBytesAtVa(sectionVa + FeedsHelperOffset, feedsHelper);
         pe.WriteBytesAtVa(CommandDelaySiteVa, BuildCommandHook(helperVa));
         pe.WriteBytesAtVa(GoldProductionSiteVa,
             BuildRelativeCall(GoldProductionSiteVa, sectionVa + GoldHelperOffset, GoldProductionOriginal.Length));
@@ -710,6 +820,10 @@ public static class ScopedTweakPatch
             BuildRelativeCall(InitialGoldSiteVa, sectionVa + InitialGoldHelperOffset, InitialGoldOriginal.Length));
         pe.WriteBytesAtVa(OwnerScalarSiteVa,
             BuildRelativeCall(OwnerScalarSiteVa, sectionVa + OwnerScalarHelperOffset, OwnerScalarOriginal.Length));
+        pe.WriteBytesAtVa(SpeedSiteVa,
+            BuildRelativeCall(SpeedSiteVa, sectionVa + SpeedHelperOffset, SpeedOriginal.Length));
+        pe.WriteBytesAtVa(FeedsSiteVa,
+            BuildRelativeCall(FeedsSiteVa, sectionVa + FeedsHelperOffset, FeedsOriginal.Length));
         return pe.ToBytes();
     }
 
@@ -735,7 +849,11 @@ public static class ScopedTweakPatch
                 !pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length)
                    .AsSpan().SequenceEqual(InitialGoldOriginal) ||
                 !pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length)
-                   .AsSpan().SequenceEqual(OwnerScalarOriginal))
+                   .AsSpan().SequenceEqual(OwnerScalarOriginal) ||
+                !pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length)
+                   .AsSpan().SequenceEqual(SpeedOriginal) ||
+                !pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length)
+                   .AsSpan().SequenceEqual(FeedsOriginal))
                 throw new InvalidOperationException("找不到 .cktw，但 scoped hook 指令也不是原版；拒絕猜測還原。");
             return pe.ToBytes();
         }
@@ -753,6 +871,8 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal);
         pe.WriteBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal);
         pe.WriteBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal);
+        pe.WriteBytesAtVa(SpeedSiteVa, SpeedOriginal);
+        pe.WriteBytesAtVa(FeedsSiteVa, FeedsOriginal);
         pe.RemoveSection(SectionName, info.OriginalFileLength);
         return pe.ToBytes();
     }
@@ -826,6 +946,10 @@ public static class ScopedTweakPatch
             pe.ReadUInt32(cfg + 172) != 0,
             pe.ReadUInt32(cfg + 176), pe.ReadUInt32(cfg + 180),
             pe.ReadUInt32(cfg + 184), pe.ReadUInt32(cfg + 188)));
+        uint selfSpeed = pe.ReadUInt32(cfg + 252);
+        uint enemySpeed = pe.ReadUInt32(cfg + 256);
+        uint selfFeeds = pe.ReadUInt32(cfg + 260);
+        uint enemyFeeds = pe.ReadUInt32(cfg + 264);
         var unitScalars = ValidateUnitScalarSettings(new UnitScalarSettings(
             pe.ReadUInt32(cfg + 192) != 0,
             pe.ReadUInt32(cfg + 196), pe.ReadUInt32(cfg + 200),
@@ -833,7 +957,9 @@ public static class ScopedTweakPatch
             pe.ReadUInt32(cfg + 212), pe.ReadUInt32(cfg + 216),
             pe.ReadUInt32(cfg + 220), pe.ReadUInt32(cfg + 224),
             pe.ReadUInt32(cfg + 228), pe.ReadUInt32(cfg + 232),
-            pe.ReadUInt32(cfg + 236), pe.ReadUInt32(cfg + 240)));
+            pe.ReadUInt32(cfg + 236), pe.ReadUInt32(cfg + 240),
+            pe.ReadUInt32(cfg + 244), pe.ReadUInt32(cfg + 248),
+            selfSpeed, enemySpeed, selfFeeds, enemyFeeds));
 
         uint sectionVa = checked((uint)pe.ImageBase + section.VirtualAddress);
         uint configVa = sectionVa + ConfigOffset;
@@ -846,6 +972,8 @@ public static class ScopedTweakPatch
             configVa, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx).Length);
         uint initialGoldSize = checked((uint)BuildInitialGoldHelper(configVa).Length);
         uint ownerScalarSize = checked((uint)BuildOwnerScalarHelper(configVa).Length);
+        uint speedHelperSize = checked((uint)BuildSpeedHelper(configVa).Length);
+        uint feedsHelperSize = checked((uint)BuildFeedsHelper(configVa).Length);
         return new PatchInfo(originalLength, sectionVa, sectionVa + CommandHelperOffset,
             helperSize, sectionVa + goldHelperOffset, goldHelperSize,
             sectionVa + foodHelperOffset, foodHelperSize,
@@ -855,6 +983,8 @@ public static class ScopedTweakPatch
             sectionVa + PopulationLossIntervalHelperOffset, lossIntervalSize,
             sectionVa + InitialGoldHelperOffset, initialGoldSize,
             sectionVa + OwnerScalarHelperOffset, ownerScalarSize,
+            sectionVa + SpeedHelperOffset, speedHelperSize,
+            sectionVa + FeedsHelperOffset, feedsHelperSize,
             flags, HookCount, settings, production, population, capacity, initialGold, unitScalars);
     }
 
@@ -943,6 +1073,12 @@ public static class ScopedTweakPatch
         Write(payload, cfg + 232, unitScalars.EnemyRomanPowerQ16);
         Write(payload, cfg + 236, unitScalars.SelfVisionQ16);
         Write(payload, cfg + 240, unitScalars.EnemyVisionQ16);
+        Write(payload, cfg + 244, unitScalars.SelfMaxArmy);
+        Write(payload, cfg + 248, unitScalars.EnemyMaxArmy);
+        Write(payload, cfg + 252, unitScalars.SelfSpeedQ16);
+        Write(payload, cfg + 256, unitScalars.EnemySpeedQ16);
+        Write(payload, cfg + 260, unitScalars.SelfFeeds);
+        Write(payload, cfg + 264, unitScalars.EnemyFeeds);
         return payload;
     }
 
@@ -964,6 +1100,8 @@ public static class ScopedTweakPatch
             info.SectionVa + ConfigOffset, 104, PopulationLossIntervalGlobalVa, PopulationLoadTarget.Edx);
         byte[] expectedInitialGoldHelper = BuildInitialGoldHelper(info.SectionVa + ConfigOffset);
         byte[] expectedOwnerScalarHelper = BuildOwnerScalarHelper(info.SectionVa + ConfigOffset);
+        byte[] expectedSpeedHelper = BuildSpeedHelper(info.SectionVa + ConfigOffset);
+        byte[] expectedFeedsHelper = BuildFeedsHelper(info.SectionVa + ConfigOffset);
         return info.HelperSize == expectedHelper.Length &&
                pe.ReadBytesAtVa(info.HelperVa, expectedHelper.Length).AsSpan().SequenceEqual(expectedHelper) &&
                info.GoldHelperSize == expectedGoldHelper.Length &&
@@ -988,6 +1126,12 @@ public static class ScopedTweakPatch
                info.OwnerScalarHelperSize == expectedOwnerScalarHelper.Length &&
                pe.ReadBytesAtVa(info.OwnerScalarHelperVa, expectedOwnerScalarHelper.Length)
                  .AsSpan().SequenceEqual(expectedOwnerScalarHelper) &&
+               info.SpeedHelperSize == expectedSpeedHelper.Length &&
+               pe.ReadBytesAtVa(info.SpeedHelperVa, expectedSpeedHelper.Length)
+                 .AsSpan().SequenceEqual(expectedSpeedHelper) &&
+               info.FeedsHelperSize == expectedFeedsHelper.Length &&
+               pe.ReadBytesAtVa(info.FeedsHelperVa, expectedFeedsHelper.Length)
+                 .AsSpan().SequenceEqual(expectedFeedsHelper) &&
                pe.ReadBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal.Length).AsSpan()
                  .SequenceEqual(BuildRelativeCall(GoldProductionSiteVa, info.GoldHelperVa, GoldProductionOriginal.Length)) &&
                pe.ReadBytesAtVa(FoodProductionSiteVa, FoodProductionOriginal.Length).AsSpan()
@@ -1009,7 +1153,13 @@ public static class ScopedTweakPatch
                      info.InitialGoldHelperVa, InitialGoldOriginal.Length)) &&
                pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length).AsSpan()
                  .SequenceEqual(BuildRelativeCall(OwnerScalarSiteVa,
-                     info.OwnerScalarHelperVa, OwnerScalarOriginal.Length));
+                     info.OwnerScalarHelperVa, OwnerScalarOriginal.Length)) &&
+               pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(SpeedSiteVa,
+                     info.SpeedHelperVa, SpeedOriginal.Length)) &&
+               pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(FeedsSiteVa,
+                     info.FeedsHelperVa, FeedsOriginal.Length));
     }
 
     private static CommandSettings ValidateSettings(CommandSettings settings)
@@ -1094,11 +1244,19 @@ public static class ScopedTweakPatch
             settings.SelfDefenseQ16, settings.EnemyDefenseQ16,
             settings.SelfGaulPowerQ16, settings.EnemyGaulPowerQ16,
             settings.SelfRomanPowerQ16, settings.EnemyRomanPowerQ16,
-            settings.SelfVisionQ16, settings.EnemyVisionQ16
+            settings.SelfVisionQ16, settings.EnemyVisionQ16,
+            settings.SelfSpeedQ16, settings.EnemySpeedQ16
         ];
         // Existing multiplier UI allows 0.01x..100x. Q16 minimum 656 rounds up from 0.01.
         if (factors.Any(value => value is < 656 or > 6_553_600))
             throw new ArgumentOutOfRangeException(nameof(settings), "單位 scoped 倍率必須介於 0.01x 與 100x。");
+
+        if (settings.SelfMaxArmy > 2000 || settings.EnemyMaxArmy > 2000)
+            throw new ArgumentOutOfRangeException(nameof(settings), "英雄帶兵上限 scoped 設定超出安全範圍（0 或 1..2000）。");
+
+        if (settings.SelfFeeds > 2 || settings.EnemyFeeds > 2)
+            throw new ArgumentOutOfRangeException(nameof(settings), "單位進食 scoped 設定超出安全範圍（0=保持原版、1=不進食、2=進食）。");
+
         return settings;
     }
 
@@ -1180,6 +1338,12 @@ public static class ScopedTweakPatch
         pe.WriteUInt32AtVa(cfg + 232, unitScalars.EnemyRomanPowerQ16);
         pe.WriteUInt32AtVa(cfg + 236, unitScalars.SelfVisionQ16);
         pe.WriteUInt32AtVa(cfg + 240, unitScalars.EnemyVisionQ16);
+        pe.WriteUInt32AtVa(cfg + 244, unitScalars.SelfMaxArmy);
+        pe.WriteUInt32AtVa(cfg + 248, unitScalars.EnemyMaxArmy);
+        pe.WriteUInt32AtVa(cfg + 252, unitScalars.SelfSpeedQ16);
+        pe.WriteUInt32AtVa(cfg + 256, unitScalars.EnemySpeedQ16);
+        pe.WriteUInt32AtVa(cfg + 260, unitScalars.SelfFeeds);
+        pe.WriteUInt32AtVa(cfg + 264, unitScalars.EnemyFeeds);
     }
 
     private static byte[] BuildCommandHelper(uint configVa)
@@ -1559,8 +1723,155 @@ public static class ScopedTweakPatch
         EmitScaleEaxByOwnerMultiplier(configVa + 236);
         EmitStoreInstanceField(InstanceVisionOffset);
 
+        // Hero max army (ISSUE-049):
+        // ebx = 0 (self) / 1 (enemy). Load configured max_army (0 = disabled/unmodified).
+        // Only instances whose vtable equals HeroVtableVa (0x00709C28) are modified.
+        x86.EmitIndexedLoadEaxByEbx(configVa + 244);
+        x86.Emit(0x85, 0xC0);                              // test eax,eax
+        x86.Jump(0x84, "done");                            // jz done: 0 means keep original
+        x86.Emit(0x81, 0x3E);                              // cmp dword [esi], HeroVtableVa
+        x86.EmitUInt32(HeroVtableVa);
+        x86.Jump(0x85, "done");                            // jne done: not a hero
+        EmitStoreInstanceField(InstanceMaxArmyOffset);      // mov [esi+198h], eax
+
         x86.Label("done");
         x86.Emit(0x58, 0x59, 0x5F, 0x5B, 0x5A, 0x9D, 0xC3); // pop eax/ecx/edi/ebx/edx; popfd; ret
+        return x86.Build();
+    }
+
+    private static byte[] BuildSpeedHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        // Preserves EBX (used for divisor), ECX (class pointer), and EDX:EAX (64-bit dividend).
+        x86.Emit(0x53);                                     // push ebx
+        x86.Emit(0x51);                                     // push ecx
+        x86.Emit(0x50);                                     // push eax
+        x86.Emit(0x52);                                     // push edx
+
+        // Load vanilla speed into ebx as fallback.
+        x86.Emit(0x8B, 0x99, 0xF4, 0x00, 0x00, 0x00);       // mov ebx,[ecx+F4h]
+
+        // Fail-closed checks
+        x86.Emit(0x85, 0xF6);                               // test esi,esi
+        x86.Jump(0x84, "use_base");                         // jz use_base
+
+        x86.EmitAbsoluteLoadEax(GameGlobalVa);               // eax = game
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "use_base");
+        x86.Emit(0x8B, 0x40, (byte)SessionOffset);           // mov eax,[eax+50h]
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "use_base");
+        x86.Emit(0x80, 0xB8);                               // cmp byte [eax+108h],0
+        x86.EmitUInt32(MultiplayerMaskOffset);
+        x86.Emit(0x00);
+        x86.Jump(0x85, "use_base");                         // jne use_base
+
+        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);         // eax = engine base
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "use_base");
+        x86.Emit(0x8B, 0x80);                               // mov eax,[eax+CD0h]
+        x86.EmitUInt32(LocalPlayerOffset);
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "use_base");
+
+        // Scope selection: compare [esi+6Eh] (owner) with local player pointer in eax
+        x86.Emit(0x39, 0x46, (byte)ObjectOwnerOffset);       // cmp [esi+6Eh],eax
+        x86.Emit(0x0F, 0x95, 0xC2);                         // setne dl (self=0, enemy=1)
+        x86.Emit(0x0F, 0xB6, 0xD2);                         // movzx edx,dl
+
+        // Load multiplier from configVa + 252 + edx*4 into ecx
+        x86.EmitIndexedLoadEcxByEdx(configVa + 252);        // mov ecx,[edx*4 + (configVa+252)]
+
+        // Scale ebx by ecx (Q16.16)
+        x86.Emit(0x89, 0xD8);                               // mov eax,ebx
+        x86.Emit(0xF7, 0xE1);                               // mul ecx -> edx:eax = ebx * multiplier
+        x86.Emit(0x81, 0xFA);                               // cmp edx,0x10000
+        x86.EmitUInt32(0x10000);
+        x86.Jump(0x83, "use_base");                         // jae use_base (overflow)
+        x86.Emit(0xB9);                                     // mov ecx,65536
+        x86.EmitUInt32(65536);
+        x86.Emit(0xF7, 0xF1);                               // div ecx -> eax = (ebx*mult)/65536
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "use_base");                         // jz use_base (zero divisor protection)
+        x86.Emit(0x89, 0xC3);                               // mov ebx,eax
+
+        x86.Label("use_base");
+        x86.Emit(0x5A);                                     // pop edx
+        x86.Emit(0x58);                                     // pop eax
+        x86.Emit(0xF7, 0xFB);                               // idiv ebx -> eax = quotient, edx = remainder
+        x86.Emit(0x59);                                     // pop ecx
+        x86.Emit(0x5B);                                     // pop ebx
+        x86.Emit(0xC3);                                     // ret
+
+        return x86.Build();
+    }
+
+    private static byte[] BuildFeedsHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        // Original at 0x0050B3DA: test dword [ebp+138h], 20000h (10 bytes)
+        // EBP = CVXUnit* (this). EAX is scratch in caller. Preserve ECX and EDX.
+        x86.Emit(0x51);                                     // push ecx
+        x86.Emit(0x52);                                     // push edx
+
+        x86.Emit(0x85, 0xED);                               // test ebp,ebp
+        x86.Jump(0x84, "fallback");                         // jz fallback
+
+        x86.EmitAbsoluteLoadEax(GameGlobalVa);               // eax = game
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "fallback");
+        x86.Emit(0x8B, 0x40, (byte)SessionOffset);           // mov eax,[eax+50h]
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "fallback");
+        x86.Emit(0x80, 0xB8);                               // cmp byte [eax+108h],0
+        x86.EmitUInt32(MultiplayerMaskOffset);
+        x86.Emit(0x00);
+        x86.Jump(0x85, "fallback");                         // jne fallback
+
+        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);         // eax = engine base
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "fallback");
+        x86.Emit(0x8B, 0x80);                               // mov eax,[eax+CD0h]
+        x86.EmitUInt32(LocalPlayerOffset);
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "fallback");
+
+        // Scope selection: compare [ebp+6Eh] (owner) with local player pointer in eax
+        x86.Emit(0x39, 0x45, (byte)ObjectOwnerOffset);       // cmp [ebp+6Eh],eax
+        x86.Emit(0x0F, 0x95, 0xC2);                         // setne dl (self=0, enemy=1)
+        x86.Emit(0x0F, 0xB6, 0xD2);                         // movzx edx,dl
+
+        // Load config tri-state from configVa + 260 + edx*4
+        x86.EmitIndexedLoadEcxByEdx(configVa + 260);        // mov ecx,[edx*4 + (configVa+260)]
+        x86.Emit(0x83, 0xF9, 0x01);                         // cmp ecx,1
+        x86.Jump(0x84, "no_food");                          // je no_food (1 = do not eat)
+        x86.Emit(0x83, 0xF9, 0x02);                         // cmp ecx,2
+        x86.Jump(0x84, "eat_food");                         // je eat_food (2 = eat food)
+        x86.Jump("fallback");                               // 0 or other = fallback
+
+        x86.Label("no_food");
+        x86.Emit(0x31, 0xC0);                               // xor eax,eax (eax = 0)
+        x86.Jump("done");
+
+        x86.Label("eat_food");
+        x86.Emit(0xB8);                                     // mov eax,1
+        x86.EmitUInt32(1);
+        x86.Jump("done");
+
+        x86.Label("fallback");
+        x86.Emit(0x8B, 0x85);                               // mov eax,[ebp+138h]
+        x86.EmitUInt32(FeedsFlagOffset);
+        x86.Emit(0x25);                                     // and eax,0x20000
+        x86.EmitUInt32(FeedsFlagBit);
+
+        x86.Label("done");
+        x86.Emit(0x5A);                                     // pop edx
+        x86.Emit(0x59);                                     // pop ecx
+        x86.Emit(0x85, 0xC0);                               // test eax,eax (sets ZF!)
+        x86.Emit(0xC3);                                     // ret
+
         return x86.Build();
     }
 
@@ -1755,9 +2066,21 @@ public static class ScopedTweakPatch
             EmitUInt32(address);
         }
 
+        public void EmitIndexedLoadEaxByEbx(uint address)
+        {
+            Emit(0x8B, 0x04, 0x9D);                        // mov eax,[ebx*4+disp32]
+            EmitUInt32(address);
+        }
+
         public void EmitIndexedLoadEcxByEax(uint address)
         {
             Emit(0x8B, 0x0C, 0x85);                        // mov ecx,[eax*4+disp32]
+            EmitUInt32(address);
+        }
+
+        public void EmitIndexedLoadEcxByEdx(uint address)
+        {
+            Emit(0x8B, 0x0C, 0x95);                        // mov ecx,[edx*4+disp32]
             EmitUInt32(address);
         }
 

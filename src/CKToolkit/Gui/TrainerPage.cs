@@ -26,9 +26,11 @@ public sealed class TrainerPage : UserControl
     private readonly Button _resetTweaks = new();
     private readonly Button _resetScopedTweaks = new();
     private readonly Button _launchGame = new();
+    private readonly Button _openPanel = new();
     private readonly Label _launchHint = new();
     private readonly Label _hint = new();
     private readonly Label _tweaksWarning = new();
+    private readonly Label _tweaksScopeNotice = new();
     private readonly Label _scopedWarning = new();
     private readonly Label _scopedSimpleLabel = new();
     private readonly Label _scopedSettlementLabel = new();
@@ -46,6 +48,9 @@ public sealed class TrainerPage : UserControl
 
     /// <summary>使用者按下修改器頁裡的「啟動遊戲」。MainForm 收到後會先套用目前設定、再帶診斷層啟動。</summary>
     public event Action? LaunchGameRequested;
+
+    /// <summary>使用者按下「遊戲中面板」。MainForm 收到後會開啟置頂的按鍵遙控面板。</summary>
+    public event Action? OpenPanelRequested;
 
     public TrainerPage()
     {
@@ -115,11 +120,21 @@ public sealed class TrainerPage : UserControl
         _launchGame.Font = new Font(Font, FontStyle.Bold);
         _launchGame.Margin = new Padding(0, 0, 12, 0);
         _launchGame.Click += (_, _) => LaunchGameRequested?.Invoke();
+
+        _openPanel.AutoSize = true;
+        _openPanel.MinimumSize = new Size(140, 34);
+        _openPanel.FlatStyle = FlatStyle.Flat;
+        _openPanel.BackColor = Color.FromArgb(241, 245, 249);
+        _openPanel.ForeColor = Color.FromArgb(30, 41, 59);
+        _openPanel.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+        _openPanel.Margin = new Padding(0, 0, 12, 0);
+        _openPanel.Click += (_, _) => OpenPanelRequested?.Invoke();
+
         _launchHint.AutoSize = true;
         _launchHint.Anchor = AnchorStyles.Left;
         _launchHint.ForeColor = Color.FromArgb(100, 116, 139);
         _launchHint.Margin = new Padding(0, 10, 0, 0);
-        launchRow.Controls.AddRange([_launchGame, _launchHint]);
+        launchRow.Controls.AddRange([_launchGame, _openPanel, _launchHint]);
 
         _hint.AutoSize = true;
         _hint.MaximumSize = new Size(1000, 0);
@@ -172,7 +187,8 @@ public sealed class TrainerPage : UserControl
 
     private void BuildTweaksTab()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -183,6 +199,17 @@ public sealed class TrainerPage : UserControl
         _tweaksWarning.Font = new Font(Font, FontStyle.Bold);
         _tweaksWarning.Padding = new Padding(8, 6, 8, 6);
         panel.Controls.Add(_tweaksWarning, 0, 0);
+
+        // 多人失效提示：本頁只要有值被路由到 .cktw，多人連線就會退回原版數值。
+        // 樣式沿用分流子分頁的藍色資訊框，但不加粗，以免蓋過上面的橘色風險警告。
+        _tweaksScopeNotice.AutoSize = true;
+        _tweaksScopeNotice.Dock = DockStyle.Fill;
+        _tweaksScopeNotice.MaximumSize = new Size(1600, 0);
+        _tweaksScopeNotice.Padding = new Padding(10, 8, 10, 8);
+        _tweaksScopeNotice.Margin = new Padding(2, 2, 2, 6);
+        _tweaksScopeNotice.BackColor = Color.FromArgb(239, 246, 255);
+        _tweaksScopeNotice.ForeColor = Color.FromArgb(30, 64, 175);
+        panel.Controls.Add(_tweaksScopeNotice, 0, 1);
 
         ConfigureGrid(_tweaks);
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Group", ReadOnly = true, Width = 120 });
@@ -196,8 +223,8 @@ public sealed class TrainerPage : UserControl
         _resetTweaks.AutoSize = true;
         _resetTweaks.Margin = new Padding(6);
         _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
-        panel.Controls.Add(_tweaks, 0, 1);
-        panel.Controls.Add(_resetTweaks, 0, 2);
+        panel.Controls.Add(_tweaks, 0, 2);
+        panel.Controls.Add(_resetTweaks, 0, 3);
         _tweaksTab.Controls.Add(panel);
     }
 
@@ -566,9 +593,13 @@ public sealed class TrainerPage : UserControl
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
         _resetScopedTweaks.Text = Strings.Get("Gui_Trainer_ResetScopedTweaks");
         _launchGame.Text = Strings.Get("Gui_Trainer_Launch");
+        _openPanel.Text = Strings.Get("Gui_Trainer_OpenPanel");
         _launchHint.Text = Strings.Get("Gui_Trainer_LaunchHint");
         _hint.Text = Strings.Get("Gui_Trainer_Hint");
         _tweaksWarning.Text = Strings.Get("Gui_Trainer_TweaksWarning");
+        _tweaksScopeNotice.Text = Strings.Get(
+            "Gui_Trainer_TweaksScopeNotice",
+            Tweaks.All.Count(t => ScopedTweakPatch.GetSupportedScopes(t.Id).Count > 0));
         _scopedWarning.Text = Strings.Get("Gui_Trainer_ScopedWarning");
         _scopedSimpleLabel.Text = Strings.Get("Gui_Trainer_ScopedSimple");
         _scopedSettlementLabel.Text = Strings.Get("Gui_Trainer_ScopedSettlement");

@@ -41,6 +41,7 @@ public sealed class MainForm : Form
     private readonly Button _restore = new();
     private readonly Label _operationStatus = new();
     private readonly TextBox _log = new();
+    private InGamePanelForm? _panel;
 
     public MainForm()
     {
@@ -166,6 +167,7 @@ public sealed class MainForm : Form
         _savePage.LogMessage += message => AppendLog(message);
         _tabs.Selected += (_, e) => { if (e.TabPage == _saveTab) _savePage.RefreshCatalog(); };
         _trainerPage.LaunchGameRequested += async () => await ApplyThenLaunchAsync();
+        _trainerPage.OpenPanelRequested += OpenInGamePanel;
         return _tabs;
     }
 
@@ -440,6 +442,34 @@ public sealed class MainForm : Form
         }
         catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
         finally { SetBusy(false); }
+    }
+
+    /// <summary>
+    /// 開啟置頂的遊戲中面板（AGENTS.md §1 輔助視窗例外）。面板只送按鍵、不改任何設定，
+    /// 由主視窗開關，關掉之後不留常駐。
+    /// </summary>
+    private void OpenInGamePanel()
+    {
+        if (_panel is { IsDisposed: false })
+        {
+            _panel.Show();
+            _panel.BringToFront();
+            return;
+        }
+
+        try
+        {
+            // 面板要用目前畫面上的設定，所以先把 TrainerPage 的內容存回設定物件再建。
+            _trainerPage.SaveConfig(_config.Trainer);
+            _panel = new InGamePanelForm(_config.Trainer);
+            _panel.FormClosed += (_, _) => _panel = null;
+            _panel.Show(this);
+            _panel.PositionNearGame();
+        }
+        catch (Exception ex)
+        {
+            ShowOperationError(ex.Message);
+        }
     }
 
     private void SetBusy(bool busy, bool profilerOwnsBusy = false)

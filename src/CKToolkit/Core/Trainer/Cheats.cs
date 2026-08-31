@@ -190,6 +190,53 @@ public static class Cheats
     /// <summary>「在滑鼠位置生成物品」的作弊代號。</summary>
     public const string SpawnItemId = "spawn_item";
 
+    /// <summary>「循環切換遊戲速度」的作弊代號。</summary>
+    public const string GameSpeedId = "game_speed";
+
+    /// <summary>速度循環的位置記在這個「每位玩家一份」的環境變數裡（同 UnitVar 的作法）。</summary>
+    private const string SpeedVar = "cktrainerspeed";
+
+    /// <summary>
+    /// 引擎的原生速度基準是 1000（<c>SetSpeed(1000)</c> = 正常速度），
+    /// 所以 n 倍速就是 <c>SetSpeed(n * 1000)</c>。原版 scdebug.xml 的「極速切換」
+    /// 用的正是 <c>SetSpeed(10000)</c>，也就是 10 倍——這是原廠功能，不是新發明。
+    /// 見 docs/VS腳本速查.md 與 Core/Perf/GameSpeed.cs。
+    /// </summary>
+    public const int NormalSpeedValue = 1000;
+
+    /// <summary>可放進循環清單的倍率。上限 100 倍與分析器的 --speed 一致。</summary>
+    public static readonly IReadOnlyList<CheatParamOption> SpeedOptions =
+    [
+        new("1",   "1 倍（正常）", englishLabel: "1x (normal)"),
+        new("2",   "2 倍",  englishLabel: "2x"),
+        new("3",   "3 倍",  englishLabel: "3x"),
+        new("5",   "5 倍",  englishLabel: "5x"),
+        new("10",  "10 倍（原版極速）", englishLabel: "10x (vanilla turbo)"),
+        new("20",  "20 倍", englishLabel: "20x"),
+        new("50",  "50 倍", englishLabel: "50x"),
+        new("100", "100 倍", englishLabel: "100x"),
+    ];
+
+    /// <summary>速度循環的出廠清單。</summary>
+    public const string DefaultSpeedList = "1,2,5,10";
+
+    /// <summary>
+    /// 座標取自 <c>MousePtm()</c> 的作弊——觸發當下游標必須正停在目標地點。
+    ///
+    /// <c>MousePtm</c> 的實作在 .text VA 0x005CBD40，它不呼叫 GetCursorPos，只是把
+    /// <c>[[0x008AAB80] + 0x20]</c> 與 <c>+0x24</c> 這兩個 dword 推進 VM 堆疊：
+    ///
+    ///     005CBD40  a1 80 ab 8a 00   mov eax, [0x8AAB80]
+    ///     005CBD45  8d 48 20         lea ecx, [eax + 0x20]
+    ///     005CBD4F  8b 31            mov esi, [ecx]
+    ///
+    /// 那是一個由滑鼠移動訊息更新的快取。所以用面板按鈕代按熱鍵時，游標從目標點
+    /// 移到按鈕的路上會一路更新這個快取，最後生成在面板邊緣而不是使用者要的位置。
+    /// 面板因此對這些作弊改用延遲觸發，讓游標在送鍵當下仍停在目標上。
+    /// </summary>
+    public static readonly IReadOnlySet<string> CursorPositionCheats =
+        new HashSet<string>(StringComparer.Ordinal) { SpawnUnitId, SpawnItemId };
+
     /// <summary>「切換生成物品」的作弊代號。</summary>
     public const string CycleItemId = "cycle_item";
 
@@ -364,6 +411,38 @@ public static class Cheats
     /// VS 沒有陣列也沒有 switch，只能展開成 if 串；
     /// 先給第 0 個當底，後面比中了就覆蓋，所以 n 落在範圍外也一定有值可用。
     /// </summary>
+    /// <summary>
+    /// 把逗號分隔的倍率清單解析成整數。只接受 <see cref="SpeedOptions"/> 列出的值，
+    /// 全部不合法就退回出廠清單——腳本不能生成空的 if 鏈，否則引擎會噴編譯錯誤。
+    /// </summary>
+    private static IReadOnlyList<int> ParseSpeedList(string raw)
+    {
+        var allowed = SpeedOptions
+            .Select(o => int.Parse(o.Value, CultureInfo.InvariantCulture))
+            .ToHashSet();
+
+        var parsed = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0)
+            .Where(allowed.Contains)
+            .Distinct()
+            .OrderBy(v => v)
+            .ToList();
+
+        return parsed.Count > 0
+            ? parsed
+            : DefaultSpeedList.Split(',').Select(t => int.Parse(t, CultureInfo.InvariantCulture)).ToList();
+    }
+
+    /// <summary>依循環索引 n 選出速度值與顯示名稱，作法同 <see cref="UnitPick"/>。</summary>
+    private static string SpeedPick(IReadOnlyList<int> speeds)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"s = {speeds[0] * NormalSpeedValue}; name = \"{speeds[0]}\";");
+        for (int i = 1; i < speeds.Count; i++)
+            sb.Append($" if (n == {i}) {{ s = {speeds[i] * NormalSpeedValue}; name = \"{speeds[i]}\"; }}");
+        return sb.ToString();
+    }
+
     private static string UnitPick(IReadOnlyList<string> units)
     {
         var firstCls = units[0];
@@ -574,7 +653,7 @@ public static class Cheats
             },
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
                             options: UnitOptions, multi: true, englishLabel: "Switchable Units"),
-             new CheatParam("count", "數量", 5, 1, 50, englishLabel: "Spawn Count"),
+             new CheatParam("count", "數量", 5, 1, 1000, englishLabel: "Spawn Count"),
              new CheatParam("level", "初始等級", 1, 1, 1000, englishLabel: "Spawn Level"),
              new CheatParam("items", "攜帶物品", string.Empty, options: ItemOptions, multi: true, englishLabel: "Carried Items")],
             experimental: true, defaultKey: "Pause", numpadKey: "Sub"),
@@ -692,6 +771,30 @@ public static class Cheats
             },
             [new CheatParam("level", "目標等級", 100, 1, 1000, englishLabel: "Target Level")],
             defaultEnabled: false, defaultKey: "F7", numpadKey: "Pause"),
+
+        new Cheat(GameSpeedId, "循環切換遊戲速度",
+            "按一下就切到清單裡的下一個倍率，並把目前速度印在畫面上。"
+            + "用的是引擎自己的腳本函式 SetSpeed()——原生基準是 1000，所以 n 倍速就是 "
+            + "SetSpeed(n * 1000)；原版 scdebug.xml 的「極速切換」用的也是同一個函式（10 倍）。"
+            + "速度是全域的，不分玩家，敵方 AI 與生產也會一起加速。"
+            + "倍率開太高時模擬端可能跟不上（見 ISSUES.md ISSUE-005 的超線性卡頓），"
+            + "這不是修改器的錯，把速度切回 1 倍即可恢復。",
+            (player, p) =>
+            {
+                var speeds = ParseSpeedList(Str(p, "speeds"));
+                return $$"""
+                    int n; int s; str name;
+                    n = EnvReadInt({{player}}, "{{SpeedVar}}") + 1;
+                    if (n < 0 || n >= {{speeds.Count}}) n = 0;
+                    EnvWriteInt({{player}}, "{{SpeedVar}}", n);
+                    {{SpeedPick(speeds)}}
+                    SetSpeed(s);
+                    pr("[修改器] 遊戲速度：" + name + " 倍");
+                    """;
+            },
+            [new CheatParam("speeds", "循環的倍率", DefaultSpeedList,
+                            options: SpeedOptions, multi: true, englishLabel: "Speed Cycle")],
+            defaultEnabled: false, defaultKey: "Mul", numpadKey: "Ins"),
 
         new Cheat("diagnose", "診斷（確認修改器運作）",
             "在畫面上印出玩家編號與單位數量。裝好後先按這個鍵確認熱鍵有生效；"

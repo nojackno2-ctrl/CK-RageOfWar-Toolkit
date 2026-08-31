@@ -1844,6 +1844,12 @@ public static partial class CliHost
                     string tweakId = val[..eq].Trim();
                     string tweakValStr = val[(eq + 1)..].Trim();
 
+                    if (Tweaks.Retired.Contains(tweakId))
+                    {
+                        string err = Strings.Get("Error_TrainerRetiredTweak", tweakId);
+                        return OutputError("trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+
                     if (!Tweaks.ById.TryGetValue(tweakId, out var tweak))
                     {
                         string err = Strings.Get("Error_TrainerUnknownTweak", tweakId);
@@ -1882,6 +1888,13 @@ public static partial class CliHost
                     string tweakId = val[..dot].Trim();
                     string scope = val[(dot + 1)..eq].Trim();
                     string tweakValStr = val[(eq + 1)..].Trim();
+
+                    if (Tweaks.Retired.Contains(tweakId))
+                    {
+                        string err = Strings.Get("Error_TrainerRetiredTweak", tweakId);
+                        return OutputError(
+                            "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
 
                     if (!Tweaks.ById.TryGetValue(tweakId, out var tweak))
                     {

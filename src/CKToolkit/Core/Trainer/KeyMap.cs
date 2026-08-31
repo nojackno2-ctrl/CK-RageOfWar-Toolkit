@@ -71,6 +71,16 @@ public static class KeyMap
     public static bool IsRemapped(string key) =>
         ById.TryGetValue(key, out var binding) && binding.Numpad is not null;
 
+    /// <summary>
+    /// 這個 scdebug id 在目前模式下實際對應到哪一顆實體鍵的 Win32 虛擬鍵碼。
+    /// 面板要代送按鍵時就是查這裡；id 不存在回傳 null。
+    /// </summary>
+    public static uint? VirtualKeyFor(string key, bool numpadKeys)
+    {
+        if (!ById.TryGetValue(key, out var binding)) return null;
+        return numpadKeys && binding.Numpad is { } np ? np : binding.Vanilla;
+    }
+
     /// <summary>介面上要顯示的鍵名。小鍵盤模式下顯示實際要按的那顆鍵。</summary>
     public static string Display(string key, bool numpadKeys)
     {

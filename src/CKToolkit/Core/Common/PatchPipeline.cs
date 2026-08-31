@@ -561,6 +561,8 @@ public sealed class PatchPipeline
 
         foreach ((string id, decimal value) in config.Trainer.Tweaks)
         {
+            if (Tweaks.Retired.Contains(id))
+                continue;
             if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
                 return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
             if (value < tweak.Minimum || value > tweak.Maximum)
@@ -573,6 +575,8 @@ public sealed class PatchPipeline
 
         foreach ((string id, Dictionary<string, decimal> values) in config.Trainer.ScopedTweaks)
         {
+            if (Tweaks.Retired.Contains(id))
+                continue;
             if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
                 return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
             if (!ScopedTweakPatch.IsSupportedScopedTweakId(id))
