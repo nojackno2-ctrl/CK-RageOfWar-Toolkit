@@ -80,7 +80,8 @@ public static class TrainerInstaller
         if (selections.Count > 0)
         {
             string xml = Cheats.BuildScDebug(
-                selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla);
+                selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla,
+                config.NumpadKeys);
             pak.WriteText(Cheats.ScDebugPath, xml, ScDebugEncoding);
             marker.Cheats.AddRange(selections.Select(s => s.Id));
             log?.Invoke($"作弊：{selections.Count} 項已寫入 {Cheats.ScDebugPath}");

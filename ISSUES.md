@@ -61,55 +61,24 @@
 | [ISSUE-054](#issue-054-筆電無小鍵盤又不使用-f1f12-時修改器幾乎無鍵可綁) | **筆電無小鍵盤又不使用 F1~F12 時，修改器幾乎無鍵可綁** | ⏳ 待實測 | 點擊修改器頁「遊戲中面板」或開啟置頂面板，在遊戲中點擊面板作弊按鈕。 | 遊戲視窗接收到對應鍵碼並觸發作弊，視窗不搶焦點，關閉後無殘留常駐。 |
 | [ISSUE-055](#issue-055-面板代按熱鍵時-mouseptm-快取已被游標移動蓋掉生成位置錯誤) | **面板代按熱鍵時生成位置錯誤** | ⏳ 待實測 | 把地圖捲到目標位於畫面中央，開啟面板點「在滑鼠位置生成單位」；另測數量設為 1000。 | 單位生成在畫面中央而不是面板邊緣，面板顯示「已生成於 (x, y)」；游標瞬間歸位；面板可縮放。 |
 | [ISSUE-056](#issue-056-修改器缺少遊戲速度調整) | **修改器加入遊戲速度調整** | ⏳ 待實測 | 面板速度欄填 5 按「套用」；另啟用「循環切換遊戲速度」作弊後連按其熱鍵。 | 速度即時變化，面板顯示結果訊息；循環作弊依序切換 1/2/5/10 倍並在畫面印出目前倍率。 |
+| [ISSUE-047](#issue-047-外部快照配額被可修復例外耗盡真正致命現場沒有外部-json完整-dump) | **外部快照配額被耗盡時滾動保存最後崩潰候選快照** | ⏳ 待實測 | 模擬 800+ 筆可修復 first-chance 例外後程序退出。 | 超過 20 筆上限後滾動更新 `-crash-latest.json`，最新致命現場完整寫出。 |
+| [ISSUE-048](#issue-048-ckrun-configtxt-與-verify-只比較設定修補名稱會錯報遊戲實際修改內容) | **`ckrun-config.txt` 與 `verify` 只比較設定修補名稱，會錯報遊戲實際修改內容** | ⏳ 待實測 | 核對 `ckrun-config.txt` 與實際遊戲檔案 `CKTRAINER.TXT` 內容。 | 檔案唯讀解析實際 marker payload，不將期望物件冒充實際狀態。 |
+| [ISSUE-053](#issue-053-遊戲保留按鍵表漏列-f2f3delins原版模式預設綁定直接撞到存讀檔) | **遊戲保留按鍵表漏列 F2／F3／Del／Ins，原版模式預設綁定撞到存讀檔** | ⏳ 待實測 | 於原版按鍵模式下按下 F2（存檔）或 F3（讀檔），並測試自由鍵設定。 | F2/F3/Ins/Del 被標記為保留鍵，不撞作弊；原版模式僅綁定安全鍵且存讀檔正常。 |
 | [ISSUE-057](#issue-057-未設定的-unit_feeds-與-hero_max_army-仍被寫進-cktw-並強制單位進食) | **未設定的 `unit_feeds`／`hero_max_army` 仍被寫進 `.cktw` 並強制單位進食** | ⏳ 待實測 | 開啟修改器但不調任何數值，用 GUI 存檔後 apply；再進遊戲觀察狼／熊等動物與運輸車。 | EXE 不含 `.cktw` 節區（`verify` 判定 vanilla）；動物與運輸車不會挨餓或掉血，行為與原版一致。 |
+| [ISSUE-058](#issue-058-聚落容量與初始金錢-tweak-走-scoped-路徑後不再只影響新建聚落) | **聚落容量與初始金錢 tweak 說明與分流路徑行為同步** | ⏳ 待實測 | 於修改器調整城鎮／村莊容量與人口上限並套用，進入戰役或劇本地圖。 | 核心定義、三語說明與 CLI 完全一致，單人 .cktw 作用於已存在與新建聚落，多人退回原版。 |
+| [ISSUE-059](#issue-059-遊戲中面板生成座標取樣同步阻塞-ui-執行緒) | **遊戲中面板生成座標非同步取樣不凍結 UI 訊息幫浦** | ⏳ 待實測 | 開啟遊戲中面板並連續快速點擊「生成單位」，或於取樣時關閉視窗。 | UI 視窗流暢不凍結，快速點擊安全防重入，關閉視窗安全取消等待並恢復游標。 |
+| [ISSUE-060](#issue-060-trainer-定義繞過-i18n簡中顯示繁中且英文說明退回-id) | **Trainer 定義繞過 I18n，簡中顯示繁中且英文說明退回 ID** | ⏳ 待實測 | 切換 zh-TW / zh-CN / en，檢查修改器各作弊／數值調整名稱、說明、參數、117 個 Option 標籤、對話框與 CLI `list-cheats` / `list-tweaks` 輸出。 | 三語 100% 完整在地化、簡繁獨立翻譯、英文無 raw ID 暴露、CLI 與 GUI 契約完全一致。 |
+| [ISSUE-061](#issue-061-game_speed-多選倍率在參數對話框誤建為-00-numericupdown) | **`game_speed.speeds` 通用對話框誤用 0..0 NumericUpDown 致倍率完全無法選取** | ⏳ 待實測 | 於修改器頁面點擊「循環切換遊戲速度」的「⚙ 設定」，勾選倍率並儲存。 | 對話框顯示 CheckBox 多選清單且有三語倍率名稱，儲存後可正常循環切換。 |
+| [ISSUE-062](#issue-062-18-個作弊有-6-個在兩種按鍵模式下都無鍵可綁而被靜默停用) | **18 個作弊有 6 個在兩種按鍵模式下都無鍵可綁而被靜默停用** | ⏳ 待實測 | 以既有設定檔啟動，確認 spawn_unit 自動改綁至 Backspace 且遊戲中面板出現「在滑鼠位置生成單位」按鈕；再取消勾選「保留原版功能」確認其餘作弊可綁定。 | 既有設定檔的衝突綁定能改綁就改綁、改不了才停用並附上解法提示；遊戲中面板保有游標生成按鈕；關閉保留原版後可綁定更多作弊。 |
+| [ISSUE-063](#issue-063-修改器按鍵擷取只擋格線內重複不檢查遊戲與原版保留鍵) | **修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵** | ⏳ 待實測 | 於修改器頁點選任一作弊的按鍵欄進入擷取狀態，分別按下 Del、Ins，以及勾選／取消「保留原版功能」後按下 Add。 | 當場顯示三語正確的「已被佔用」訊息且不寫入該鍵，改按自由鍵可正常設定；套用時不再出現延後爆出的按鍵衝突例外。 |
+| [ISSUE-064](#issue-064-關閉主視窗時設定儲存失敗會被空-catch-靜默吞掉) | **關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉** | ⏳ 待實測 | 在修改器頁把某個 tweak 填成超出範圍的值或清空已啟用作弊的按鍵，然後直接關閉主視窗並重新開啟。 | 關閉前記錄區出現未儲存的原因訊息，關窗流程不被阻擋，重開後設定維持上一次成功儲存的狀態。 |
+| [ISSUE-065](#issue-065-cli-靜默接受未知選項--game---config-會吞掉下一個選項) | **CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項** | ⏳ 待實測 | 以 AI 代理程式驅動 CLI 時故意打錯選項名稱（如 `--gam`），或在 `--game` / `--config` 後面直接接 `--json`。 | 未知選項一律以 InvalidArgs 拒絕並回傳合規 JSON 封套；`--game` / `--config` 缺少值或值本身是另一個選項時明確報錯，`--json` 永不遺失。 |
 
 ---
 
 ## 3. 🔴 未修復／進行中調查清冊 (Open Issues)
 
 > 說明：以下為目前已知、尚未完全修復或正在進行深入逆向工程調查之問題項目。
-
----
-
-### ISSUE-058: 聚落容量與初始金錢 tweak 走 scoped 路徑後不再只影響新建聚落
-
-- **問題編號**: `ISSUE-058`
-- **發現日期**: 2026-08-31
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
-- **問題現象**:
-  - `townhall_maxgold`／`townhall_maxfood`／`townhall_max_population`／`townhall_start_gold`／`village_maxgold`／`village_maxfood`／`village_max_population` 這七項在 GUI 的名稱都帶著「（僅限新建聚落）」，說明文字也重述了 `MapPlacedSettlementNote`。該限制只對舊的 data.pak 路徑成立。
-  - 這七項同時也在 `ScopedTweakPatch.SupportedScopes` 內。一旦被調成非原廠值（或有任何明確 scoped 值），`ShouldRouteToScopedPatch` 會把它整項改走 `.cktw`，class XML 不再被改寫，於是標籤與實際行為對不上：同一個數字，換路徑後影響範圍變大。
-- **逆向分析與根因**:
-  - 舊路徑改的是 `BASETOWNHALL.SC.XML`／`BASEVILLAGE.SC.XML` 的 `settlement_maxgold` 等屬性，只有建構子讀得到，所以地圖／戰役預先擺好的聚落不受影響。
-  - scoped 路徑則是在 gold income helper 進入時（該處仍持有 `EAX=resource*`、`ESI=central building*`）以 `owner*2+type` 索引更新 resource object `+0x0C/+0x10` 與中央建築 `+0x3A`，每個 income tick 都會重寫，因此**連地圖擺好的聚落也會被改**。這是 §4.1 刻意設計的行為（capacity disabled 時完全不寫，才保留戰役地圖 override），不是實作缺陷。
-  - `townhall_start_gold` 的落差方向相反：scoped 路徑只 hook `0x0050132E`，該站僅在 constructor 收到 current-gold override `-1` 時執行，地圖／存檔傳入明確值會繞過。
-- **驗證狀態與實測指引**:
-  - 需要決定產品行為再改字串，不是單純改標籤：(a) 保留現狀但把「僅限新建聚落」改成分路徑敘述；(b) 讓 scoped 路徑也只作用於新建聚落，以維持與舊行為一致。目前傾向 (a)，因為 scoped 路徑的涵蓋範圍其實是使用者要的。
-  - 實測要點：在戰役地圖上調高 `townhall_maxgold` 後確認**已存在**的城鎮容量有無變化，並確認關閉該值後回到原版容量。
-
----
-
-### ISSUE-053: 遊戲保留按鍵表漏列 F2／F3／Del／Ins，原版模式預設綁定直接撞到存讀檔
-
-- **問題編號**: `ISSUE-053`
-- **發現日期**: 2026-08-31
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
-- **問題現象**:
-  - `Cheats.GameReservedKeys` 只收了 `F1`／`F5`~`F10`（來源是 `data/interface/cmdbar/*.ini` 的 HelpText），但遊戲自己的說明清單還用了 `F2`（存檔）、`F3`（讀檔）、`Ins`／`Del`（依經驗值選取 50% 單位）。
-    - 因此 `DescribeConflict` 對這四顆鍵回報「無衝突」，`FreeKeys(false)` 宣稱原版模式有 8 顆自由鍵，實際只有 `F4`／`F11`／`F12`／`Backspace` 4 顆。
-    - 更嚴重的是原版模式的出廠預設正好踩在上面：`Cheats.cs:409` (`F2`)、`:415` (`F3`)、`:488` (`Del`)、`:516` (`Ins`)。使用者關掉小鍵盤模式後，按存檔就會觸發作弊。
-- **逆向分析與根因**:
-  - 完整清單來自遊戲內建說明 "General shortcuts" 段（`assets/langpacks/*/help.json`，30 種在地化一致）：
-    `Space`（地圖）、`Tab`（跳到最近通知）、`` ` ``（血條）、`/`（分數）、`Esc`、`Enter`（聊天／主控台）、
-    `F1` `F2` `F3` `F5` `F6` `F7` `F8` `F9` `F10`、`Pause` `+` `-` `*`（速度）、
-    `Digit 1-9`（叫回編隊，`Ctrl+Digit` 記憶編隊）、`Home` `Page Up` `Page Down` `Insert` `Delete`（選取過濾）。
-    - 另從 `data.pak` 內各介面 ini 的 `key="x"` 掃出單位指令熱鍵佔用 23 個字母：
-      `a b c d e f g h i j k l m n o p r s t u v w x`，只剩 `q` `y` `z` 沒被用。
-  - 引擎的 scdebug 派送只比對虛擬鍵碼、完全不看修飾鍵，所以 `Ctrl+1` 送進來的仍是 `VK_1`，
-    數字列 1~9 一旦綁上作弊，連編隊都會誤觸——數字列整排不可用。
-- **驗證狀態與實測指引**:
-  - 需補齊 `GameReservedKeys`（至少加入 `F2`／`F3`／`Ins`／`Del`），並重新指派原版模式的預設鍵。
-    - 補齊後原版模式自由鍵只剩 4 顆，`FreeKeys` 的數量註解與 GUI 提示文字要一併更新。
 
 ---
 
@@ -155,36 +124,7 @@
 - **驗證狀態與實測指引**:
   - 評估是否需要對選單節流進行解鎖或維持原廠節能行為。
 
----
 
-### ISSUE-047: 外部快照配額被可修復例外耗盡，真正致命現場沒有外部 JSON／完整 dump
-- **問題編號**: `ISSUE-047`
-- **發現日期**: 2026-08-24
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
-- **問題現象與實機證據**:
-  - `15-09-54_launch` 場次共記錄 843 次 first-chance 例外，但外部偵錯器只寫出上限 20 份 JSON；第 20 份是可修復的 `0x006908DF`，真正令程序退出的最後例外 `0x00553180` 沒有外部 JSON。
-  - GUI 對話框仍宣稱「現場全部產出」，並指向第一筆可修復例外的 441 MB dump 與第 20 份 JSON；真正致命現場只由行程內 `ckcrash #12` 與其 574 KB minidump 保存。
-- **影響與修復方向**:
-  - 大量可恢復 AV 仍可耗盡 `MaxCaptures=20`，使最需要的退出現場遺失並誤導使用者開錯 dump。
-  - 外部層應保留／滾動更新「退出前最後候選」快照，GUI 只可在實際保存最後候選時宣稱完整；同時優先顯示最高編號的行程內未修復報告。
-
----
-
-### ISSUE-048: `ckrun-config.txt` 與 `verify` 只比較設定／修補名稱，會錯報遊戲實際修改內容
-- **問題編號**: `ISSUE-048`
-- **發現日期**: 2026-08-24
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象與實機證據**:
-  - 發布版 CLI 已把八個 tweak 還原原廠並成功 apply；直接解析真實 `data.pak\CKTRAINER.TXT`，內容為 `tweaks: {}`、唯一作弊 `diagnose`，`SCDEBUG.XML` 也只有 F10 診斷與原廠速度鍵。
-  - 但 `16-08-18_launch`、`16-28-53_launch` 的 `ckrun-config.txt` 仍列出英雄上限 2000、人口每秒 +100、訓練／研究 20 倍及多個未實際安裝的作弊。`RunManifest.AppendTrainer()` 直接列印傳入的 `ToolkitConfig`，卻把文件描述成「遊戲檔案的實際狀態」。
-  - 目前磁碟 `cktoolkit.json` 同樣要求極端 tweak，但唯讀 `verify --json` 仍回 `allMatchesConfig=true`；`PatchPipeline.GetExpectedPatchesForFile()` 只比較 `trainer_marker` 是否存在，沒有比較 `TrainerMarker.Cheats/Tweaks` 內容。
-- **影響與修復方向**:
-  - 崩潰分析可能把實際原廠數值場次誤判成極端修改器場次；`verify` 也會對「設定未真正套用」給出假成功。
-  - `RunManifest` 必須從實際 PAK marker／遊戲檔案讀值，設定值只能另列為「期望設定」；`verify` 必須比較 trainer marker 的作弊與非預設 tweak payload，並對不一致回 `matchesConfig=false`。
-- **修復方案與自動化驗證**:
-  - `verify` 現在會比對 `TrainerMarker.Cheats/Tweaks` 與實際非預設 payload，並比對 `.cktw` 的完整 legacy 設定；只存在同名 patch 而 payload 不符時回報 `matchesConfig=false`。
-  - `ckrun-config.txt` 現在從遊戲目錄唯讀解析 `data.pak` marker 與 `.cktw`，另外列出本次期望設定，不再把設定物件冒充實際狀態。
-  - Release build 與 SelfTest 全部通過；尚未取得真實遊戲場次的 marker/manifest 交叉驗收，因此保留待實測狀態。
 
 ---
 
@@ -231,6 +171,215 @@
 ## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
 
 > 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+
+---
+
+### ISSUE-065: CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項
+
+- **問題編號**: `ISSUE-065`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `CliHost` 的全域選項解析迴圈（`src/CKToolkit/Cli/CliHost.cs`，約 125–145 行）只認得 `--json`、`--game`、`--config` 三個選項，其餘 token 一律丟進 `commands` 清單。派送時只檢查 `commands[0]`，所以未知**指令**會被擋下（exit 2），未知**選項**卻變成沒人讀的多餘位置參數而被靜默忽略。
+  - 實測（Debug 建置）：`status`、`verify`、`perf get`、`lang list`、`trainer list-cheats`、`version` 傳入 `--bogus-option zzz` 全部回傳 `ok: true` 與 exit 0。相對地 `save list`、`perf set`、`trainer set` 有自己的選項白名單，會正確回傳 `ok: false` 與 exit 2 —— 契約在同一支 CLI 內不一致。
+  - **最危險的案例**：`status --gam "C:/not/a/game"` 回傳 `ok: true`，並且靜默改用自動偵測到的安裝目錄。AI 代理程式只要把 `--game` 打錯一個字母，就會在**另一套安裝**上得到看似成功的結果。這與 ISSUE-045 是同一個失效模式，只是從另一扇門進來。
+  - **`--json` 會遺失**：`--game` / `--config` 用 `i + 1 < args.Length` 判斷後就無條件吃掉下一個 token，完全不檢查那個 token 是不是另一個選項。實測 `status --game --json` 會把 `--json` 當成遊戲目錄值，結果 exit 3 而且**輸出是純文字而非 JSON**；`status --config --json` 則 exit 0、靜默退回預設設定檔，同樣沒有 JSON。這直接違反 AGENTS.md §1「CLI 永不互動、永遠可用 `--json` 取得穩定結構化輸出」。
+  - 選項若出現在最末位而沒有帶值（`i + 1 < args.Length` 為 false），會落入 `else` 分支變成指令 token，同樣被靜默忽略而不是報錯。
+- **修復與證據**:
+  - 全域解析改為先掃一遍 `--json` 再處理其餘選項，因此連解析階段自己的錯誤都必定以合規 JSON 封套輸出，不會再退回純文字。
+  - `--game` / `--config` 取值前先檢查下一個 token 存在且不是以 `--` 開頭；缺值或值本身是選項時回傳 `Error_OptionRequiresValue` 與 `ExitCodes.InvalidArgs`。
+  - 新增 `NoOptionCommandTokenCount` 與 `RejectExtraArgs`：`help`／`version`／`status`／`apply`／`verify`／`perf get`／`lang list`／`lang uninstall`／`trainer list-cheats`／`trainer list-tweaks`／`trainer apply` 這些不吃選項的指令，多餘 token 一律以 `Error_UnknownOption` 拒絕。全域迴圈仍然把無法辨識的 token 往下傳，因為 `--help` 與 `perf set --resolution` 等子指令選項都靠這條路，把關責任落在各指令自己的白名單。
+  - `HandleRestore` 現在拒絕 `--all` 以外的 token，且該檢查排在任何檔案存取之前，因此 `restore --all --bogus` 不會碰到任何遊戲檔案。
+  - 三語新增 `Error_UnknownOption` 與 `Error_OptionRequiresValue`（737→739 鍵，parity 0/0）。
+  - 實測驗證：`status --gam <path>`、`status --bogus zzz`、`perf get --bogus`、`lang list --bogus`、`trainer list-cheats --bogus`、`version --bogus`、`status --game --json`、`status --config --json`、末位懸空的 `--game` 全部回傳 exit 2、`ok:false` 且輸出為 JSON；`status --game --json` 由原本的 exit 3 純文字修正為 exit 2 JSON。合法用法（`status`／`verify`／`perf get`／`lang list`／`trainer list-cheats`／`version`／`help`／`save list` 加 `--json`）全部維持 exit 0、`ok:true`；`perf set --resolution 1920x1080` 等子指令選項仍正常接受；實測後遊戲檔案 mtime 未變動。
+  - SelfTest 新增第 45 組「CLI 未知選項與選項取值嚴謹度測試」共 25 個斷言，涵蓋 8 個不吃選項指令的拒絕與正常路徑、`--gam` 打錯字、`--game`／`--config` 吞值與懸空、以及 restore 的兩條錯誤路徑。Debug／Release 建置 0 warning / 0 error，SelfTest 1008 個斷言全綠。
+- **影響範圍**:
+  - 只影響 CLI，GUI 不受影響。`apply` 與 `restore` 走同一套全域解析，因此打錯 `--game` 會對自動偵測到的安裝套用修補，屬於會實際寫入遊戲檔案的風險路徑。
+
+---
+
+### ISSUE-064: 關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉
+
+- **問題編號**: `ISSUE-064`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `MainForm.PersistCurrentUiSilently` 以 `try { _config = SnapshotConfiguration(); _config.Save(); } catch { }` 包住整個存檔流程。`SnapshotConfiguration` 會呼叫各頁 `SaveConfig`，其中 `TrainerPage.SaveConfig` 會因為按鍵未指定、數值超出範圍或按鍵衝突而丟出例外。
+  - 這條路徑掛在 `FormClosing` 上，因此使用者在修改器頁留下一個無效欄位後直接關閉視窗，整份 UI 變更會無聲消失，畫面上沒有任何提示，下次開啟時看到的是舊設定。
+- **修復與證據**:
+  - 空 catch 改為捕捉例外並寫入主視窗記錄區，明確告知使用者「本次關閉未能儲存設定」以及原因，同時維持原本「不阻擋關窗、不彈出對話框」的行為，避免關閉流程被打斷。
+
+---
+
+### ISSUE-063: 修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵
+
+- **問題編號**: `ISSUE-063`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `TrainerPage.OnKeyCaptured` 只比對格線內是否有其他列已佔用同一個 id，完全沒有呼叫 `Cheats.DescribeConflict`。使用者可以順利把 `Del`、`Ins`（或勾選保留原版時的 `Add`／`Sub`／`Mul`／`Pause`／`Tab`）擷取進去並看到正常顯示，直到按下「套用」才被 `Cheats.BuildScDebug` 丟出例外擋下，錯誤訊息與當初操作已經脫節。
+  - 核心早就提供 `Cheats.FreeKeys(numpadKeys)` 與 `Cheats.DescribeConflict(key, keepVanilla, numpadKeys)`，UI 卻沒有接上。
+  - 另外 `DescribeConflict` 原本回傳硬編繁體中文（`遊戲：說明`、`原版：加速`），一旦顯示在 UI 上就會讓英文與簡體中文使用者看到繁體中文，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
+- **修復與證據**:
+  - `Cheats.GameReservedKeys`／`VanillaReservedKeys` 改為對應 I18n 鍵名，`DescribeConflict` 透過 `Strings.Get` 解析；三語各新增 18 個鍵（717→735），涵蓋 15 個保留鍵佔用者名稱、兩個 `Trainer_Conflict_*` 格式字串與 `Gui_Trainer_KeyCaptureReserved`。
+  - `OnKeyCaptured` 在既有的重複檢查之後補上保留鍵檢查，衝突時以 `Gui_Trainer_KeyCaptureReserved` 顯示「哪一顆鍵被誰佔用」並維持擷取狀態，讓使用者當場改按其他鍵，不再延後到套用時才失敗。
+  - 保留鍵判定隨「小鍵盤模式」與「保留原版功能」兩個核取方塊即時生效，與核心 `ValidateBindings` 使用完全相同的規則來源。
+
+---
+
+### ISSUE-062: 18 個作弊有 6 個在兩種按鍵模式下都無鍵可綁而被靜默停用
+
+- **問題編號**: `ISSUE-062`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 引擎只有 20 個硬編 scdebug 按鍵 id（F1..F12, Pause, Add, Sub, Mul, Del, Ins, Backspace, Tab）。ISSUE-053 把 F2/F3/Del/Ins 補進 `Cheats.GameReservedKeys` 之後，可用鍵位預算被壓縮成：原版模式＋保留原版只有 4 個（F4/F11/F12/Backspace）、小鍵盤模式＋保留原版 13 個（F1..F12/Backspace），但預設按鍵表沒有跟著重排。
+  - 小鍵盤模式下 6 個作弊的 `NumpadKey` 全部落在保留鍵上：`spawn_unit`=Sub、`cycle_unit`=Add、`spawn_item`=Mul、`cycle_item`=Del、`set_selected_level`=Pause、`game_speed`=Ins。`ToolkitConfig.DisableConflictingTrainerBindings` 在載入時把它們全部靜默停用，`perf get --json` 的 warnings 已實際重現這 6 筆。
+  - `InGamePanelForm` 建立按鈕時會跳過未啟用的作弊，因此「在滑鼠位置生成單位／物品」這兩個作弊會從遊戲中面板消失 —— 而 AGENTS.md §2.9 明訂該面板存在的唯一理由就是這兩項的游標取點。ISSUE-054／ISSUE-059 的成果被 ISSUE-053 的修正抵銷。
+  - 原版模式另有 9 個作弊的 `DefaultKey` 直接壓在遊戲功能鍵上，且 `Del` 被 `buff_army` 與 `toggle_fog` 重複指派、`Ins` 被 `explore_all` 與 `spawn_item` 重複指派；兩組撞鍵目前只是被新的 `DefaultEnabled` 守衛遮蔽，使用者一旦手動勾選就會觸發 `Error_TrainerDuplicateKey`。
+- **修復與證據**:
+  - 確立不變式並寫進程式碼註解：任何作弊的 `DefaultKey`／`NumpadKey` 都不得落在 `GameReservedKeys`（那些鍵永遠無法解放），且同一模式內不得重複；該模式沒有合法鍵時一律留空，由使用者手動綁定。
+  - 小鍵盤表只動三筆：`spawn_unit` Sub→Backspace（依 §2.9 優先取得最後一個永久自由鍵）、`cycle_item` Del→Sub、`game_speed` Ins→Tab。重排後 18 個作弊佔用 18 個相異鍵且零保留鍵；關閉「保留原版功能」時 18 個可同時生效，開啟時 13 個可用（引擎硬上限）。
+  - 原版表把 9 個壓在遊戲鍵上的作弊改為空鍵（`gold_fill`／`food_fill`／`buff_army`／`explore_all`／`toggle_fog`／`cycle_unit`／`spawn_item`／`cycle_item`／`set_selected_level`），同時消除 Del／Ins 兩組重複指派；其餘 9 個合法鍵維持不變，`DefaultEnabled` 仍為 4/18，無行為退步。
+  - SelfTest 新增測試群組永久鎖定：預設鍵合法性、零遊戲保留鍵、模式內唯一性、`FreeKeys` 為 4/13、13 個小鍵盤預設啟用彼此不撞、`CursorPositionCheats` 的鍵必為自由鍵、以及 18 個作弊全開時 `BuildScDebug` 在 keepVanilla 關閉下不丟例外、開啟下必丟例外。
+  - 既有設定檔不會只被停用：`ToolkitConfig` 的遷移改名為 `ResolveConflictingTrainerBindings`，採兩遍處理——第一遍記下沒有衝突的已啟用綁定佔走的鍵，第二遍對衝突綁定先嘗試改綁回該作弊「目前」的預設鍵，預設鍵同樣不可用或已被別人佔走時才停用。絕不搶走其他綁定已佔用的鍵，也絕不指派使用者從未選過的任意鍵。
+  - 實機設定檔驗證：使用者原設定（numpadKeys=true、keepVanilla=true）載入後 `spawn_unit` 由 `Sub` 自動改綁為 `Backspace` 並維持啟用，遊戲中面板因此重新取得游標生成按鈕（AGENTS.md §2.9）；其餘 5 項（cycle_unit/Add、spawn_item/Mul、cycle_item/Del、set_selected_level/Pause、game_speed/Ins）在保留原版下確實無鍵可用而停用，這是引擎 13 鍵上限的必然結果，不是缺陷。
+  - 三語新增 `Migration_TrainerReboundConflictingKeys` 與 `Migration_TrainerKeepVanillaHint`（735→737 鍵，parity 0/0）。停用提示只在「保留原版功能」確實擋掉鍵時才附加，keepVanilla 已關閉時不會給出錯誤建議。
+  - 連帶修復本次重排引進的回歸：`SetKeyCell` 對空預設鍵寫入的是空字串而非 null，而 `TrainerPage.SaveConfig` 的判斷是 `if (key is null)`，導致原版按鍵模式下任何儲存／套用都會在第一個空鍵列丟出 `Gui_Trainer_InvalidKey`，即使該列已停用。已改為 `string.IsNullOrEmpty(key)`。此回歸是在跑完整 SelfTest 時才暴露出來的。
+  - SelfTest 第 44 組（18 個斷言）鎖定按鍵表不變式，另於 ToolkitConfig 遷移測試新增 8 個斷言涵蓋改綁、預設鍵被佔用時讓位、關閉保留原版後可改綁，以及提示訊息的出現與不出現條件。Debug／Release 建置 0 warning / 0 error，SelfTest 983 個斷言全綠。
+
+---
+
+### ISSUE-061: game_speed 多選倍率在參數對話框誤建為 0..0 NumericUpDown
+
+- **問題編號**: `ISSUE-061`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `game_speed.speeds` 是 `IsText=true`、`HasOptions=true`、`IsMulti=true` 的八項倍率清單，但通用 `CheatParamsDialog.BuildGenericContent` 只建立 NumericUpDown，且文字參數的 Minimum／Maximum 都是 0，結果 GUI 顯示不可用的 `0..0` 數字欄，八個倍率完全無法選取。
+- **修復與證據**:
+  - 通用參數 UI 現在對 `HasOptions` 建立 CheckBox 選項；multi 可複選、單選項互斥，儲存為逗號清單，重設回 param default。所有 option 顯示／tooltip／搜尋走 `TrainerStrings` adapter。
+  - 三語各新增 8 個 `game_speed/speeds` option keys（598→606），父層映射比對證明零既有 key/value 改寫。單位／物品仍走原專用頁面，沒有專用翻譯 key 時維持 fallback。
+  - Release build 0 warning／0 error、完整 SelfTest 全綠。仍需人工操作對話框確認勾選、儲存、重開與遊戲中速度循環。
+
+---
+
+### ISSUE-060: Trainer 定義繞過 I18n，簡中顯示繁中且英文說明退回 ID
+
+- **問題編號**: `ISSUE-060`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `TrainerPage.DisplayCheatName`／`DisplayTweakName`／`DisplayGroup` 與三個 tooltip 路徑使用 `Strings.IsChinese` 二分法；zh-TW 與 zh-CN 都直接顯示 `Cheats.cs`／`Tweaks.cs` 內硬編的繁體中文，英文則以 `Humanize(id)` 或純 ID 代替名稱／說明。
+  - `CliHost` 的 `trainer list-cheats`／`list-tweaks` JSON 與人類輸出直接使用核心 `Name`／`Label`／`Description`，同樣繞過三語字串表。這讓 GUI 與 CLI 各自決定展示語意，也使核心規則定義承擔 UI 文案責任。
+- **證據與範圍**:
+  - 目前內建清冊為 18 個作弊、28 個有效 tweak、5 個 tweak 分組；作弊參數／選項與 62 種單位／23 種物品顯示文字另有第二層清冊。
+  - **Wave 1 已完成（2026-08-31）**：新增共用 `TrainerStrings` adapter，TrainerPage 與參數對話框標題已接通 18 個作弊名稱、28 個 tweak 名稱與 5 個分組；三語各新增 51 keys（483→534），逐鍵證明所有舊 key/value 零改寫。
+  - **Wave 2 已完成（2026-08-31）**：adapter 與 GUI 接通 18 個作弊＋28 個 tweak 說明；三語各新增 46 description keys（534→580）。三個 TrainerPage tooltip 與 CheatParamsDialog 主說明已使用目前語系。
+  - **Wave 3A 已完成（2026-08-31）**：接通目前 18 cheats 動態清冊中的 16 個非 hidden `CheatParam` 標籤；三語各新增精確 16 個 `Trainer_Cheat_<id>_Param_<name>_Label` keys（582→598）。
+  - **Wave 3B 已完成（2026-08-31）**：新增可逆 `Uri.EscapeDataString` option key 與 adapter；三語各新增 8 個 game_speed 倍率 keys（598→606）。
+  - **Wave 3C & CLI 接線已完成（2026-08-31）**：
+    - 三語各新增 63 種單位（`spawn_unit.units`）＋23 種攜帶物品（`spawn_unit.items`）＋23 種生成物品（`spawn_item.items`）共 109 個 Option 標籤鍵及 `Gui_Trainer_Summary_CarriedItems`（三語字典擴充至 716 keys）。
+    - `TrainerStrings` adapter 新增 `GetUnitLabel` 與 `GetItemLabel`。
+    - `TrainerPage` 摘要與 `CheatParamsDialog` 全面接上 `TrainerStrings`，消除硬編字串。
+    - `CliHost.Trainer.cs`（`trainer list-cheats`、`list-tweaks`、`trainer set`）全面接上 `TrainerStrings`，JSON schema 與純文字輸出均支援三語。
+    - SelfTest Group 43 完整覆蓋所有 117 個 Option 鍵、三語適配器、三語對話框建立與 CLI 輸出契約。全數 43 組 SelfTest 全綠通過。
+- **驗證邊界**:
+  - SelfTest Group 43 動態鎖定 18 作弊／28 Tweak／5 分組／16 參數標籤／117 Option 標籤清冊，驗證三語 100% 覆蓋、簡繁獨立翻譯、英文非原始 ID、以及 unknown ID fail-soft fallback。
+  - Release build 0 warning / 0 error，SelfTest 794+ assertions 100% 通過。依據專案協作紀律，本項目標記為 `⏳ 已修碼 · 待實測`，待使用者在遊戲實機確認。
+
+---
+
+### ISSUE-059: 遊戲中面板生成座標取樣同步阻塞 UI 執行緒
+
+- **問題編號**: `ISSUE-059`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `InGamePanelForm.SpawnAtViewCentre` 由作弊按鈕的 WinForms `Click` 事件同步呼叫 `SampleMapPoint()`。
+  - `SampleMapPoint()` 最多輪詢 21 次，每次在 UI 執行緒執行 `Thread.Sleep(10)`；一次生成操作會凍結訊息幫浦約 10–210ms，期間視窗無法重繪或處理輸入。
+- **靜態證據與修復方向**:
+  - 現行程式位於 `src/CKToolkit/Gui/InGamePanelForm.cs:261-317`；`SampleTimeoutMs=200`、`SampleStepMs=10`。
+  - 改為可取消的非同步取樣（`Task.Delay`），防止同一按鈕重入，並在視窗關閉／Dispose 時取消等待及恢復游標；不得擴張 `GameMemory` 的 8-byte 存取範圍。
+  - 補 SelfTest 驗證生成點取樣不再使用 `Thread.Sleep`，並維持失敗時的倒數／游標歸位退路。
+- **驗證邊界**:
+  - 已以可取消 `Task.Delay` 取代同步 `Thread.Sleep`；單一 operation 擁有並釋放 CTS，快速連點拒絕重入，關窗／Dispose／連線更換／例外均取消等待並恢復游標。成功路徑仍是「游標歸位 → 原樣寫回引擎 MapPoint → 送鍵」，失敗路徑仍是「中央送鍵 → 可取消的延遲歸位」。
+  - Release build 0 warning／0 error；完整 SelfTest 全綠。新增行為測試覆蓋 UI 訊息幫浦不中斷、兩次穩定讀值、MapPoint 寫回順序、快速連點、Dispose 取消、fallback hold 與例外安全復原。
+  - Build／SelfTest 只能證明非阻塞控制流與既有邊界未回歸；仍需真實遊戲確認座標取樣、游標歸位與快速連點觀感。
+
+---
+
+### ISSUE-058: 聚落容量與初始金錢 tweak 走 scoped 路徑後不再只影響新建聚落
+
+- **問題編號**: `ISSUE-058`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `townhall_maxgold`／`townhall_maxfood`／`townhall_max_population`／`townhall_start_gold`／`village_maxgold`／`village_maxfood`／`village_max_population` 這七項在 GUI 的名稱都帶著「（僅限新建聚落）」，說明文字也重述了 `MapPlacedSettlementNote`。該限制只對舊的 data.pak 路徑成立。
+  - 這七項同時也在 `ScopedTweakPatch.SupportedScopes` 內。一旦被調成非原廠值（或有任何明確 scoped 值），`ShouldRouteToScopedPatch` 會把它整項改走 `.cktw`，class XML 不再被改寫，於是標籤與實際行為對不上：同一個數字，換路徑後影響範圍變大。
+- **逆向分析與根因**:
+  - 舊路徑改的是 `BASETOWNHALL.SC.XML`／`BASEVILLAGE.SC.XML` 的 `settlement_maxgold` 等屬性，只有建構子讀得到，所以地圖／戰役預先擺好的聚落不受影響。
+  - scoped 路徑則是在 gold income helper 進入時（該處仍持有 `EAX=resource*`、`ESI=central building*`）以 `owner*2+type` 索引更新 resource object `+0x0C/+0x10` 與中央建築 `+0x3A`，每個 income tick 都會重寫，因此**連地圖擺好的聚落也會被改**。這是 §4.1 刻意設計的行為（capacity disabled 時完全不寫，才保留戰役地圖 override），不是實作缺陷。
+  - `townhall_start_gold` 的落差方向相反：scoped 路徑只 hook `0x0050132E`，該站僅在 constructor 收到 current-gold override `-1` 時執行，地圖／存檔傳入明確值會繞過。
+- **修復方案與實作細節**:
+  - 採分路徑敘述（方案 a）：六個 `maxgold`／`maxfood`／`max_population` 名稱移除「（僅限新建聚落）」，核心 `Tweaks.cs` 與三語字典（`strings.*.json`）明示單人 `.cktw` 會作用於既有＋新建聚落且多人退回原版；`townhall_start_gold` 仍保留「（僅限新建聚落）」，並明示 constructor `-1` fallback 與 map/save bypass。
+  - Release build 0 warning / 0 error，SelfTest Group 40 測試全綠。仍需真實遊戲中於戰役地圖確認既有聚落容量。
+
+---
+
+### ISSUE-053: 遊戲保留按鍵表漏列 F2／F3／Del／Ins，原版模式預設綁定直接撞到存讀檔
+
+- **問題編號**: `ISSUE-053`
+- **發現日期**: 2026-08-31
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `Cheats.GameReservedKeys` 只收了 `F1`／`F5`~`F10`（來源是 `data/interface/cmdbar/*.ini` 的 HelpText），但遊戲自己的說明清單還用了 `F2`（存檔）、`F3`（讀檔）、`Ins`／`Del`（依經驗值選取 50% 單位）。
+    - 因此 `DescribeConflict` 對這四顆鍵回報「無衝突」，`FreeKeys(false)` 宣稱原版模式有 8 顆自由鍵，實際只有 `F4`／`F11`／`F12`／`Backspace` 4 顆。
+    - 更嚴重的是原版模式的出廠預設正好踩在上面：`Cheats.cs:409` (`F2`)、`:415` (`F3`)、`:488` (`Del`)、`:516` (`Ins`)。使用者關掉小鍵盤模式後，按存檔就會觸發作弊。
+- **逆向分析與根因**:
+  - 完整清單來自遊戲內建說明 "General shortcuts" 段（`assets/langpacks/*/help.json`，30 種在地化一致）：
+    `Space`（地圖）、`Tab`（跳到最近通知）、`` ` ``（血條）、`/`（分數）、`Esc`、`Enter`（聊天／主控台）、
+    `F1` `F2` `F3` `F5` `F6` `F7` `F8` `F9` `F10`、`Pause` `+` `-` `*`（速度）、
+    `Digit 1-9`（叫回編隊，`Ctrl+Digit` 記憶編隊）、`Home` `Page Up` `Page Down` `Insert` `Delete`（選取過濾）。
+    - 另從 `data.pak` 內各介面 ini 的 `key="x"` 掃出單位指令熱鍵佔用 23 個字母：
+      `a b c d e f g h i j k l m n o p r s t u v w x`，只剩 `q` `y` `z` 沒被用。
+  - 引擎的 scdebug 派送只比對虛擬鍵碼、完全不看修飾鍵，所以 `Ctrl+1` 送進來的仍是 `VK_1`，
+    數字列 1~9 一旦綁上作弊，連編隊都會誤觸——數字列整排不可用。
+- **修復方案與驗證狀態**:
+  - `EffectiveKey`／`DescribeConflict`／`ValidateBindings` 成為 BuildScDebug、Installer、GUI、CLI 的單一驗證來源；原版模式只預設啟用 `loyalty_max@Backspace`、`heal_army@F4`、`smite_enemies@F11`、`diagnose@F12`。小鍵盤模式只把 F1–F12 視為重映射，實體 Ins／Del／Pause 等仍會拒絕。
+  - 舊設定載入只在記憶體停用已知衝突項並發出三語 migration warning，讀取零寫入；後續 GUI／CLI 明確儲存才持久化。CLI 新設定衝突回 InvalidArgs／JSON 錯誤且設定檔逐位元組零寫入。
+  - Release build 0 warning／0 error、完整 SelfTest 全綠；涵蓋兩模式精確自由鍵、numpad F2 放行／Ins 拒絕、FromJson 自癒、Load 零寫入、CLI／GUI 拒絕與後續持久化。仍需真實遊戲確認 F2/F3/Ins/Del 不再誤觸與小鍵盤代送行為後才能升為 ✅。
+
+---
+
+### ISSUE-047: 外部快照配額被可修復例外耗盡，真正致命現場沒有外部 JSON／完整 dump
+
+- **問題編號**: `ISSUE-047`
+- **發現日期**: 2026-08-24
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象與實機證據**:
+  - `15-09-54_launch` 場次共記錄 843 次 first-chance 例外，但外部偵錯器只寫出上限 20 份 JSON；第 20 份是可修復的 `0x006908DF`，真正令程序退出的最後例外 `0x00553180` 沒有外部 JSON。
+  - GUI 對話框仍宣稱「現場全部產出」，並指向第一筆可修復例外的 441 MB dump 與第 20 份 JSON；真正致命現場只由行程內 `ckcrash #12` 與其 574 KB minidump 保存。
+- **修復方案與實作細節**:
+  - 當 first-chance 例外次數超過 `MaxCaptures = 20` 時，`CrashCatcher` 動態更新滾動最新的候選快照檔案 `<base>-crash-latest.json`。
+  - 當後續出現致命 second-chance (`FirstChance == 0`) 例外時，同時寫出 `<base>-crash-latest.dmp`，並將 `StatePath` / `DumpPath` 指向該最新候選快照。
+  - SelfTest Group 36 新增 843-exception 模擬斷言，確認 `LatestSummary` 與滾動快照正確更新。
+
+---
+
+### ISSUE-048: `ckrun-config.txt` 與 `verify` 只比較設定／修補名稱，會錯報遊戲實際修改內容
+
+- **問題編號**: `ISSUE-048`
+- **發現日期**: 2026-08-24
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象與實機證據**:
+  - 發布版 CLI 已把八個 tweak 還原原廠並成功 apply；直接解析真實 `data.pak\CKTRAINER.TXT`，內容為 `tweaks: {}`、唯一作弊 `diagnose`，`SCDEBUG.XML` 也只有 F10 診斷與原廠速度鍵。
+  - 但 `16-08-18_launch`、`16-28-53_launch` 的 `ckrun-config.txt` 仍列出英雄上限 2000、人口每秒 +100、訓練／研究 20 倍及多個未實際安裝的作弊。`RunManifest.AppendTrainer()` 直接列印傳入的 `ToolkitConfig`，卻把文件描述成「遊戲檔案的實際狀態」。
+  - 目前磁碟 `cktoolkit.json` 同樣要求極端 tweak，但唯讀 `verify --json` 仍回 `allMatchesConfig=true`；`PatchPipeline.GetExpectedPatchesForFile()` 只比較 `trainer_marker` 是否存在，沒有比較 `TrainerMarker.Cheats/Tweaks` 內容。
+- **修復方案與自動化驗證**:
+  - `verify` 現在會比對 `TrainerMarker.Cheats/Tweaks` 與實際非預設 payload，並比對 `.cktw` 的完整 legacy 設定；只存在同名 patch 而 payload 不符時回報 `matchesConfig=false`。
+  - `ckrun-config.txt` 現在從遊戲目錄唯讀解析 `data.pak` marker 與 `.cktw`，另外列出本次期望設定，不再把設定物件冒充實際狀態。
+  - Release build 與 SelfTest 全部通過；尚未取得真實遊戲場次的 marker/manifest 交叉驗收，因此保留待實測狀態。
 
 ---
 

@@ -517,7 +517,15 @@ public sealed class MainForm : Form
     private void PersistCurrentUiSilently()
     {
         if (_initialising || _busy || _config.LoadError is not null) return;
-        try { _config = SnapshotConfiguration(); _config.Save(); } catch { }
+        try
+        {
+            _config = SnapshotConfiguration();
+            _config.Save();
+        }
+        catch (Exception ex)
+        {
+            AppendLog(Strings.Get("Gui_Log_Error", Strings.Get("Error_GeneralFailure", ex.Message)));
+        }
     }
 
     private sealed record LanguageChoice(string Code, string Label)

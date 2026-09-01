@@ -15,6 +15,7 @@ public sealed class CheatParamsDialog : Form
     private readonly Cheat _cheat;
     private readonly Dictionary<string, string> _parameters;
     private readonly Dictionary<string, Control> _inputControls = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(CheatParamOption Option, CheckBox Box)>> _genericOptionControls = new(StringComparer.Ordinal);
     private readonly List<CheckBox> _unitCheckBoxes = [];
     private readonly List<CheckBox> _itemCheckBoxes = [];
     private readonly HashSet<string> _selectedUnits = new(StringComparer.OrdinalIgnoreCase);
@@ -48,10 +49,10 @@ public sealed class CheatParamsDialog : Form
 
     private void InitializeUi()
     {
-        bool isZh = Strings.IsChinese;
-        string cheatTitle = isZh ? _cheat.Name : _cheat.Id;
+        string cheatTitle = TrainerStrings.GetCheatName(_cheat.Id, _cheat.Name);
         Text = Strings.Get("Gui_Trainer_DialogTitle", cheatTitle);
         StartPosition = FormStartPosition.CenterParent;
+        AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -98,7 +99,7 @@ public sealed class CheatParamsDialog : Form
         };
         var descLabel = new Label
         {
-            Text = isZh ? _cheat.Description : _cheat.Id,
+            Text = TrainerStrings.GetCheatDescription(_cheat.Id, _cheat.Description),
             ForeColor = Color.FromArgb(71, 85, 105),
             AutoSize = true,
             MaximumSize = new Size((isSpawnUnit || isSpawnItem) ? 770 : 510, 0),
@@ -132,7 +133,6 @@ public sealed class CheatParamsDialog : Form
 
     private Control BuildGenericContent()
     {
-        bool isZh = Strings.IsChinese;
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -151,49 +151,102 @@ public sealed class CheatParamsDialog : Form
 
             var lbl = new Label
             {
-                Text = param.DisplayLabel(!isZh),
+                Text = TrainerStrings.GetCheatParamLabel(_cheat.Id, param),
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
                 Font = new Font(Font, FontStyle.Bold),
                 Margin = new Padding(4, 8, 12, 8),
             };
 
-            var num = new NumericUpDown
-            {
-                Minimum = param.Minimum,
-                Maximum = param.Maximum,
-                ThousandsSeparator = true,
-                Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                Margin = new Padding(4, 6, 12, 6),
-            };
-
-            if (_parameters.TryGetValue(param.Name, out string? valStr) &&
-                decimal.TryParse(valStr, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal val))
-            {
-                num.Value = Math.Clamp(val, param.Minimum, param.Maximum);
-            }
-            else if (param.Default is decimal or int or long)
-            {
-                num.Value = Math.Clamp(Convert.ToDecimal(param.Default, CultureInfo.InvariantCulture), param.Minimum, param.Maximum);
-            }
-
-            _inputControls[param.Name] = num;
-
-            var hint = new Label
-            {
-                Text = Strings.Get("Gui_Trainer_ParamRange",
-                    Convert.ToString(param.Default, CultureInfo.InvariantCulture) ?? "",
-                    param.Minimum.ToString("N0", CultureInfo.CurrentCulture),
-                    param.Maximum.ToString("N0", CultureInfo.CurrentCulture)),
-                ForeColor = Color.FromArgb(100, 116, 139),
-                AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                Margin = new Padding(4, 8, 4, 8),
-            };
-
             panel.Controls.Add(lbl, 0, row);
-            panel.Controls.Add(num, 1, row);
-            panel.Controls.Add(hint, 2, row);
+
+            if (param.HasOptions)
+            {
+                var choices = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Fill,
+                    AutoSize = true,
+                    WrapContents = true,
+                    Margin = new Padding(4, 4, 4, 6),
+                };
+                string configured = _parameters.TryGetValue(param.Name, out string? optionValue)
+                    ? optionValue
+                    : Convert.ToString(param.Default, CultureInfo.InvariantCulture) ?? string.Empty;
+                var selected = configured.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.Ordinal);
+                var optionControls = new List<(CheatParamOption Option, CheckBox Box)>();
+
+                foreach (CheatParamOption option in param.Options!)
+                {
+                    string optionLabel = TrainerStrings.GetCheatOptionLabel(_cheat.Id, param.Name, option);
+                    var optionBox = new CheckBox
+                    {
+                        Text = optionLabel,
+                        Tag = option,
+                        AutoSize = true,
+                        Checked = selected.Contains(option.Value),
+                        Margin = new Padding(4, 4, 12, 4),
+                    };
+                    _toolTip.SetToolTip(optionBox, OptionLabelWithValue(optionLabel, option.Value));
+                    if (!param.IsMulti)
+                    {
+                        optionBox.CheckedChanged += (_, _) =>
+                        {
+                            if (!optionBox.Checked) return;
+                            foreach (var (_, otherBox) in optionControls)
+                            {
+                                if (otherBox != optionBox)
+                                    otherBox.Checked = false;
+                            }
+                        };
+                    }
+                    optionControls.Add((option, optionBox));
+                    choices.Controls.Add(optionBox);
+                }
+
+                _genericOptionControls[param.Name] = optionControls;
+                _inputControls[param.Name] = choices;
+                panel.Controls.Add(choices, 1, row);
+                panel.SetColumnSpan(choices, 2);
+            }
+            else
+            {
+                var num = new NumericUpDown
+                {
+                    Minimum = param.Minimum,
+                    Maximum = param.Maximum,
+                    ThousandsSeparator = true,
+                    Anchor = AnchorStyles.Left | AnchorStyles.Right,
+                    Margin = new Padding(4, 6, 12, 6),
+                };
+
+                if (_parameters.TryGetValue(param.Name, out string? valStr) &&
+                    decimal.TryParse(valStr, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal val))
+                {
+                    num.Value = Math.Clamp(val, param.Minimum, param.Maximum);
+                }
+                else if (param.Default is decimal or int or long)
+                {
+                    num.Value = Math.Clamp(Convert.ToDecimal(param.Default, CultureInfo.InvariantCulture), param.Minimum, param.Maximum);
+                }
+
+                _inputControls[param.Name] = num;
+
+                var hint = new Label
+                {
+                    Text = Strings.Get("Gui_Trainer_ParamRange",
+                        Convert.ToString(param.Default, CultureInfo.InvariantCulture) ?? "",
+                        param.Minimum.ToString("N0", CultureInfo.CurrentCulture),
+                        param.Maximum.ToString("N0", CultureInfo.CurrentCulture)),
+                    ForeColor = Color.FromArgb(100, 116, 139),
+                    AutoSize = true,
+                    Anchor = AnchorStyles.Left,
+                    Margin = new Padding(4, 8, 4, 8),
+                };
+
+                panel.Controls.Add(num, 1, row);
+                panel.Controls.Add(hint, 2, row);
+            }
             row++;
         }
 
@@ -238,9 +291,14 @@ public sealed class CheatParamsDialog : Form
             Margin = new Padding(0, 0, 0, 8),
         };
 
+        var countParam = _cheat.Parameters.FirstOrDefault(p => p.Name == "count");
+        string countLabelText = countParam is not null
+            ? TrainerStrings.GetCheatParamLabel(_cheat.Id, countParam)
+            : TrainerStrings.GetCheatParamLabel(_cheat.Id, "count", "每次生成數量", "Spawn Count");
+
         var countLabel = new Label
         {
-            Text = isZh ? "每次生成數量：" : "Spawn Count:",
+            Text = isZh ? $"{countLabelText}：" : $"{countLabelText}:",
             AutoSize = true,
             Font = new Font(Font, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
@@ -261,9 +319,14 @@ public sealed class CheatParamsDialog : Form
         }
         _inputControls["count"] = countNum;
 
+        var levelParam = _cheat.Parameters.FirstOrDefault(p => p.Name == "level");
+        string levelLabelText = levelParam is not null
+            ? TrainerStrings.GetCheatParamLabel(_cheat.Id, levelParam)
+            : TrainerStrings.GetCheatParamLabel(_cheat.Id, "level", "初始等級", "Spawn Level");
+
         var levelLabel = new Label
         {
-            Text = isZh ? "初始等級 (Level)：" : "Spawn Level:",
+            Text = isZh ? $"{levelLabelText}：" : $"{levelLabelText}:",
             AutoSize = true,
             Font = new Font(Font, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
@@ -344,6 +407,7 @@ public sealed class CheatParamsDialog : Form
         var tabs = new TabControl { Dock = DockStyle.Fill };
         var unitsParam = _cheat.Parameters.FirstOrDefault(p => p.Name == "units");
         var unitOptions = unitsParam?.Options ?? Cheats.UnitOptions;
+        string unitsParamName = unitsParam?.Name ?? "units";
 
         // 初始化已選取的單位集合
         string initialUnits = _parameters.TryGetValue("units", out string? u) ? u : Cheats.DefaultUnitList;
@@ -375,16 +439,17 @@ public sealed class CheatParamsDialog : Form
 
             foreach (var opt in unitOptions.Where(pred))
             {
+                string optionLabel = TrainerStrings.GetCheatOptionLabel(_cheat.Id, unitsParamName, opt);
                 var cb = new CheckBox
                 {
-                    Text = isZh ? $"{opt.Label} ({opt.Value})" : $"{opt.EnglishLabel} ({opt.Value})",
+                    Text = $"{optionLabel} ({opt.Value})",
                     Tag = opt,
                     Dock = DockStyle.Fill,
                     AutoEllipsis = true,
                     Margin = new Padding(4, 2, 4, 2),
                     Checked = _selectedUnits.Contains(opt.Value),
                 };
-                _toolTip.SetToolTip(cb, isZh ? $"{opt.Label}\n代號: {opt.Value}\n英文: {opt.EnglishLabel}" : $"{opt.EnglishLabel} ({opt.Value})");
+                _toolTip.SetToolTip(cb, Strings.Get("Gui_Trainer_Option_Tooltip", optionLabel, opt.Value, opt.EnglishLabel));
                 cb.CheckedChanged += (_, _) => OnUnitCheckedChanged(cb, opt.Value);
                 _unitCheckBoxes.Add(cb);
                 boxList.Add(cb);
@@ -400,19 +465,21 @@ public sealed class CheatParamsDialog : Form
         // 物品分頁 (Carried Items) - 2 欄寬度以完整顯示裝備名稱與能力加成
         var itemsTab = new TabPage(Strings.Get("Gui_Trainer_Cat_Items")) { BackColor = Color.FromArgb(248, 250, 252), Padding = new Padding(6) };
         _itemsGrid = CreateGrid(2);
+        string carriedItemsParamName = _cheat.Parameters.FirstOrDefault(p => p.Name == "items")?.Name ?? "items";
 
         foreach (var opt in Cheats.ItemOptions)
         {
+            string optionLabel = TrainerStrings.GetCheatOptionLabel(_cheat.Id, carriedItemsParamName, opt);
             var cb = new CheckBox
             {
-                Text = isZh ? opt.Label : opt.EnglishLabel,
+                Text = optionLabel,
                 Tag = opt,
                 Dock = DockStyle.Fill,
                 AutoEllipsis = true,
                 Margin = new Padding(4, 2, 4, 2),
                 Checked = _selectedItems.Contains(opt.Value),
             };
-            _toolTip.SetToolTip(cb, isZh ? $"{opt.Label}\n代號: {opt.Value}\n英文: {opt.EnglishLabel}" : $"{opt.EnglishLabel} (ID: {opt.Value})");
+            _toolTip.SetToolTip(cb, Strings.Get("Gui_Trainer_Option_Tooltip", optionLabel, opt.Value, opt.EnglishLabel));
             cb.CheckedChanged += (_, _) => OnItemCheckedChanged(cb, opt.Value);
             _itemCheckBoxes.Add(cb);
         }
@@ -450,9 +517,14 @@ public sealed class CheatParamsDialog : Form
             Margin = new Padding(0, 0, 0, 8),
         };
 
+        var countParam = _cheat.Parameters.FirstOrDefault(p => p.Name == "count");
+        string countLabelText = countParam is not null
+            ? TrainerStrings.GetCheatParamLabel(_cheat.Id, countParam)
+            : TrainerStrings.GetCheatParamLabel(_cheat.Id, "count", "每次生成數量", "Spawn Count");
+
         var countLabel = new Label
         {
-            Text = isZh ? "每次生成數量：" : "Spawn Count:",
+            Text = isZh ? $"{countLabelText}：" : $"{countLabelText}:",
             AutoSize = true,
             Font = new Font(Font, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
@@ -534,6 +606,7 @@ public sealed class CheatParamsDialog : Form
             ("heal", Strings.Get("Gui_Trainer_Cat_Heal"), opt => opt.Category == "Heal"),
             ("special", Strings.Get("Gui_Trainer_Cat_Special"), opt => opt.Category == "Special"),
         };
+        string itemsParamName = _cheat.Parameters.FirstOrDefault(p => p.Name == "items")?.Name ?? "items";
 
         foreach (var (key, name, pred) in categories)
         {
@@ -543,16 +616,17 @@ public sealed class CheatParamsDialog : Form
 
             foreach (var opt in Cheats.ItemOptions.Where(pred))
             {
+                string optionLabel = TrainerStrings.GetCheatOptionLabel(_cheat.Id, itemsParamName, opt);
                 var cb = new CheckBox
                 {
-                    Text = isZh ? opt.Label : opt.EnglishLabel,
+                    Text = optionLabel,
                     Tag = opt,
                     Dock = DockStyle.Fill,
                     AutoEllipsis = true,
                     Margin = new Padding(4, 2, 4, 2),
                     Checked = _selectedItems.Contains(opt.Value),
                 };
-                _toolTip.SetToolTip(cb, isZh ? $"{opt.Label}\n代號: {opt.Value}\n英文: {opt.EnglishLabel}" : $"{opt.EnglishLabel} (ID: {opt.Value})");
+                _toolTip.SetToolTip(cb, Strings.Get("Gui_Trainer_Option_Tooltip", optionLabel, opt.Value, opt.EnglishLabel));
                 cb.CheckedChanged += (_, _) => OnItemCheckedChanged(cb, opt.Value);
                 _itemCheckBoxes.Add(cb);
                 boxList.Add(cb);
@@ -611,6 +685,17 @@ public sealed class CheatParamsDialog : Form
         }
         table.ResumeLayout();
     }
+
+    private static string OptionLabelWithValue(string label, string value) =>
+        string.Equals(label, value, StringComparison.Ordinal)
+            ? value
+            : $"{label} ({value})";
+
+    private bool OptionMatchesSearch(string paramName, CheatParamOption option, string query) =>
+        option.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        TrainerStrings.GetCheatOptionLabel(_cheat.Id, paramName, option).Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        option.Label.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+        option.EnglishLabel.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private Button CreatePresetButton(string text, Action action)
     {
@@ -737,9 +822,7 @@ public sealed class CheatParamsDialog : Form
             var filtered = string.IsNullOrEmpty(query)
                 ? allBoxes
                 : allBoxes.Where(cb => cb.Tag is CheatParamOption opt &&
-                    (opt.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.Label.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.EnglishLabel.Contains(query, StringComparison.OrdinalIgnoreCase))).ToList();
+                    OptionMatchesSearch("units", opt, query)).ToList();
 
             PopulateGrid(panel, filtered, 3);
         }
@@ -750,9 +833,7 @@ public sealed class CheatParamsDialog : Form
             var filtered = string.IsNullOrEmpty(query)
                 ? allBoxes
                 : allBoxes.Where(cb => cb.Tag is CheatParamOption opt &&
-                    (opt.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.Label.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.EnglishLabel.Contains(query, StringComparison.OrdinalIgnoreCase))).ToList();
+                    OptionMatchesSearch("items", opt, query)).ToList();
 
             PopulateGrid(panel, filtered, 2);
         }
@@ -763,9 +844,7 @@ public sealed class CheatParamsDialog : Form
             var filteredItems = string.IsNullOrEmpty(query)
                 ? _itemCheckBoxes
                 : _itemCheckBoxes.Where(cb => cb.Tag is CheatParamOption opt &&
-                    (opt.Value.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.Label.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                     opt.EnglishLabel.Contains(query, StringComparison.OrdinalIgnoreCase))).ToList();
+                    OptionMatchesSearch("items", opt, query)).ToList();
 
             PopulateGrid(_itemsGrid, filteredItems, 2);
         }
@@ -898,7 +977,15 @@ public sealed class CheatParamsDialog : Form
         {
             foreach (var param in _cheat.Parameters.Where(p => !p.Hidden))
             {
-                if (_inputControls.TryGetValue(param.Name, out Control? ctrl) && ctrl is NumericUpDown num)
+                if (_genericOptionControls.TryGetValue(param.Name, out var optionControls))
+                {
+                    var defaults = (Convert.ToString(param.Default, CultureInfo.InvariantCulture) ?? string.Empty)
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .ToHashSet(StringComparer.Ordinal);
+                    foreach (var (option, box) in optionControls)
+                        box.Checked = defaults.Contains(option.Value);
+                }
+                else if (_inputControls.TryGetValue(param.Name, out Control? ctrl) && ctrl is NumericUpDown num)
                 {
                     num.Value = Math.Clamp(Convert.ToDecimal(param.Default, CultureInfo.InvariantCulture), param.Minimum, param.Maximum);
                 }
@@ -945,7 +1032,13 @@ public sealed class CheatParamsDialog : Form
         {
             foreach (var param in _cheat.Parameters.Where(p => !p.Hidden))
             {
-                if (_inputControls.TryGetValue(param.Name, out Control? ctrl) && ctrl is NumericUpDown num)
+                if (_genericOptionControls.TryGetValue(param.Name, out var optionControls))
+                {
+                    _parameters[param.Name] = string.Join(',', optionControls
+                        .Where(item => item.Box.Checked)
+                        .Select(item => item.Option.Value));
+                }
+                else if (_inputControls.TryGetValue(param.Name, out Control? ctrl) && ctrl is NumericUpDown num)
                 {
                     _parameters[param.Name] = ((long)num.Value).ToString(CultureInfo.InvariantCulture);
                 }

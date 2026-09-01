@@ -1,4 +1,4 @@
-﻿using CKToolkit.Core.Common;
+using CKToolkit.Core.Common;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -66,10 +66,11 @@ public static class Tweaks
     /// 流失間隔調大，就能在地圖寫死的上限之上長期維持高人口；而收入是
     /// 「人口 × 生產率 ÷ 100」（0x502740），完全不看上限，人口越高收入越高。
     /// </summary>
-    private const string MapPlacedSettlementNote =
-        "注意：劇本與戰役地圖會把每座聚落的容量／人口上限直接存在地圖檔裡，"
-        + "開局就存在的聚落一律以地圖的值為準，這裡改的只會套用到遊戲中新建立的聚落。"
-        + "想在現有聚落衝人口，請改用「人口暴增」熱鍵＋「經濟」分頁的人口流失設定。";
+    private const string ScopedSettlementNote =
+        "單人模式下，非原版值或明確分流值會走 .cktw，每個收入週期套用至已存在與新建聚落；多人連線退回原版值。";
+
+    private const string StartGoldNote =
+        "此項仍只影響新建聚落：單人模式 .cktw hook 只在建構子收到 current-gold override -1 時執行；地圖或存檔傳入明確值時會繞過。多人連線退回原版值。";
 
     public static readonly IReadOnlyList<Tweak> All =
     [
@@ -95,31 +96,28 @@ public static class Tweaks
             "ExpFromArmyDivider", 10, 1, 1000),
 
         // --- 聚落 ---
-        // 這一組除了「每棟房屋人口加成」以外，全部都只是**地圖沒寫時才用的預設值**，
-        // 詳見下方 MapPlacedSettlementNote。想在戰役／劇本地圖上真的提高人口上限，
-        // 唯一有效的是 house_pop_bonus。
-        new AttrTweak("townhall_maxgold", GroupTown, "城鎮金錢容量（僅限新建聚落）",
+        new AttrTweak("townhall_maxgold", GroupTown, "城鎮金錢容量",
             "羅馬城鎮中心的金錢儲存上限，原版 100000。"
             + "熱鍵「金錢補滿」補到的是聚落當下的實際上限。"
-            + MapPlacedSettlementNote,
+            + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_maxgold", 100000, 0, 100000000),
-        new AttrTweak("townhall_maxfood", GroupTown, "城鎮食物容量（僅限新建聚落）",
-            "羅馬城鎮中心的食物儲存上限，原版 100000。" + MapPlacedSettlementNote,
+        new AttrTweak("townhall_maxfood", GroupTown, "城鎮食物容量",
+            "羅馬城鎮中心的食物儲存上限，原版 100000。" + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_maxfood", 100000, 0, 100000000),
         new AttrTweak("townhall_start_gold", GroupTown, "城鎮初始金錢（僅限新建聚落）",
-            "城鎮中心建立時的初始金錢，原版 2500。" + MapPlacedSettlementNote,
+            "城鎮中心建立時的初始金錢，原版 2500。" + StartGoldNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_gold", 2500, 0, 100000000),
-        new AttrTweak("townhall_max_population", GroupTown, "城鎮人口上限（僅限新建聚落）",
-            "單一城鎮的人口上限，原版 100。" + MapPlacedSettlementNote,
+        new AttrTweak("townhall_max_population", GroupTown, "城鎮人口上限",
+            "單一城鎮的人口上限，原版 100。" + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "max_population", 100, 1, 100000),
-        new AttrTweak("village_max_population", GroupTown, "村莊人口上限（僅限新建聚落）",
-            "單一村莊的人口上限，原版 20。" + MapPlacedSettlementNote,
+        new AttrTweak("village_max_population", GroupTown, "村莊人口上限",
+            "單一村莊的人口上限，原版 20。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "max_population", 20, 1, 100000),
-        new AttrTweak("village_maxgold", GroupTown, "高盧村莊金錢容量（僅限新建聚落）",
-            "高盧村莊的金錢儲存上限，原版 5000。" + MapPlacedSettlementNote,
+        new AttrTweak("village_maxgold", GroupTown, "高盧村莊金錢容量",
+            "高盧村莊的金錢儲存上限，原版 5000。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "settlement_maxgold", 5000, 0, 100000000),
-        new AttrTweak("village_maxfood", GroupTown, "高盧村莊食物容量（僅限新建聚落）",
-            "高盧村莊的食物儲存上限，原版 5000。" + MapPlacedSettlementNote,
+        new AttrTweak("village_maxfood", GroupTown, "高盧村莊食物容量",
+            "高盧村莊的食物儲存上限，原版 5000。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "settlement_maxfood", 5000, 0, 100000000),
         // 註：basehouse.sc.xml 的 house_pop_bonus（房屋替聚落加人口上限）看起來很誘人，
         // 但這款遊戲根本不能蓋房子——commands.xml 裡的建造指令只有 build_catapult 與

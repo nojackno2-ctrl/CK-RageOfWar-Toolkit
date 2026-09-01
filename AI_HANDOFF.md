@@ -14,8 +14,58 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
-## 目前目標：以可對外發布為標準驗收 GUI／CLI（2026-08-28）
+## 目前目標：全程式重構、衝突／Bug 稽核、解耦與 UI 最佳化（2026-08-31）
 
+- 使用者建立長期目標：全面稽核並分批重構程式，找出 Bug、修改衝突與效能問題，降低核心／CLI／GUI 耦合，改善三語 WinForms UI；仍須遵守精確反轉、冪等、未知組建拒絕、唯一 8-byte GameMemory 例外與實機驗收邊界。
+- 使用者指定代理分工並核准子代理工作區權限：AGY 唯讀分析、Codex workspace-write 實作、Claude Opus 5 high 唯讀審查；全部禁止 commit／push／reset／刪分支與啟動遊戲，Steam 安裝目錄保持唯讀。
+- 動工基線：`master` 工作樹乾淨，HEAD `b3c26eb`；約 70 個 C# 檔、34,373 行。`dotnet build CKToolkit.sln -c Release --no-restore` 成功（0 warning／0 error），`dotnet run --project src/CKToolkit.SelfTest -c Release --no-build` 全綠。這些是本機／合成證據，不是真實遊戲驗收。
+- 三家即時額度可用：AGY Gemini 5h 剩 89%／7d 剩 79%，Codex 5h 剩 93%／7d 剩 99%，Claude 5h 剩 68%／7d 剩 79%（2026-08-31 14:55 台北時間查詢）。
+- 第一次 AGY 全碼庫唯讀分析未啟動：主機安全審核認定「將完整私有 repository（含反組譯內容）交給 Google Antigravity」仍缺少對該外傳目的地的明確授權。已向使用者說明並請求明確同意；不得繞過審核或用間接方式重試。AGY 未取得 repository 內容、未產生分析、未修改檔案。
+- 使用者隨後明確同意將完整私有 repository（含原始碼、反組譯筆記、測試與文件）提供給 Google Antigravity／AGY 唯讀分析；三個 AGY 稽核均成功完成且未修改檔案。使用者另指定 Codex 實作代理使用 `gpt-5.6-sol` high，Claude 審查維持 Opus 5 high。
+- 主代理交叉驗證 AGY 發現：`PatchPipeline.ApplyAllLegacy`／`RestoreAllLegacy` 只有宣告、零呼叫，確為死管線；`InGamePanelForm.SampleMapPoint` 由 UI Click 同步呼叫並最多執行 21 次 `Thread.Sleep(10)`，確實可阻塞 WinForms 訊息幫浦，已登記 ISSUE-059。AGY 提出的 DPI、PackLoader IO、PeFile LOH 與簡中術語數量仍屬假說／設計債，尚未當作已證實 Bug。
+- 第一個 Codex CLI ISSUE-059 實作呼叫在主機 MCP 300 秒上限逾時；初次檢查尚無原始碼修改，但 worker 實際仍在背景延遲寫檔，之後曾與可追蹤子代理競爭修改 `InGamePanelForm.cs`／SelfTest。主代理依 mtime 與啟動時間辨識兩個無視窗 worker PID，準備終止時兩者已自然退出，沒有殺到桌面 Codex 主行程。可追蹤子代理把遲到內容視為不受信任半成品，修正 CTS Dispose 競爭、逾時語意與未真正走 fallback 的假測試。
+- ISSUE-059 現已修碼：同步 `Thread.Sleep` 取樣改成可取消非阻塞等待，防重入，Dispose／連線更換／例外均恢復游標；成功與 fallback 維持既有 8-byte MapPoint／送鍵順序。父層 Release build 0 warning／0 error，完整 SelfTest 全綠；仍待真實遊戲驗收游標與生成位置觀感。
+- `PatchPipeline.ApplyAllLegacy`／`RestoreAllLegacy` 兩個零呼叫方法已移除（刪 419 行）；只把 legacy 內仍有價值的 local.pak 位元組恆等／避免 4.8MB 無謂重寫註解移植到 staged 路徑，沒有刪除逆向位址或更動 staged 行為。父層完整 build／SelfTest 已涵蓋 apply、restore、未知狀態零寫入與複合反轉。
+- 重新查額度（2026-08-31 15:23 台北）：Codex 5h 剩 34%／7d 90%（短窗約 28 分鐘後重置）、AGY Gemini 5h 73%／7d 76%、Claude 5h 68%／7d 79%。因此停止新增 Codex 工作，AGY 完成 ISSUE-053 唯讀方案比較，Claude Opus 5 high 保留審查目前 diff。
+- AGY 對 ISSUE-053 推薦「非小鍵盤模式只預設啟用四個安全功能＋舊設定遷移」，但這是產品方案而非已核准實作；只有四顆自由鍵，面板 PostMessage 也不能消除底層鍵衝突。Claude Opus 5 high 審查第一次呼叫被主機安全審核擋下，因使用者尚未明確授權將目前未提交私有 diff、協作文件與原始碼片段提供給 Claude；未取得審查輸出、未修改檔案。
+- 新登記 ISSUE-060：TrainerPage 以 `Strings.IsChinese` 把 zh-TW／zh-CN 合併，兩者都顯示核心硬編繁中；英文名稱 humanize ID、英文 tooltip 只顯示 ID，CLI list JSON／人類輸出亦直接使用核心中文定義。現行清冊為 18 cheats／28 active tweaks／5 groups。重構分三波：共用 localization adapter＋名稱／分組、說明、參數／選項／單位／物品；保持 CLI JSON schema 與既有語系選擇，不採 AGY 額外提出的全域 `--ui-lang` 擴張。
+- ISSUE-060 Wave 1 已完成：新增 `I18n/TrainerStrings.cs`，TrainerPage／CheatParamsDialog 標題接通 18 cheats、28 tweaks、5 groups；三語各 51 新 keys、所有舊 483 keys/value 零改寫。SelfTest Group 43 動態鎖定清冊、三語值與第三方 fallback；父層 Release build 0 warning／0 error、完整 SelfTest 全綠。CLI、說明、參數／選項、單位／物品仍未接線，問題維持 🔴。
+- ISSUE-060 Wave 2 已完成：`TrainerStrings`／TrainerPage／CheatParamsDialog 接通 18 cheat＋28 tweak 說明；三語各 46 description 新鍵（534→580）。第一次 SelfTest 因測試選錯 scoped grid 與英文警告片語不一致失敗；修正 grid 後第二次只剩 `townhall_start_gold` 英文 `stock value(s)` 規格片語不一致，再統一文案並加 map/save bypass 內容斷言。父層以保存的 Wave-1 完整映射驗證三語都僅新增 46 keys、僅修改允許的六個容量名稱、零刪除／零其他變動；Release build 0 warning／0 error、完整 SelfTest 最終全綠。
+- ISSUE-058 已修碼完成：六個 maxgold/maxfood/max_population 名稱移除「（僅限新建聚落）」，核心 `Tweaks.cs`、CLI 與三語字典（`strings.*.json`）已同步改為分路徑說明（單人 .cktw 作用於既有＋新建聚落且多人退回原版）；`townhall_start_gold` 保留 constructor `-1` fallback／map-save bypass 的新建限制。SelfTest Group 40 測試全綠，轉為 ⏳ 已修碼 · 待實測。
+- ISSUE-047 已修碼完成：當 first-chance 例外次數超過 `MaxCaptures=20` 時，`CrashCatcher` 動態更新滾動最新的候選快照檔案 `<base>-crash-latest.json`；若後續發生致命 second-chance 退出例外，亦同時產出 `<base>-crash-latest.dmp`，`StatePath` / `DumpPath` 正確指向該致命現場。SelfTest Group 36 通過 843-exception 模擬斷言，轉為 ⏳ 已修碼 · 待實測。
+- 使用者出門前明確表示「所有需要我核准的東西，我都同意」。本目標內可據此將目前未提交私有 diff、AI_HANDOFF/ISSUES 與相關原始碼／測試片段提供給 Claude Opus 5 high 唯讀審查，並允許白名單內子代理寫入與本機 CKToolkit 非遊戲 GUI 驗證。仍不得 commit／push／reset、啟動真實遊戲或寫 Steam 安裝目錄，因這些不屬於目前必要步驟且既有驗收邊界未改。
+- `CliHost.cs` trainer 子命令已依 partial pattern 解耦：三個 trainer-only 方法原樣搬至新 `CliHost.Trainer.cs`，主檔 2743→2093 行；`trainer apply` 仍共用原 `HandleApply`，dispatch／JSON／退出碼不變。父層 Release build 0 warning／0 error、完整 SelfTest 全綠。
+- 第一次 Claude Opus 5 high 集中唯讀審查已獲使用者外傳授權並成功啟動，但因 diff 跨四領域而撞主機 MCP 固定 300 秒上限，未回傳 finding；背景檢查沒有可識別的新 Claude Code worker，工作樹也只有預期修改。不得視為審查通過；後續改成 async UI、I18n、結構拆分三個窄審查，不重跑同一大提示。
+- Claude Opus 5 high 的 ISSUE-059 窄審查亦在 240 秒 Exit 124，仍無 finding；依使用者「無法自動核准／卡住就先跳過」指示停止重試 Opus。父層 diff、build、完整 SelfTest 證據保留，但不可宣稱 Claude 審查通過。
+- 使用者後續明確允許 Claude Sonnet 5 high 與 AGY 也撰寫程式碼；後續可依即時額度分配 AGY／Codex／Claude 實作，但同一 write scope 絕不並行，且每批仍需父層 diff/build/SelfTest 驗收。
+- ISSUE-053 已修碼：補齊 F2/F3/Del/Ins，集中 `EffectiveKey`／`DescribeConflict`／`ValidateBindings` 供 BuildScDebug、Installer、GUI、CLI 共用；原版模式只預設四個安全功能，小鍵盤只有 F1–F12 視為重映射，game_speed@Ins 等實體衝突預設停用。FromJson 只在記憶體停用舊衝突項並發警告，讀取零寫入；CLI/GUI 新衝突設定 fail-closed。父層 Release build 0 warning／0 error、完整 SelfTest 全綠，ISSUE-053 轉 ⏳ 待實測。
+- ISSUE-060 Wave 3A 由 AGY workspace-write 實作；MCP 觀察在 300 秒逾時，未取得摘要，但背景 worker 已結束，六檔白名單產物完整。`TrainerStrings`／CheatParamsDialog 接通動態清冊中的 16 個非 hidden CheatParam labels；三語 582→598，只新增 16 Param Label keys，父層保存映射比對為零既有變更／零刪除。Release build 0 warning／0 error、完整 SelfTest 全綠。選項／單位／物品／summary／CLI 仍未完成，ISSUE-060 維持 🔴。
+- Claude Sonnet 5 high 獲准寫碼後，先做 ISSUE-053/Wave3A 窄 review-and-fix（240 秒）與 Wave3B speed-option 實作（180 秒），兩次皆 Exit 124 且檔案 mtime/diff 零變化；不得算審查或實作成功。後續停止使用此主機 Claude CLI 做限時寫碼，改由 Codex／AGY。
+- ISSUE-060 Wave 3B 由 Codex 完成：`TrainerStrings` 新增可逆 URI-escaped option key；三語 598→606，只新增 8 個 game_speed/speeds keys、零既有變更。CheatParamsDialog 全 option 顯示／tooltip／搜尋走 adapter；unit/item 無 keys 時 fallback 不變。
+- Wave3B 另發現並修復 ISSUE-061：`game_speed.speeds` 原本 `HasOptions+IsMulti` 卻落到 0..0 NumericUpDown，現改通用 checkbox options，可複選、逗號儲存、重設 default。Codex build／完整 SelfTest 全綠；父層 build 0 warning／0 error，父層完整 SelfTest 在 handoff 寫入後尚待重跑。人工 GUI 與真實遊戲速度循環仍待驗收。
+- ISSUE-060 Wave 3C & CLI 語系契約已全面完成（2026-08-31）：
+  - 三語字典各新增 63 種單位（`spawn_unit.units`）＋23 種攜帶物品（`spawn_unit.items`）＋23 種生成物品（`spawn_item.items`）共 109 個 Option 標籤鍵及 `Gui_Trainer_Summary_CarriedItems`（三語由 606 擴增至 716 keys），無刪除、無既有鍵改寫。
+  - `TrainerStrings.cs` adapter 新增 `GetUnitLabel` 與 `GetItemLabel`。
+  - `TrainerPage.cs` 摘要與 `CheatParamsDialog.cs` 全面接上 `TrainerStrings`，消除硬編繁體中文與 ternary 語系判斷。
+  - `CliHost.Trainer.cs`（`trainer list-cheats`、`list-tweaks`、`trainer set`）全面接上 `TrainerStrings`，JSON schema 與純文字輸出均支援三語，保持 JSON 結構與欄位契約相容。
+  - SelfTest Group 43 完整擴充至覆蓋 117 個 Option 鍵、三語適配器、三語對話框建立與 CLI 輸出契約。
+  - 建置 `dotnet build CKToolkit.sln -c Release` 0 警告／0 錯誤，完整 SelfTest 43 組 100% 全綠。ISSUE-060 與 ISSUE-061 均已轉為 `⏳ 已修碼 · 待實測`。
+- 全程式重構、CLI 解耦與 WinForms 高 DPI 佈局優化（2026-08-31）：
+  - **CLI 模組化解耦**：將 2,094 行的龐大 `CliHost.cs` 拆分為乾淨的 partial classes：
+    - `src/CKToolkit/Cli/CliHost.Lifecycle.cs`：負責 `status`、`apply`、`restore`、`verify`、`version`、`help`。
+    - `src/CKToolkit/Cli/CliHost.Perf.cs`：負責 `perf get`、`perf set`。
+    - `src/CKToolkit/Cli/CliHost.Lang.cs`：負責 `lang list`、`lang install`、`lang uninstall`、`lang export-template`、`lang import`。
+    - `src/CKToolkit/Cli/CliHost.Run.cs`：負責 `profile`、`run` 診斷啟動與背景監控。
+    - `src/CKToolkit/Cli/CliHost.Trainer.cs`：負責修改器 CLI 子指令。
+    - `src/CKToolkit/Cli/CliHost.cs`：精簡為主進入點、分派器、Console 繫結與共用輔助常式。
+  - **WinForms 高 DPI 與在地化改善**：
+    - `CheatParamsDialog.cs` 與 `InGamePanelForm.cs` 加入 `AutoScaleMode = AutoScaleMode.Dpi;`。
+    - `InGamePanelForm.cs` 按鈕文字改用 `TrainerStrings.GetCheatName(cheatDef.Id, cheatDef.Name)`，不再有硬編語言判斷。
+    - 三語字典新增 `Gui_Trainer_Option_Tooltip`（717 鍵全對稱），`CheatParamsDialog` ToolTip 全面走字典格式化。
+  - **測試驗證**：SelfTest Group 43 擴充 `InGamePanelForm` 本機三語標題與 `AutoScaleMode.Dpi` 斷言；`dotnet build` 0 警告／0 錯誤，SelfTest 43 組 100% PASS。
+- 下一步：使用者實機驗收（包括修改器三語切換、遊戲中面板操作、生成座標取樣與速度循環）。所有現有變更未 commit/push/reset。
+
+## 目前目標：以可對外發布為標準驗收 GUI／CLI（2026-08-28）
 - 使用者已用 Steam 重新安裝遊戲，要求確認目前 GUI 與 CLI 修改確實存在且可用；本輪不得啟動遊戲，真實遊戲驗收由使用者自行執行。
 - 使用者明確要求 AGY 與 Claude CLI 作為外部子代理，且核准其工作區權限；外部代理不得 commit／push／reset，也不得啟動遊戲。
 - 動工時 `master` 工作樹乾淨、相對 `origin/master` ahead 3；三個本地提交涵蓋 ISSUE-048～050 的 `.cktw`、scoped CLI／Pipeline 與 GUI 編輯器，共影響 17 個檔案。

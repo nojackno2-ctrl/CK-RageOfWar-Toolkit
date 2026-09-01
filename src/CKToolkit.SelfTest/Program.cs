@@ -61,6 +61,8 @@ namespace CKToolkit.SelfTest;
 ///   40. TrainerScopedTweaksGui: scoped tweaks GUI 建立、三語字串、往返儲存、範圍拒絕與未完成項目隱藏
 ///   41. ScopedTweaksAndHiResCompositeReversal: .cktw scoped payload 與 HiRes 1920 .ckhr 依 PatchPipeline
 ///       疊加順序套到同一 EXE，證明 inspect 同時辨識、重套/設定更新、正規化/RestoreAll 後兩節區消失且逐位元組還原 (ISSUE-052)
+///   42. InGamePanelAndKeyPosting: 面板代按、非阻塞座標取樣、快速連點防重入、取消與游標歸位 (ISSUE-059)
+///   43. TrainerLocalization: 18 項作弊、28 項 tweak 與 5 個分組之三語名稱／說明 key 覆蓋、GUI adapter 與未知 ID fallback (ISSUE-060)
 ///
 ///   解耦後的迴歸防線:
 ///   34. 語系身分單一來源（pack.json gameLangFolder/gameLangKey 為唯一權威，verify 期望值與實際簽章必須對得上）
@@ -140,6 +142,9 @@ internal static class Program
         RunGroup("40. TrainerScopedTweaksGui", TestTrainerScopedTweaksGui);
         RunGroup("41. ScopedTweaksAndHiResCompositeReversal", TestScopedTweaksAndHiResCompositeReversal);
         RunGroup("42. InGamePanelAndKeyPosting", TestInGamePanelAndKeyPosting);
+        RunGroup("43. TrainerLocalization", TestTrainerNameLocalization);
+        RunGroup("44. TrainerDefaultKeyTableInvariants", TestTrainerDefaultKeyTableInvariants);
+        RunGroup("45. CliOptionStrictness", TestCliOptionStrictness);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -305,6 +310,155 @@ internal static class Program
         Check("FromJson 自動過濾 scopedTweaks 中的廢棄 tweak ID",
             !legacyCleaned.Trainer.ScopedTweaks.ContainsKey("wagon_build_time") &&
             legacyCleaned.Trainer.ScopedTweaks.ContainsKey("train_speed"));
+
+        string conflictingTrainerJson = """
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": false,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "gold_fill", "enabled": true, "key": "F2", "parameters": { "kept": "yes" } },
+              { "id": "buff_army", "enabled": true, "key": "Del", "parameters": {} },
+              { "id": "loyalty_max", "enabled": true, "key": "Backspace", "parameters": {} },
+              { "id": "future_unknown", "enabled": true, "key": "F2", "parameters": { "future": "kept" } }
+            ]
+          }
+        }
+        """;
+        ToolkitConfig sanitized = ToolkitConfig.FromJson(conflictingTrainerJson);
+        Check("FromJson 停用舊版留下的 F2 綁定（舊預設鍵，現已改為空鍵）",
+            !sanitized.Trainer.Cheats.Single(c => c.Id == "gold_fill").Enabled);
+        Check("FromJson 停用明確綁定 Del 的舊版衝突項目",
+            !sanitized.Trainer.Cheats.Single(c => c.Id == "buff_army").Enabled);
+        Check("FromJson 保留安全作弊與其餘欄位",
+            sanitized.Trainer.Cheats.Single(c => c.Id == "loyalty_max").Enabled &&
+            sanitized.Trainer.Cheats.Single(c => c.Id == "gold_fill").Parameters["kept"] == "yes");
+        Check("FromJson 完整保留未知作弊項目",
+            sanitized.Trainer.Cheats.Single(c => c.Id == "future_unknown") is { Enabled: true } unknown &&
+            unknown.Key == "F2" && unknown.Parameters["future"] == "kept");
+        Check("FromJson 只新增一則本地化 migration warning 並列出停用 id/key",
+            sanitized.MigrationsApplied.Count == 1 &&
+            sanitized.MigrationsApplied[0].Contains("gold_fill/F2", StringComparison.Ordinal) &&
+            sanitized.MigrationsApplied[0].Contains("buff_army/Del", StringComparison.Ordinal));
+
+        // ISSUE-062：小鍵盤模式下舊版預設鍵留下的綁定，能改綁回目前預設鍵就改綁，改不了才停用。
+        ToolkitConfig reboundNumpad = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": true,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "gold_fill", "enabled": true, "key": "F1", "parameters": {} },
+              { "id": "spawn_unit", "enabled": true, "key": "Sub", "parameters": {} },
+              { "id": "game_speed", "enabled": true, "key": "Ins", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("FromJson 把 spawn_unit 的舊 Sub 綁定改綁回目前預設鍵 Backspace",
+            reboundNumpad.Trainer.Cheats.Single(c => c.Id == "spawn_unit") is { Enabled: true, Key: "Backspace" });
+        Check("FromJson 對預設鍵同樣不可用的 game_speed 仍然停用",
+            !reboundNumpad.Trainer.Cheats.Single(c => c.Id == "game_speed").Enabled);
+        Check("FromJson 不更動原本就沒有衝突的 gold_fill 綁定",
+            reboundNumpad.Trainer.Cheats.Single(c => c.Id == "gold_fill") is { Enabled: true, Key: "F1" });
+        Check("FromJson 對改綁與停用各產生一則 migration warning",
+            reboundNumpad.MigrationsApplied.Count == 2,
+            $"Count={reboundNumpad.MigrationsApplied.Count}");
+
+        ToolkitConfig reboundBlocked = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": true,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "diagnose", "enabled": true, "key": "Backspace", "parameters": {} },
+              { "id": "spawn_unit", "enabled": true, "key": "Sub", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("預設鍵已被其他啟用綁定佔走時不搶鍵，改為停用",
+            !reboundBlocked.Trainer.Cheats.Single(c => c.Id == "spawn_unit").Enabled &&
+            reboundBlocked.Trainer.Cheats.Single(c => c.Id == "diagnose") is { Enabled: true, Key: "Backspace" });
+
+        ToolkitConfig reboundVanillaOff = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": true,
+            "keepVanilla": false,
+            "cheats": [
+              { "id": "cycle_item", "enabled": true, "key": "Del", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("關閉保留原版後 cycle_item 的舊 Del 綁定可改綁回 Sub 而不必停用",
+            reboundVanillaOff.Trainer.Cheats.Single(c => c.Id == "cycle_item") is { Enabled: true, Key: "Sub" });
+
+        ToolkitConfig hintShown = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": true,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "cycle_unit", "enabled": true, "key": "Add", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("停用原因含原版保留鍵時附上關閉保留原版的提示",
+            hintShown.MigrationsApplied.Count == 2 &&
+            hintShown.MigrationsApplied[1] == Strings.Get("Migration_TrainerKeepVanillaHint"),
+            $"Count={hintShown.MigrationsApplied.Count}");
+
+        ToolkitConfig hintHidden = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "enabled": true,
+            "numpadKeys": false,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "buff_army", "enabled": true, "key": "Del", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("停用原因只有遊戲保留鍵時不附上關閉保留原版的提示",
+            hintHidden.MigrationsApplied.Count == 1,
+            $"Count={hintHidden.MigrationsApplied.Count}");
+
+        ToolkitConfig remappedF2 = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "numpadKeys": true,
+            "keepVanilla": true,
+            "cheats": [
+              { "id": "food_fill", "enabled": true, "key": "F2", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("FromJson 不停用小鍵盤模式已重對應至 keypad 2 的 F2",
+            remappedF2.Trainer.Cheats.Single().Enabled && remappedF2.MigrationsApplied.Count == 0);
+
+        ToolkitConfig vanillaAllowed = ToolkitConfig.FromJson("""
+        {
+          "trainer": {
+            "numpadKeys": false,
+            "keepVanilla": false,
+            "cheats": [
+              { "id": "production_boost", "enabled": true, "key": "Add", "parameters": {} }
+            ]
+          }
+        }
+        """);
+        Check("FromJson 在 keepVanilla=false 時保留只與原版 scdebug 衝突的 Add 綁定",
+            vanillaAllowed.Trainer.Cheats.Single().Enabled && vanillaAllowed.MigrationsApplied.Count == 0);
     }
 
     // --- 2. IniFile 往返與節區操作測試 --------------------------------------
@@ -746,6 +900,18 @@ internal static class Program
             zh["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal) &&
             cn["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal) &&
             en["Error_TrainerRetiredTweak"].Contains("{0}", StringComparison.Ordinal));
+
+        foreach (string key in new[] { "Error_TrainerKeyConflict", "Migration_TrainerDisabledConflictingKeys" })
+        {
+            Check($"三語皆包含 {key}",
+                zh.ContainsKey(key) && cn.ContainsKey(key) && en.ContainsKey(key));
+            Check($"{key} 三語佔位符數量一致",
+                PlaceholderCount(zh[key]) == PlaceholderCount(cn[key]) &&
+                PlaceholderCount(cn[key]) == PlaceholderCount(en[key]));
+        }
+
+        static int PlaceholderCount(string value) =>
+            System.Text.RegularExpressions.Regex.Matches(value, @"\{\d+\}").Count;
     }
 
     // --- 10. Perf: LargeAddressAware 個別精確反轉測試 -----------------------
@@ -2551,6 +2717,67 @@ internal static class Program
         Check($"{Cheats.All.Count} 個作弊定義完整", Cheats.All.Count >= 14);
         Check($"小鍵盤模式 {Cheats.All.Count} 個作弊各有唯一按鍵",
             Cheats.All.Select(c => c.NumpadKey).Distinct(StringComparer.Ordinal).Count() == Cheats.All.Count);
+
+        string[] expectedGameReserved =
+            ["F1", "F2", "F3", "F5", "F6", "F7", "F8", "F9", "F10", "Del", "Ins"];
+        Check("遊戲保留鍵集合精確包含 F2/F3/Del/Ins",
+            Cheats.GameReservedKeys.Keys.ToHashSet(StringComparer.Ordinal)
+                .SetEquals(expectedGameReserved) &&
+            Cheats.GameReservedKeys.Count == expectedGameReserved.Length);
+
+        string[] expectedOriginalFree = ["F4", "F11", "F12", "Backspace"];
+        string[] expectedNumpadFree =
+            ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Backspace"];
+        Check("原版模式自由鍵精確為 F4/F11/F12/Backspace",
+            Cheats.FreeKeys(numpadKeys: false).SequenceEqual(expectedOriginalFree));
+        Check("小鍵盤模式自由鍵精確為重對應 F1-F12 加 Backspace",
+            Cheats.FreeKeys(numpadKeys: true).SequenceEqual(expectedNumpadFree));
+
+        string[] expectedOriginalDefaults = ["loyalty_max", "heal_army", "smite_enemies", "diagnose"];
+        Check("原版模式預設啟用項目精確為四個安全功能",
+            Cheats.All.Where(c => c.DefaultEnabled).Select(c => c.Id)
+                .SequenceEqual(expectedOriginalDefaults));
+        Check("原版模式所有預設啟用按鍵皆無遊戲或原版衝突",
+            Cheats.All.Where(c => c.DefaultEnabled).All(c =>
+                Cheats.DescribeConflict(c.DefaultKey, keepVanilla: true, numpadKeys: false) is null));
+        Check("小鍵盤模式所有預設啟用按鍵皆無遊戲或原版衝突",
+            Cheats.All.Where(c => c.NumpadDefaultEnabled).All(c =>
+                Cheats.DescribeConflict(c.NumpadKey, keepVanilla: true, numpadKeys: true) is null));
+        Check("小鍵盤模式未重對應的 game_speed Ins 維持預設停用",
+            !Cheats.ById[Cheats.GameSpeedId].NumpadDefaultEnabled);
+
+        bool originalF2Rejected = false;
+        try
+        {
+            _ = Cheats.BuildScDebug(
+                [new CheatSelection { Id = "gold_fill", Key = "F2" }],
+                "auto", 1, keepVanilla: true, numpadKeys: false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            originalF2Rejected = ex.Message == Strings.Get("Error_TrainerKeyConflict", "gold_fill", "F2");
+        }
+        Check("BuildScDebug 拒絕原版模式 F2 遊戲保留鍵", originalF2Rejected);
+
+        string remappedF2Script = Cheats.BuildScDebug(
+            [new CheatSelection { Id = "gold_fill", Key = "F2" }],
+            "auto", 1, keepVanilla: true, numpadKeys: true);
+        Check("BuildScDebug 允許小鍵盤模式已重對應的 F2",
+            remappedF2Script.Contains("id=\"F2\"", StringComparison.Ordinal));
+
+        bool numpadInsRejected = false;
+        try
+        {
+            _ = Cheats.BuildScDebug(
+                [new CheatSelection { Id = Cheats.GameSpeedId, Key = "Ins" }],
+                "auto", 1, keepVanilla: true, numpadKeys: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            numpadInsRejected = ex.Message ==
+                Strings.Get("Error_TrainerKeyConflict", Cheats.GameSpeedId, "Ins");
+        }
+        Check("BuildScDebug 拒絕小鍵盤模式仍為實體鍵的 Ins", numpadInsRejected);
     }
 
     private static void TestTrainerScriptsAndDataPakReversal()
@@ -2560,19 +2787,19 @@ internal static class Program
         foreach (var cheat in Cheats.All)
         {
             string script = Cheats.BuildScDebug(
-                [new CheatSelection { Id = cheat.Id, Key = cheat.NumpadKey, Parameters = cheat.Defaults() }],
-                "auto", 1, keepVanilla: false);
+                [new CheatSelection { Id = cheat.Id, Key = "F4", Parameters = cheat.Defaults() }],
+                "auto", 1, keepVanilla: false, numpadKeys: true);
             Check($"作弊 {cheat.Id} 產生有效且具對應鍵的 SCDEBUG",
                 script.Contains("<scdebug>", StringComparison.Ordinal) &&
-                script.Contains($"id=\"{cheat.NumpadKey}\"", StringComparison.Ordinal));
+                script.Contains("id=\"F4\"", StringComparison.Ordinal));
         }
 
         string itemScript = Cheats.BuildScDebug(
             [
-                new CheatSelection { Id = Cheats.SpawnItemId, Key = "Ins", Parameters = new Dictionary<string, object> { ["items"] = "King's Belt,Boar teeth", ["count"] = 3 } },
+                new CheatSelection { Id = Cheats.SpawnItemId, Key = "F5", Parameters = new Dictionary<string, object> { ["items"] = "King's Belt,Boar teeth", ["count"] = 3 } },
                 new CheatSelection { Id = Cheats.CycleItemId, Key = "F6" }
             ],
-            "auto", 1, keepVanilla: false);
+            "auto", 1, keepVanilla: false, numpadKeys: true);
         Check("spawn_item 產生 DefItemHolder 與 AddItem 腳本", itemScript.Contains("Place(&quot;DefItemHolder&quot;", StringComparison.Ordinal) && itemScript.Contains("o.AddItem(item)", StringComparison.Ordinal));
         Check("cycle_item 借用 spawn_item 之 items 參數", itemScript.Contains("King's Belt", StringComparison.Ordinal) && itemScript.Contains("Boar teeth", StringComparison.Ordinal));
 
@@ -3508,6 +3735,14 @@ internal static class Program
         Check("第二筆會取代第一筆成為退出前最後候選", tracker.Count == 2 &&
             tracker.LatestSummary?.Contains("@ 0x00000000", StringComparison.Ordinal) == true &&
             !tracker.LatestSummary.Contains("0x005D99A4", StringComparison.Ordinal));
+
+        // 模擬大量可修復例外超過配額後的第 843 筆致命例外
+        for (int i = 3; i <= 843; i++)
+        {
+            tracker.Record("STATUS_ACCESS_VIOLATION", $"，讀取位址 0x{i:X8}", (ulong)(0x00550000 + i), 24480);
+        }
+        Check("第 843 筆例外正確記錄為退出前最後候選", tracker.Count == 843 &&
+            tracker.LatestSummary?.Contains($"0x{0x00550000 + 843:X8}", StringComparison.Ordinal) == true);
     }
 
     // --- 37. 死行程／無效 handle 的位址空間掃描不得冒充 100% 用滿 --------
@@ -3968,6 +4203,74 @@ internal static class Program
                 Check("CLI trainer set 拒絕未知的按鍵代號 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
             }
 
+            string conflictConfigPath = Path.Combine(tempDir, "conflicting-bindings.json");
+            new ToolkitConfig
+            {
+                Trainer = new TrainerConfig
+                {
+                    NumpadKeys = false,
+                    KeepVanilla = true,
+                    Cheats =
+                    [
+                        new CheatConfig { Id = "gold_fill", Enabled = false, Key = "F2" }
+                    ]
+                }
+            }.Save(conflictConfigPath);
+            byte[] conflictConfigBefore = File.ReadAllBytes(conflictConfigPath);
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute([
+                    "trainer", "set",
+                    "--cheat", "gold_fill=on",
+                    "--key", "gold_fill=F2",
+                    "--config", conflictConfigPath,
+                    "--json"
+                ], stdout, stderr);
+                JsonEnvelope? env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("CLI trainer set 衝突綁定回傳 InvalidArgs 與 JSON 錯誤",
+                    exitCode == ExitCodes.InvalidArgs && env is { Ok: false } &&
+                    env.Errors.Contains(Strings.Get("Error_TrainerKeyConflict", "gold_fill", "F2")));
+                Check("CLI trainer set 衝突失敗時設定檔逐位元組零寫入",
+                    File.ReadAllBytes(conflictConfigPath).SequenceEqual(conflictConfigBefore));
+            }
+
+            string migrationReadOnlyPath = Path.Combine(tempDir, "migration-read-only.json");
+            File.WriteAllText(migrationReadOnlyPath, """
+            {
+              "trainer": {
+                "numpadKeys": false,
+                "keepVanilla": true,
+                "cheats": [
+                  { "id": "gold_fill", "enabled": true, "key": "F2", "parameters": {} }
+                ]
+              }
+            }
+            """);
+            byte[] migrationBefore = File.ReadAllBytes(migrationReadOnlyPath);
+            ToolkitConfig migrationLoaded = ToolkitConfig.Load(migrationReadOnlyPath);
+            Check("ToolkitConfig.Load 只在記憶體自癒衝突綁定",
+                !migrationLoaded.Trainer.Cheats.Single().Enabled &&
+                migrationLoaded.MigrationsApplied.Count == 1);
+            Check("ToolkitConfig.Load 遷移不會自行寫回設定檔",
+                File.ReadAllBytes(migrationReadOnlyPath).SequenceEqual(migrationBefore));
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute([
+                    "trainer", "set", "--trainer", "off",
+                    "--config", migrationReadOnlyPath, "--json"
+                ], stdout, stderr);
+                using JsonDocument persistedJson = JsonDocument.Parse(File.ReadAllText(migrationReadOnlyPath));
+                bool persistedDisabled = !persistedJson.RootElement
+                    .GetProperty("trainer")
+                    .GetProperty("cheats")[0]
+                    .GetProperty("enabled")
+                    .GetBoolean();
+                Check("後續 CLI 儲存會持久化記憶體中已自癒的衝突狀態",
+                    exitCode == ExitCodes.Success && persistedDisabled);
+            }
+
             // 7. trainer set 拒絕兩個啟用的作弊綁定相同按鍵 -> exit code 2
             using (var stdout = new StringWriter())
             using (var stderr = new StringWriter())
@@ -4162,6 +4465,32 @@ internal static class Program
         Check("超界 scoped 值不會寫入 rejected config",
             rejectedConfig.ScopedTweaks.Count == 0 &&
             !rejectedConfig.ScopedTweaks.ContainsKey("train_speed"));
+
+        using var conflictPage = new TrainerPage();
+        conflictPage.CreateControl();
+        form.Controls.Add(conflictPage);
+        _ = conflictPage.Handle;
+        conflictPage.LoadConfig(new TrainerConfig
+        {
+            Enabled = false,
+            NumpadKeys = false,
+            KeepVanilla = true,
+            Cheats =
+            [
+                new CheatConfig { Id = "gold_fill", Enabled = true, Key = "F2" }
+            ]
+        });
+        bool keyConflictRejected = false;
+        try
+        {
+            conflictPage.SaveConfig(new TrainerConfig());
+        }
+        catch (InvalidOperationException ex)
+        {
+            keyConflictRejected = ex.Message ==
+                Strings.Get("Error_TrainerKeyConflict", "gold_fill", "F2");
+        }
+        Check("GUI SaveConfig 即使總開關關閉仍拒絕已啟用列的 F2 遊戲保留鍵", keyConflictRejected);
     }
 
     // --- 41. scoped tweaks (.cktw) + HiRes 1920 (.ckhr) 複合套用與精確反轉 (ISSUE-052) ---
@@ -4410,6 +4739,804 @@ internal static class Program
             ["speeds"] = "abc,0,999999",
         });
         Check("game_speed 非法倍率清單退回出廠值", junkScript.Contains("s = 1000;", StringComparison.Ordinal));
+
+        // 8. 非阻塞取樣：等待期間訊息幫浦仍前進；成功時維持
+        //    「游標歸位 -> 原樣寫回引擎 8-byte MapPoint -> 送鍵」契約。
+        {
+            Point originalCursor = new(100, 100);
+            Point currentCursor = originalCursor;
+            using var panelSpawn = CreateSpawnPanelForTest(
+                () => currentCursor, p => currentCursor = p,
+                new Rectangle(200, 200, 800, 600));
+
+            int readCount = 0;
+            var expectedPoint = new GameMemory.MapPoint(1234, 5678);
+            panelSpawn.ReadMousePointSeam = (_, _) =>
+            {
+                readCount++;
+                return (true, expectedPoint);
+            };
+
+            List<string> sequence = [];
+            panelSpawn.WriteMousePointSeam = (_, _, point) =>
+            {
+                sequence.Add($"write:{point.X},{point.Y}@{currentCursor.X},{currentCursor.Y}");
+                return true;
+            };
+            panelSpawn.PostKeySeam = (_, key) =>
+            {
+                sequence.Add($"key:{key:X}@{currentCursor.X},{currentCursor.Y}");
+                return true;
+            };
+
+            int messagePumpTicks = 0;
+            using var pumpTimer = new System.Windows.Forms.Timer { Interval = 1 };
+            pumpTimer.Tick += (_, _) => messagePumpTicks++;
+            pumpTimer.Start();
+            Task<bool> task = panelSpawn.SpawnAtViewCentreAsync(0x70);
+            bool completed = PumpMessagesUntil(task);
+            pumpTimer.Stop();
+
+            Check("非同步取樣期間 WinForms 訊息幫浦正常處理訊息", messagePumpTicks > 0);
+            Check("取樣成功在測試時限內完成", completed && task.Result);
+            Check("穩定取樣需要連續兩次相同的引擎讀值", readCount == 2);
+            Check("成功路徑依序原樣寫回 MapPoint 再送鍵，且兩者都發生在游標歸位後",
+                sequence.SequenceEqual([
+                    "write:1234,5678@100,100",
+                    "key:70@100,100"]));
+            Check("取樣成功後游標維持原位", currentCursor == originalCursor);
+        }
+
+        // 9. 快速連點不重入；Dispose 會取消正在等待的取樣且立即恢復游標。
+        {
+            Point originalCursor = new(50, 50);
+            Point currentCursor = originalCursor;
+            var panelDispose = CreateSpawnPanelForTest(
+                () => currentCursor, p => currentCursor = p,
+                new Rectangle(100, 100, 400, 400));
+            var sampleGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            panelDispose.DelayAsyncSeam = (_, token) => sampleGate.Task.WaitAsync(token);
+
+            Task<bool> first = panelDispose.SpawnAtViewCentreAsync(0x70);
+            Task<bool> reentrant = panelDispose.SpawnAtViewCentreAsync(0x70);
+            Check("取樣進行中標記為 active，快速連點立即被拒絕",
+                panelDispose.IsSpawningActive && reentrant.IsCompleted && !reentrant.Result);
+            Check("取樣等待開始後游標位於遊戲畫面中央", currentCursor == new Point(300, 300));
+
+            panelDispose.Dispose();
+            bool completed = PumpMessagesUntil(first);
+            Check("Dispose 取消等待且任務安全回傳 false", completed && !first.Result);
+            Check("Dispose 立即恢復游標並清除 active 狀態",
+                currentCursor == originalCursor && !panelDispose.IsSpawningActive);
+        }
+
+        // 10. 完全讀不到座標時仍先在中央送鍵，再進入可取消的延遲歸位退路。
+        {
+            Point originalCursor = new(33, 33);
+            Point currentCursor = originalCursor;
+            var panelFallback = CreateSpawnPanelForTest(
+                () => currentCursor, p => currentCursor = p,
+                new Rectangle(0, 0, 200, 200));
+            var holdGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            panelFallback.DelayAsyncSeam = (delay, token) =>
+                delay == 10 ? Task.CompletedTask : holdGate.Task.WaitAsync(token);
+            panelFallback.ReadMousePointSeam = (_, _) => (false, default);
+            Point? cursorWhenKeySent = null;
+            panelFallback.PostKeySeam = (_, _) =>
+            {
+                cursorWhenKeySent = currentCursor;
+                return true;
+            };
+
+            Task<bool> task = panelFallback.SpawnAtViewCentreAsync(0x70);
+            Check("失敗退路先在中央送鍵且延遲未完成前不歸位",
+                !task.IsCompleted
+                && cursorWhenKeySent == new Point(100, 100)
+                && currentCursor == new Point(100, 100));
+            panelFallback.Dispose();
+            bool completed = PumpMessagesUntil(task);
+            Check("失敗退路可由 Dispose 取消並安全恢復游標",
+                completed && !task.Result && currentCursor == originalCursor);
+        }
+
+        // 11. 未預期例外不得外洩成 faulted async-void，也不得把游標留在畫面中央。
+        {
+            Point originalCursor = new(70, 80);
+            Point currentCursor = originalCursor;
+            using var panelException = CreateSpawnPanelForTest(
+                () => currentCursor, p => currentCursor = p,
+                new Rectangle(0, 0, 300, 200));
+            panelException.DelayAsyncSeam = (_, _) =>
+                throw new InvalidOperationException("synthetic sample failure");
+
+            Task<bool> task = panelException.SpawnAtViewCentreAsync(0x70);
+            Check("取樣例外被安全收斂為 false 而非 faulted task",
+                task.IsCompletedSuccessfully && !task.Result);
+            Check("取樣例外後游標恢復原位且 active 狀態清除",
+                currentCursor == originalCursor && !panelException.IsSpawningActive);
+        }
+    }
+
+    private static InGamePanelForm CreateSpawnPanelForTest(
+        Func<Point> getCursor, Action<Point> setCursor, Rectangle gameRect)
+    {
+        var config = new TrainerConfig
+        {
+            Enabled = true,
+            Cheats = [new CheatConfig { Id = Cheats.SpawnUnitId, Enabled = true }]
+        };
+        var panel = new InGamePanelForm(config);
+        _ = panel.Handle;
+        panel.GetCursorPositionSeam = getCursor;
+        panel.SetCursorPositionSeam = setCursor;
+        panel.GetWindowRectSeam = _ => (true, gameRect);
+        panel.SetMockConnectionForTest(new IntPtr(0x1234), new IntPtr(0x5678), new IntPtr(0x00400000));
+        return panel;
+    }
+
+    private static bool PumpMessagesUntil(Task task, int timeoutMs = 2000)
+    {
+        long deadline = Environment.TickCount64 + timeoutMs;
+        while (!task.IsCompleted && Environment.TickCount64 < deadline)
+        {
+            Application.DoEvents();
+            Thread.Sleep(1);
+        }
+        Application.DoEvents();
+        return task.IsCompleted;
+    }
+
+    // --- 43. Trainer 顯示名稱／說明三語 adapter 覆蓋與 fallback (ISSUE-060) -----
+    private static void TestTrainerNameLocalization()
+    {
+        Console.WriteLine("\n43. Trainer 顯示名稱／說明三語 key、GUI adapter 與未知 ID fallback 測試");
+
+        string[] expectedCheatIds =
+        [
+            "gold_fill", "food_fill", "population_boost", "loyalty_max", "production_boost",
+            "heal_army", "buff_army", "heal_buildings", "smite_enemies", "explore_all",
+            "toggle_fog", "spawn_unit", "cycle_unit", "spawn_item", "cycle_item",
+            "set_selected_level", "game_speed", "diagnose"
+        ];
+        string[] expectedTweakIds =
+        [
+            "hero_max_army", "hero_maxhealth", "hero_speed", "hero_sight",
+            "hero_health_per_level", "hero_exp_divider", "townhall_maxgold", "townhall_maxfood",
+            "townhall_start_gold", "townhall_max_population", "village_max_population",
+            "village_maxgold", "village_maxfood", "gold_production", "food_production",
+            "pop_growth_rate", "pop_growth_interval", "pop_decrease_interval",
+            "pop_decrease_percent", "train_speed", "research_speed", "all_unit_health",
+            "all_unit_attack", "all_unit_defense", "all_unit_speed", "gaul_unit_power",
+            "roman_unit_power", "unit_feeds"
+        ];
+        (string Group, string Key)[] expectedGroups =
+        [
+            (Tweaks.GroupHero, "Trainer_Group_hero"),
+            (Tweaks.GroupTown, "Trainer_Group_town"),
+            (Tweaks.GroupEconomy, "Trainer_Group_economy"),
+            (Tweaks.GroupProduction, "Trainer_Group_production"),
+            (Tweaks.GroupUnits, "Trainer_Group_units")
+        ];
+
+        var expectedParamItems = Cheats.All
+            .SelectMany(cheat => cheat.Parameters
+                .Where(param => !param.Hidden)
+                .Select(param => (Cheat: cheat, Param: param, Key: TrainerStrings.CheatParamLabelKey(cheat.Id, param.Name))))
+            .ToList();
+        var expectedCheatParamKeys = expectedParamItems
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        CheatParam speedParam = Cheats.ById[Cheats.GameSpeedId].Parameters.Single(param => param.Name == "speeds");
+        var expectedSpeedOptionItems = speedParam.Options!
+            .Select(option => (CheatId: Cheats.GameSpeedId, ParamName: speedParam.Name, Option: option,
+                Key: TrainerStrings.CheatOptionLabelKey(Cheats.GameSpeedId, speedParam.Name, option.Value)))
+            .ToList();
+        var expectedSpeedOptionKeys = expectedSpeedOptionItems
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var expectedUnitOptionItems = Cheats.UnitOptions
+            .Select(option => (CheatId: Cheats.SpawnUnitId, ParamName: "units", Option: option,
+                Key: TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "units", option.Value)))
+            .ToList();
+
+        var expectedCarriedItemOptionItems = Cheats.ItemOptions
+            .Select(option => (CheatId: Cheats.SpawnUnitId, ParamName: "items", Option: option,
+                Key: TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "items", option.Value)))
+            .ToList();
+
+        var expectedSpawnItemOptionItems = Cheats.ItemOptions
+            .Select(option => (CheatId: Cheats.SpawnItemId, ParamName: "items", Option: option,
+                Key: TrainerStrings.CheatOptionLabelKey(Cheats.SpawnItemId, "items", option.Value)))
+            .ToList();
+
+        var expectedAllOptionItems = expectedSpeedOptionItems
+            .Concat(expectedUnitOptionItems)
+            .Concat(expectedCarriedItemOptionItems)
+            .Concat(expectedSpawnItemOptionItems)
+            .ToList();
+
+        var expectedAllOptionKeys = expectedAllOptionItems
+            .Select(item => item.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        IReadOnlyDictionary<string, string[]> expectedSpeedLabels = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["zh-TW"] = ["1 倍（正常）", "2 倍", "3 倍", "5 倍", "10 倍（原版極速）", "20 倍", "50 倍", "100 倍"],
+            ["zh-CN"] = ["1 倍（正常）", "2 倍", "3 倍", "5 倍", "10 倍（原版极速）", "20 倍", "50 倍", "100 倍"],
+            ["en"] = ["1x (normal)", "2x", "3x", "5x", "10x (vanilla turbo)", "20x", "50x", "100x"],
+        };
+
+        Check("Cheats.All 精確包含 Wave 1 要求的 18 個穩定 ID",
+            Cheats.All.Select(cheat => cheat.Id).SequenceEqual(expectedCheatIds));
+        Check("Tweaks.All 精確包含 Wave 1 要求的 28 個穩定 ID",
+            Tweaks.All.Select(tweak => tweak.Id).SequenceEqual(expectedTweakIds));
+        Check("Tweaks.Groups 精確包含 5 個預期分組且順序不變",
+            Tweaks.Groups().Select(group => group.Group).SequenceEqual(expectedGroups.Select(group => group.Group)));
+        Check("Cheats.All 動態產生之可見作弊參數清冊非空且精確包含 16 個參數",
+            expectedParamItems.Count == 16);
+        Check("game_speed/speeds 精確定義 8 個倍率 option",
+            expectedSpeedOptionItems.Count == 8 &&
+            expectedSpeedOptionItems.Select(item => item.Option.Value).SequenceEqual(["1", "2", "3", "5", "10", "20", "50", "100"]));
+        Check("spawn_unit 與 spawn_item 精確定義 63 種單位與 23 種物品",
+            expectedUnitOptionItems.Count == 63 &&
+            expectedCarriedItemOptionItems.Count == 23 &&
+            expectedSpawnItemOptionItems.Count == 23 &&
+            expectedAllOptionItems.Count == 117);
+
+        var hiddenParams = Cheats.All
+            .SelectMany(cheat => cheat.Parameters.Where(param => param.Hidden).Select(param => (Cheat: cheat, Param: param)))
+            .ToList();
+        Check("Hidden 作弊參數被排除在清冊之外（如 cycle_unit/cycle_item）",
+            hiddenParams.Count > 0 &&
+            hiddenParams.All(item => !expectedCheatParamKeys.Contains(TrainerStrings.CheatParamLabelKey(item.Cheat.Id, item.Param.Name))));
+
+        var expectedCheatKeys = expectedCheatIds
+            .Select(id => $"Trainer_Cheat_{id}_Name")
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedTweakKeys = expectedTweakIds
+            .Select(id => $"Trainer_Tweak_{id}_Name")
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedCheatDescriptionKeys = expectedCheatIds
+            .Select(id => $"Trainer_Cheat_{id}_Description")
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedTweakDescriptionKeys = expectedTweakIds
+            .Select(id => $"Trainer_Tweak_{id}_Description")
+            .ToHashSet(StringComparer.Ordinal);
+        var expectedGroupKeys = expectedGroups
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Check("Cheat key 建構集中且符合 Trainer_Cheat_<id>_Name",
+            Cheats.All.All(cheat =>
+                TrainerStrings.CheatNameKey(cheat.Id) == $"Trainer_Cheat_{cheat.Id}_Name"));
+        Check("Tweak key 建構集中且符合 Trainer_Tweak_<id>_Name",
+            Tweaks.All.All(tweak =>
+                TrainerStrings.TweakNameKey(tweak.Id) == $"Trainer_Tweak_{tweak.Id}_Name"));
+        Check("Cheat 說明 key 建構集中且符合 Trainer_Cheat_<id>_Description",
+            Cheats.All.All(cheat =>
+                TrainerStrings.CheatDescriptionKey(cheat.Id) == $"Trainer_Cheat_{cheat.Id}_Description"));
+        Check("Tweak 說明 key 建構集中且符合 Trainer_Tweak_<id>_Description",
+            Tweaks.All.All(tweak =>
+                TrainerStrings.TweakDescriptionKey(tweak.Id) == $"Trainer_Tweak_{tweak.Id}_Description"));
+        Check("CheatParam 標籤 key 建構集中且符合 Trainer_Cheat_<id>_Param_<paramName>_Label",
+            expectedParamItems.All(item =>
+                TrainerStrings.CheatParamLabelKey(item.Cheat.Id, item.Param.Name) == $"Trainer_Cheat_{item.Cheat.Id}_Param_{item.Param.Name}_Label"));
+        Check("Cheat option 標籤 key 建構集中且符合 Trainer_Cheat_<id>_Param_<param>_Option_<escapedValue>_Label",
+            expectedAllOptionItems.All(item =>
+                item.Key == $"Trainer_Cheat_{item.CheatId}_Param_{item.ParamName}_Option_{Uri.EscapeDataString(item.Option.Value)}_Label"));
+        string[] arbitraryOptionValues = ["a/b", "a%2Fb", "a b", "a_b", "單位/英雄"];
+        string[] arbitraryOptionKeys = arbitraryOptionValues
+            .Select(value => TrainerStrings.CheatOptionLabelKey("third_party", "units", value))
+            .ToArray();
+        const string arbitraryPrefix = "Trainer_Cheat_third_party_Param_units_Option_";
+        const string arbitrarySuffix = "_Label";
+        Check("option value 使用可逆 URI escape，任意標點／Unicode token 決定性且不碰撞",
+            arbitraryOptionKeys.Distinct(StringComparer.Ordinal).Count() == arbitraryOptionValues.Length &&
+            arbitraryOptionKeys.SequenceEqual(arbitraryOptionValues.Select(value =>
+                TrainerStrings.CheatOptionLabelKey("third_party", "units", value))) &&
+            arbitraryOptionKeys.Zip(arbitraryOptionValues).All(pair =>
+                Uri.UnescapeDataString(pair.First[arbitraryPrefix.Length..^arbitrarySuffix.Length]) == pair.Second) &&
+            arbitraryOptionKeys[0].Contains("a%2Fb", StringComparison.Ordinal) &&
+            arbitraryOptionKeys[1].Contains("a%252Fb", StringComparison.Ordinal));
+        Check("五個核心分組都映射到穩定 Trainer_Group_<id> key",
+            expectedGroups.All(group => TrainerStrings.GroupNameKey(group.Group) == group.Key));
+
+        foreach (string language in new[] { "zh-TW", "zh-CN", "en" })
+        {
+            IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+            var actualCheatKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Cheat_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Name", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualTweakKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Tweak_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Name", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualCheatDescriptionKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Cheat_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Description", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualTweakDescriptionKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Tweak_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Description", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualGroupKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Group_", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualCheatParamKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Cheat_", StringComparison.Ordinal) &&
+                              key.Contains("_Param_", StringComparison.Ordinal) &&
+                              !key.Contains("_Option_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Label", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var actualCheatOptionKeys = strings.Keys
+                .Where(key => key.StartsWith("Trainer_Cheat_", StringComparison.Ordinal) &&
+                              key.Contains("_Param_", StringComparison.Ordinal) &&
+                              key.Contains("_Option_", StringComparison.Ordinal) &&
+                              key.EndsWith("_Label", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+
+            Check($"{language} 精確覆蓋 18 個 cheat name keys",
+                actualCheatKeys.SetEquals(expectedCheatKeys));
+            Check($"{language} 精確覆蓋 28 個 tweak name keys",
+                actualTweakKeys.SetEquals(expectedTweakKeys));
+            Check($"{language} 精確覆蓋 18 個 cheat description keys",
+                actualCheatDescriptionKeys.SetEquals(expectedCheatDescriptionKeys));
+            Check($"{language} 精確覆蓋 28 個 tweak description keys",
+                actualTweakDescriptionKeys.SetEquals(expectedTweakDescriptionKeys));
+            Check($"{language} 精確覆蓋 5 個 group name keys",
+                actualGroupKeys.SetEquals(expectedGroupKeys));
+            Check($"{language} 精確覆蓋 16 個 cheat param label keys",
+                actualCheatParamKeys.SetEquals(expectedCheatParamKeys));
+            Check($"{language} 精確覆蓋 117 個 cheat option label keys",
+                actualCheatOptionKeys.SetEquals(expectedAllOptionKeys));
+            Check($"{language} 所有 Wave 1 Trainer 名稱都是非空翻譯",
+                expectedCheatKeys.Concat(expectedTweakKeys).Concat(expectedGroupKeys)
+                    .All(key => strings.TryGetValue(key, out string? value) &&
+                                !string.IsNullOrWhiteSpace(value) &&
+                                !string.Equals(value, key, StringComparison.Ordinal)));
+            Check($"{language} 所有 Wave 2 Trainer 說明都是非空翻譯",
+                expectedCheatDescriptionKeys.Concat(expectedTweakDescriptionKeys)
+                    .All(key => strings.TryGetValue(key, out string? value) &&
+                                !string.IsNullOrWhiteSpace(value) &&
+                                !string.Equals(value, key, StringComparison.Ordinal)));
+            Check($"{language} 所有 Wave 3A Trainer 參數標籤都是非空翻譯",
+                expectedCheatParamKeys
+                    .All(key => strings.TryGetValue(key, out string? value) &&
+                                !string.IsNullOrWhiteSpace(value) &&
+                                !string.Equals(value, key, StringComparison.Ordinal)));
+            Check($"{language} 所有 Wave 3C 單位與物品 option 都是非空翻譯",
+                expectedAllOptionKeys
+                    .All(key => strings.TryGetValue(key, out string? value) &&
+                                !string.IsNullOrWhiteSpace(value) &&
+                                !string.Equals(value, key, StringComparison.Ordinal)));
+            Check($"{language} Wave 3B 八個速度 option 值精確且 adapter 結果一致",
+                expectedSpeedOptionItems.Select((item, index) =>
+                    strings.TryGetValue(item.Key, out string? value) &&
+                    value == expectedSpeedLabels[language][index])
+                .All(matches => matches) &&
+                VerifyTrainerOptionsForLanguage(language, strings, speedParam));
+            Check($"{language} 每個內建 Trainer key 的 adapter 結果都精確等於該語言字串表",
+                VerifyTrainerAdapterForLanguage(language, strings, expectedGroups, expectedParamItems, expectedAllOptionItems));
+        }
+
+        Check("英文 cheat 與 tweak 名稱不直接暴露原始 ID",
+            Cheats.All.All(cheat => Strings.GetAll("en")[TrainerStrings.CheatNameKey(cheat.Id)] != cheat.Id) &&
+            Tweaks.All.All(tweak => Strings.GetAll("en")[TrainerStrings.TweakNameKey(tweak.Id)] != tweak.Id));
+        Check("簡體中文關鍵範例是獨立簡體翻譯",
+            Strings.GetAll("zh-CN")[TrainerStrings.CheatNameKey("toggle_fog")] == "切换战争迷雾" &&
+            Strings.GetAll("zh-CN")[TrainerStrings.TweakNameKey("townhall_maxgold")].Contains("城镇金钱", StringComparison.Ordinal) &&
+            Strings.GetAll("zh-CN")["Trainer_Group_production"] == "生产与研究" &&
+            Strings.GetAll("zh-CN")[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "units", "GAxeman")] == "高卢斧兵" &&
+            Strings.GetAll("zh-CN")[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnItemId, "items", "Fur gloves of health")].Contains("狂乱皮手套", StringComparison.Ordinal));
+
+        string[] capacityIds =
+        [
+            "townhall_maxgold", "townhall_maxfood", "townhall_max_population",
+            "village_maxgold", "village_maxfood", "village_max_population"
+        ];
+        (string Language, string NewOnlyText, string ExistingAndNewText, string MapSaveText, string MultiplayerText)[] scopeWording =
+        [
+            ("zh-TW", "僅限新建聚落", "已存在與新建聚落", "地圖或存檔", "多人連線退回原版值"),
+            ("zh-CN", "仅限新建聚落", "已有和新建聚落", "地图或存档", "多人联机时退回原版值"),
+            ("en", "New Settlements Only", "both existing and newly created settlements", "map or save", "multiplayer falls back to stock values")
+        ];
+        foreach ((string language, string newOnlyText, string existingAndNewText, string mapSaveText, string multiplayerText) in scopeWording)
+        {
+            IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+            Check($"{language} 六個容量／人口上限名稱不再宣稱僅限新建聚落",
+                capacityIds.All(id =>
+                    !strings[TrainerStrings.TweakNameKey(id)].Contains(newOnlyText, StringComparison.OrdinalIgnoreCase)));
+            Check($"{language} 六個容量／人口上限說明明示單人 .cktw 涵蓋既有與新建且多人退回原版",
+                capacityIds.All(id =>
+                    strings[TrainerStrings.TweakDescriptionKey(id)].Contains(".cktw", StringComparison.Ordinal) &&
+                    strings[TrainerStrings.TweakDescriptionKey(id)].Contains(existingAndNewText, StringComparison.OrdinalIgnoreCase) &&
+                    strings[TrainerStrings.TweakDescriptionKey(id)].Contains(multiplayerText, StringComparison.OrdinalIgnoreCase)));
+            Check($"{language} townhall_start_gold 名稱仍明示僅限新建聚落",
+                strings[TrainerStrings.TweakNameKey("townhall_start_gold")]
+                    .Contains(newOnlyText, StringComparison.OrdinalIgnoreCase));
+            Check($"{language} townhall_start_gold 說明保留 constructor -1、map/save bypass 與多人退回原版邊界",
+                strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
+                    .Contains("current-gold override -1", StringComparison.Ordinal) &&
+                strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
+                    .Contains(mapSaveText, StringComparison.OrdinalIgnoreCase) &&
+                strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
+                    .Contains(multiplayerText, StringComparison.OrdinalIgnoreCase));
+        }
+
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = "zh-TW";
+            Check("未知 cheat/tweak 在繁中保留舊有顯示名 fallback",
+                TrainerStrings.GetCheatName("third_party_cheat", "第三方作弊") == "第三方作弊" &&
+                TrainerStrings.GetTweakName("third_party_tweak", "第三方調整") == "第三方調整");
+            Check("未知 cheat param 在繁中保留舊有顯示名 fallback",
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", "unknown_param", "自訂參數", "Custom Param") == "自訂參數" &&
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", new CheatParam("unknown_param", "自訂參數", 10, englishLabel: "Custom Param")) == "自訂參數");
+            Check("未知 cheat option 在繁中保留 legacy Label fallback",
+                TrainerStrings.GetCheatOptionLabel("third_party_cheat", "units",
+                    new CheatParamOption("custom_unit", "自訂單位", englishLabel: "Custom Unit")) == "自訂單位");
+
+            Strings.Language = "zh-CN";
+            Check("未知 cheat/tweak 在簡中保留呼叫端提供的舊有顯示名",
+                TrainerStrings.GetCheatName("third_party_cheat", "第三方作弊") == "第三方作弊" &&
+                TrainerStrings.GetTweakName("third_party_tweak", "第三方调整") == "第三方调整");
+            Check("未知 cheat param 在簡中保留呼叫端提供的舊有顯示名",
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", "unknown_param", "自订参数", "Custom Param") == "自订参数" &&
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", new CheatParam("unknown_param", "自订参数", 10, englishLabel: "Custom Param")) == "自订参数");
+            Check("未知 cheat option 在簡中保留 legacy Label fallback",
+                TrainerStrings.GetCheatOptionLabel("third_party_cheat", "items",
+                    new CheatParamOption("custom_item", "自订物品", englishLabel: "Custom Item")) == "自订物品");
+
+            Strings.Language = "en";
+            Check("未知 cheat/tweak 在英文以 humanized ID fail-soft",
+                TrainerStrings.GetCheatName("third_party_cheat", "ignored") == "Third Party Cheat" &&
+                TrainerStrings.GetTweakName("third_party_tweak", "ignored") == "Third Party Tweak");
+            Check("未知 cheat param 在英文以 englishLabel / humanized ID fail-soft",
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", "unknown_param", "自訂參數", "Custom Param") == "Custom Param" &&
+                TrainerStrings.GetCheatParamLabel("third_party_cheat", new CheatParam("custom_spawn_rate", "速率", 10)) == "Custom Spawn Rate");
+            Check("未知 cheat option 在英文以 EnglishLabel／humanized value fail-soft",
+                TrainerStrings.GetCheatOptionLabel("third_party_cheat", "units",
+                    new CheatParamOption("custom_unit", "自訂單位", englishLabel: "Custom Unit")) == "Custom Unit" &&
+                TrainerStrings.GetCheatOptionLabel("third_party_cheat", "units",
+                    new CheatParamOption("custom_unit_value", "", englishLabel: " ")) == "Custom Unit Value");
+            const string legacyDescription =
+                "A deliberately long third-party description that must remain exactly as supplied.";
+            Check("未知 cheat/tweak 說明在英文原樣保留 caller fallback，不把長說明 humanize",
+                TrainerStrings.GetCheatDescription("third_party_cheat", legacyDescription) == legacyDescription &&
+                TrainerStrings.GetTweakDescription("third_party_tweak", legacyDescription) == legacyDescription);
+
+            foreach (string language in new[] { "zh-TW", "zh-CN" })
+            {
+                Strings.Language = language;
+                Check($"未知 cheat/tweak 說明在 {language} 原樣保留 caller fallback",
+                    TrainerStrings.GetCheatDescription("third_party_cheat", legacyDescription) == legacyDescription &&
+                    TrainerStrings.GetTweakDescription("third_party_tweak", legacyDescription) == legacyDescription);
+            }
+
+            foreach (string language in new[] { "zh-TW", "zh-CN", "en" })
+            {
+                Check($"{language} TrainerPage 三種 tooltip 都精確使用 description adapter",
+                    VerifyTrainerPageDescriptionAdapter(language));
+                Check($"{language} CheatParamsDialog 主說明精確使用 description adapter",
+                    VerifyCheatParamsDialogDescriptionAdapter(language));
+                Check($"{language} CheatParamsDialog 參數標籤精確使用 adapter",
+                    VerifyCheatParamsDialogParamLabels(language));
+                Check($"{language} game_speed 對話框八個倍率精確使用 option adapter",
+                    VerifyCheatParamsDialogSpeedOptions(language));
+                Check($"{language} 單位／物品 option 正確使用三語 key 與對話框顯示",
+                    VerifyUnitItemOptionsAndDialogs(language));
+
+                // CLI 輸出三語化契約測試
+                Strings.Language = language;
+                IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+                using var swCheats = new StringWriter();
+                using var swErr1 = new StringWriter();
+                int codeCheats = CliHost.Execute(["trainer", "list-cheats", "--json"], swCheats, swErr1);
+                using var docCheats = JsonDocument.Parse(swCheats.ToString());
+                var firstCheat = docCheats.RootElement.GetProperty("data").GetProperty("cheats")[0];
+                string cheatId = firstCheat.GetProperty("id").GetString()!;
+                string cheatName = firstCheat.GetProperty("name").GetString()!;
+                string expectedCheatName = strings[TrainerStrings.CheatNameKey(cheatId)];
+
+                using var swTweaks = new StringWriter();
+                using var swErr2 = new StringWriter();
+                int codeTweaks = CliHost.Execute(["trainer", "list-tweaks", "--json"], swTweaks, swErr2);
+                using var docTweaks = JsonDocument.Parse(swTweaks.ToString());
+                var firstGroup = docTweaks.RootElement.GetProperty("data").GetProperty("groups")[0];
+                string groupName = firstGroup.GetProperty("group").GetString()!;
+                string groupLabel = firstGroup.GetProperty("label").GetString()!;
+                string expectedGroupLabel = strings[TrainerStrings.GroupNameKey(groupName)!];
+
+                Check($"{language} CLI list-cheats 與 list-tweaks 輸出符合語系契約",
+                    codeCheats == ExitCodes.Success && codeTweaks == ExitCodes.Success &&
+                    cheatName == expectedCheatName && groupLabel == expectedGroupLabel);
+            }
+
+            Strings.Language = "en";
+            Check("未知第三方 group 保留舊有原值 fallback 且不拋例外",
+                TrainerStrings.GetGroupName("third_party_group") == "third_party_group" &&
+                TrainerStrings.GroupNameKey("third_party_group") is null);
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyTrainerAdapterForLanguage(
+        string language,
+        IReadOnlyDictionary<string, string> strings,
+        IReadOnlyList<(string Group, string Key)> expectedGroups,
+        IReadOnlyList<(Cheat Cheat, CheatParam Param, string Key)> expectedParams,
+        IReadOnlyList<(string CheatId, string ParamName, CheatParamOption Option, string Key)> expectedOptions)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            bool cheatsMatch = Cheats.All.All(cheat =>
+                TrainerStrings.GetCheatName(cheat.Id, cheat.Name) == strings[TrainerStrings.CheatNameKey(cheat.Id)] &&
+                TrainerStrings.GetCheatDescription(cheat.Id, cheat.Description) ==
+                    strings[TrainerStrings.CheatDescriptionKey(cheat.Id)]);
+            bool tweaksMatch = Tweaks.All.All(tweak =>
+                TrainerStrings.GetTweakName(tweak.Id, tweak.Label) == strings[TrainerStrings.TweakNameKey(tweak.Id)] &&
+                TrainerStrings.GetTweakDescription(tweak.Id, tweak.Description) ==
+                    strings[TrainerStrings.TweakDescriptionKey(tweak.Id)]);
+            bool groupsMatch = expectedGroups.All(group =>
+                TrainerStrings.GetGroupName(group.Group) == strings[group.Key]);
+            bool paramsMatch = expectedParams.All(item =>
+                TrainerStrings.GetCheatParamLabel(item.Cheat.Id, item.Param) == strings[item.Key] &&
+                TrainerStrings.GetCheatParamLabel(item.Cheat.Id, item.Param.Name, item.Param.Label, item.Param.EnglishLabel) == strings[item.Key]);
+            bool optionsMatch = expectedOptions.All(item =>
+                TrainerStrings.GetCheatOptionLabel(item.CheatId, item.ParamName, item.Option) == strings[item.Key]);
+            bool unitLabelsMatch = Cheats.UnitOptions.All(opt =>
+                TrainerStrings.GetUnitLabel(opt.Value) == strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "units", opt.Value)]);
+            bool itemLabelsMatch = Cheats.ItemOptions.All(opt =>
+                TrainerStrings.GetItemLabel(opt.Value) == strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnItemId, "items", opt.Value)]);
+            return cheatsMatch && tweaksMatch && groupsMatch && paramsMatch && optionsMatch && unitLabelsMatch && itemLabelsMatch;
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyTrainerOptionsForLanguage(
+        string language,
+        IReadOnlyDictionary<string, string> strings,
+        CheatParam speedParam)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            return speedParam.Options!.All(option =>
+            {
+                string key = TrainerStrings.CheatOptionLabelKey(Cheats.GameSpeedId, speedParam.Name, option.Value);
+                return TrainerStrings.GetCheatOptionLabel(Cheats.GameSpeedId, speedParam.Name, option) == strings[key];
+            });
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyCheatParamsDialogSpeedOptions(string language)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            CheatParam speedParam = Cheats.ById[Cheats.GameSpeedId].Parameters.Single(param => param.Name == "speeds");
+            string[] expected = speedParam.Options!
+                .Select(option => TrainerStrings.GetCheatOptionLabel(Cheats.GameSpeedId, speedParam.Name, option))
+                .ToArray();
+
+            using var dialog = new CheatParamsDialog(Cheats.ById[Cheats.GameSpeedId], null);
+            _ = dialog.Handle;
+            CheckBox[] optionBoxes = Descendants(dialog).OfType<CheckBox>()
+                .Where(box => box.Tag is CheatParamOption)
+                .ToArray();
+            return optionBoxes.Length == expected.Length &&
+                   optionBoxes.Select(box => box.Text).SequenceEqual(expected) &&
+                   optionBoxes.All(box => box.Tag is CheatParamOption option &&
+                       box.Text == TrainerStrings.GetCheatOptionLabel(Cheats.GameSpeedId, speedParam.Name, option));
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyUnitItemOptionsAndDialogs(string language)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+            CheatParamOption unit = Cheats.UnitOptions[0];
+            CheatParamOption item = Cheats.ItemOptions[0];
+            string expectedUnit = strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "units", unit.Value)];
+            string expectedCarriedItem = strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "items", item.Value)];
+            string expectedSpawnItem = strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnItemId, "items", item.Value)];
+
+            bool adaptersMatch =
+                TrainerStrings.GetUnitLabel(unit.Value) == expectedUnit &&
+                TrainerStrings.GetItemLabel(item.Value) == expectedSpawnItem;
+
+            using var spawnUnitDialog = new CheatParamsDialog(Cheats.ById[Cheats.SpawnUnitId], null);
+            _ = spawnUnitDialog.Handle;
+            CheckBox? unitBox = Descendants(spawnUnitDialog).OfType<CheckBox>()
+                .FirstOrDefault(box => ReferenceEquals(box.Tag, unit));
+            CheckBox? carriedItemBox = Descendants(spawnUnitDialog).OfType<CheckBox>()
+                .FirstOrDefault(box => ReferenceEquals(box.Tag, item));
+
+            using var spawnItemDialog = new CheatParamsDialog(Cheats.ById[Cheats.SpawnItemId], null);
+            _ = spawnItemDialog.Handle;
+            CheckBox? switchableItemBox = Descendants(spawnItemDialog).OfType<CheckBox>()
+                .FirstOrDefault(box => ReferenceEquals(box.Tag, item));
+
+            var testTrainerConfig = new TrainerConfig
+            {
+                Enabled = true,
+                Cheats = [new CheatConfig { Id = "gold_fill", Enabled = true, Key = "F1" }]
+            };
+            using var panelForm = new InGamePanelForm(testTrainerConfig);
+            _ = panelForm.Handle;
+            string expectedCheatName = strings[TrainerStrings.CheatNameKey("gold_fill")];
+            Button? goldBtn = Descendants(panelForm).OfType<Button>().FirstOrDefault();
+            bool panelMatches = goldBtn is not null && goldBtn.Text.StartsWith(expectedCheatName) && panelForm.AutoScaleMode == AutoScaleMode.Dpi && spawnUnitDialog.AutoScaleMode == AutoScaleMode.Dpi;
+
+            return adaptersMatch &&
+                   panelMatches &&
+                   unitBox?.Text == $"{expectedUnit} ({unit.Value})" &&
+                   carriedItemBox?.Text == expectedCarriedItem &&
+                   switchableItemBox?.Text == expectedSpawnItem;
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyCheatParamsDialogParamLabels(string language)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+
+            // 1. 通用數值參數對話框 (buff_army: attack, defense, health)
+            using (var buffDialog = new CheatParamsDialog(Cheats.ById["buff_army"], null))
+            {
+                _ = buffDialog.Handle;
+                var labels = Descendants(buffDialog).OfType<Label>().Select(l => l.Text).ToList();
+                string expectedAttack = strings[TrainerStrings.CheatParamLabelKey("buff_army", "attack")];
+                string expectedDefense = strings[TrainerStrings.CheatParamLabelKey("buff_army", "defense")];
+                string expectedHealth = strings[TrainerStrings.CheatParamLabelKey("buff_army", "health")];
+
+                if (!labels.Contains(expectedAttack) || !labels.Contains(expectedDefense) || !labels.Contains(expectedHealth))
+                    return false;
+            }
+
+            // 2. 通用多選參數對話框 (game_speed: speeds)
+            using (var speedDialog = new CheatParamsDialog(Cheats.ById[Cheats.GameSpeedId], null))
+            {
+                _ = speedDialog.Handle;
+                var labels = Descendants(speedDialog).OfType<Label>().Select(l => l.Text).ToList();
+                string expectedSpeeds = strings[TrainerStrings.CheatParamLabelKey(Cheats.GameSpeedId, "speeds")];
+                if (!labels.Contains(expectedSpeeds))
+                    return false;
+            }
+
+            // 3. spawn_unit 對話框：count 與 level 標籤使用 adapter；選項標籤使用 option adapter
+            using (var spawnUnitDialog = new CheatParamsDialog(Cheats.ById[Cheats.SpawnUnitId], null))
+            {
+                _ = spawnUnitDialog.Handle;
+                var labels = Descendants(spawnUnitDialog).OfType<Label>().Select(l => l.Text).ToList();
+                string expectedCount = strings[TrainerStrings.CheatParamLabelKey(Cheats.SpawnUnitId, "count")];
+                string expectedLevel = strings[TrainerStrings.CheatParamLabelKey(Cheats.SpawnUnitId, "level")];
+
+                bool countFound = labels.Any(t => t.Contains(expectedCount, StringComparison.Ordinal));
+                bool levelFound = labels.Any(t => t.Contains(expectedLevel, StringComparison.Ordinal));
+                if (!countFound || !levelFound)
+                    return false;
+
+                // 驗證選項文字：使用在地化標籤
+                var checkBoxes = Descendants(spawnUnitDialog).OfType<CheckBox>().ToList();
+                var sampleUnit = Cheats.UnitOptions[0];
+                string sampleUnitLabel = strings[TrainerStrings.CheatOptionLabelKey(Cheats.SpawnUnitId, "units", sampleUnit.Value)];
+                string expectedOptionText = $"{sampleUnitLabel} ({sampleUnit.Value})";
+                if (!checkBoxes.Any(cb => cb.Text == expectedOptionText))
+                    return false;
+            }
+
+            // 4. spawn_item 對話框：count 標籤使用 adapter
+            using (var spawnItemDialog = new CheatParamsDialog(Cheats.ById[Cheats.SpawnItemId], null))
+            {
+                _ = spawnItemDialog.Handle;
+                var labels = Descendants(spawnItemDialog).OfType<Label>().Select(l => l.Text).ToList();
+                string expectedItemCount = strings[TrainerStrings.CheatParamLabelKey(Cheats.SpawnItemId, "count")];
+                if (!labels.Any(t => t.Contains(expectedItemCount, StringComparison.Ordinal)))
+                    return false;
+            }
+
+            return true;
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyTrainerPageDescriptionAdapter(string language)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            using var page = new TrainerPage();
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var cheatsGrid = (DataGridView)typeof(TrainerPage).GetField("_cheats", flags)!.GetValue(page)!;
+            var tweaksGrid = (DataGridView)typeof(TrainerPage).GetField("_tweaks", flags)!.GetValue(page)!;
+            var scopedGrid = (DataGridView)typeof(TrainerPage).GetField("_scopedSimple", flags)!.GetValue(page)!;
+
+            static int FindRow(DataGridView grid, string id) =>
+                grid.Rows.Cast<DataGridViewRow>()
+                    .Single(row => row.Tag is Cheat cheat ? cheat.Id == id : row.Tag is Tweak tweak && tweak.Id == id)
+                    .Index;
+
+            static DataGridViewCellToolTipTextNeededEventArgs CreateToolTipArgs(int rowIndex) =>
+                (DataGridViewCellToolTipTextNeededEventArgs)Activator.CreateInstance(
+                    typeof(DataGridViewCellToolTipTextNeededEventArgs),
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                    binder: null,
+                    args: [0, rowIndex, string.Empty],
+                    culture: null)!;
+
+            var cheatArgs = CreateToolTipArgs(FindRow(cheatsGrid, "gold_fill"));
+            typeof(TrainerPage).GetMethod("CheatsCellToolTipTextNeeded", flags)!
+                .Invoke(page, [cheatsGrid, cheatArgs]);
+
+            var tweakArgs = CreateToolTipArgs(FindRow(tweaksGrid, "townhall_maxgold"));
+            typeof(TrainerPage).GetMethod("TweaksCellToolTipTextNeeded", flags)!
+                .Invoke(page, [tweaksGrid, tweakArgs]);
+
+            var scopedArgs = CreateToolTipArgs(FindRow(scopedGrid, "townhall_maxgold"));
+            typeof(TrainerPage).GetMethod("ScopedCellToolTipTextNeeded", flags)!
+                .Invoke(page, [scopedGrid, scopedArgs]);
+
+            IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
+            return cheatArgs.ToolTipText == strings[TrainerStrings.CheatDescriptionKey("gold_fill")] &&
+                   tweakArgs.ToolTipText == strings[TrainerStrings.TweakDescriptionKey("townhall_maxgold")] &&
+                   scopedArgs.ToolTipText == strings[TrainerStrings.TweakDescriptionKey("townhall_maxgold")];
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    private static bool VerifyCheatParamsDialogDescriptionAdapter(string language)
+    {
+        string previousLanguage = Strings.Language;
+        try
+        {
+            Strings.Language = language;
+            using var dialog = new CheatParamsDialog(Cheats.ById[Cheats.SpawnUnitId], null);
+            string expected = Strings.GetAll(language)[TrainerStrings.CheatDescriptionKey(Cheats.SpawnUnitId)];
+            return Descendants(dialog).OfType<Label>().Any(label => label.Text == expected);
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
     }
 
     /// <summary>把對話框實際長出來的 NumericUpDown 上限，跟作弊定義的上限比對。</summary>
@@ -4858,6 +5985,239 @@ internal static class Program
         pak.WriteText(@"ENGLISH\CREDITS.TXT", "Celtic Kings: Rage of War Credits\r\nOriginal English Team\r\n");
 
         return pak;
+    }
+
+    #endregion
+
+    #region 44. Trainer 預設按鍵表不變式
+
+    /// <summary>
+    /// 鎖定 ISSUE-062 修復後的預設按鍵表。引擎只有 20 個硬編按鍵代號，
+    /// 任何作弊都不得預設落在遊戲永遠佔用的鍵上——那種綁定會在載入時被
+    /// ToolkitConfig 靜默停用，遊戲中面板也會跟著失去游標生成作弊（AGENTS.md §2.9）。
+    /// </summary>
+    private static void TestTrainerDefaultKeyTableInvariants()
+    {
+        Console.WriteLine("\n44. Trainer 預設按鍵表不變式測試");
+
+        // --- 1. 按鍵代號合法性 ---
+        bool keysValid = Cheats.All.All(c =>
+            (string.IsNullOrEmpty(c.DefaultKey) || Cheats.Keys.Contains(c.DefaultKey, StringComparer.Ordinal))
+            && !string.IsNullOrEmpty(c.NumpadKey)
+            && Cheats.Keys.Contains(c.NumpadKey, StringComparer.Ordinal));
+        Check("18 個作弊的 DefaultKey（若非空）與 NumpadKey 都是引擎認得的 20 個按鍵代號", keysValid);
+
+        // --- 2. 核心迴歸防線：任何預設鍵都不得落在遊戲永久佔用的鍵上 ---
+        // 用 DescribeConflict 判定而非字串比對：小鍵盤模式下 F1–F12 已被 KeyMap 重導，
+        // 在該模式合法；Del／Ins 才是兩種模式都無法解放的鍵。
+        var vanillaOnGameKey = Cheats.All
+            .Where(c => !string.IsNullOrEmpty(c.DefaultKey)
+                     && Cheats.DescribeConflict(c.DefaultKey, keepVanilla: false, numpadKeys: false) is not null)
+            .Select(c => $"{c.Id}/{c.DefaultKey}").ToList();
+        Check("原版模式沒有任何作弊預設在遊戲保留鍵上", vanillaOnGameKey.Count == 0,
+            vanillaOnGameKey.Count == 0 ? null : string.Join(", ", vanillaOnGameKey));
+
+        var numpadOnGameKey = Cheats.All
+            .Where(c => Cheats.DescribeConflict(c.NumpadKey, keepVanilla: false, numpadKeys: true) is not null)
+            .Select(c => $"{c.Id}/{c.NumpadKey}").ToList();
+        Check("小鍵盤模式沒有任何作弊預設在遊戲保留鍵上", numpadOnGameKey.Count == 0,
+            numpadOnGameKey.Count == 0 ? null : string.Join(", ", numpadOnGameKey));
+
+        // --- 3. 同模式內唯一性 ---
+        var defaultKeys = Cheats.All.Select(c => c.DefaultKey).Where(k => !string.IsNullOrEmpty(k)).ToList();
+        var numpadKeys = Cheats.All.Select(c => c.NumpadKey).ToList();
+        Check("恰有 9 個作弊具備原版模式預設鍵且彼此不重複",
+            defaultKeys.Count == 9 && defaultKeys.Distinct(StringComparer.Ordinal).Count() == 9,
+            $"Count={defaultKeys.Count}");
+        Check("18 個小鍵盤預設鍵彼此不重複",
+            numpadKeys.Count == 18 && numpadKeys.Distinct(StringComparer.Ordinal).Count() == 18,
+            $"Count={numpadKeys.Count}");
+
+        // --- 4. 自由鍵預算 ---
+        var freeVanilla = Cheats.FreeKeys(numpadKeys: false).ToHashSet(StringComparer.Ordinal);
+        var freeNumpad = Cheats.FreeKeys(numpadKeys: true).ToHashSet(StringComparer.Ordinal);
+        Check("原版模式＋保留原版只有 F4／F11／F12／Backspace 四個自由鍵",
+            freeVanilla.SetEquals(["F4", "F11", "F12", "Backspace"]),
+            $"Count={freeVanilla.Count}");
+        Check("小鍵盤模式＋保留原版有 F1–F12 加 Backspace 共 13 個自由鍵",
+            freeNumpad.SetEquals(["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Backspace"]),
+            $"Count={freeNumpad.Count}");
+
+        // --- 5. 預設啟用集合 ---
+        var defaultEnabled = Cheats.All.Where(c => c.DefaultEnabled).Select(c => c.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        Check("原版模式恰有 4 個作弊預設啟用（loyalty_max／heal_army／smite_enemies／diagnose）",
+            defaultEnabled.SequenceEqual(["diagnose", "heal_army", "loyalty_max", "smite_enemies"], StringComparer.Ordinal),
+            string.Join(", ", defaultEnabled));
+
+        // 12 而非 13：spawn_unit 雖然拿到最後一個永久自由鍵 Backspace，
+        // 但它是 experimental，NumpadDefaultEnabled 一律排除實驗性作弊。
+        var numpadEnabled = Cheats.All.Where(c => c.NumpadDefaultEnabled).ToList();
+        Check("小鍵盤模式恰有 12 個作弊預設啟用（experimental 的 spawn_unit 不計入）",
+            numpadEnabled.Count == 12, $"Count={numpadEnabled.Count}");
+        Check("12 個小鍵盤預設啟用的按鍵在保留原版下皆為自由鍵且彼此不重複",
+            numpadEnabled.All(c => Cheats.DescribeConflict(c.NumpadKey, keepVanilla: true, numpadKeys: true) is null)
+            && numpadEnabled.Select(c => c.NumpadKey).Distinct(StringComparer.Ordinal).Count() == numpadEnabled.Count);
+
+        // --- 6. 游標生成作弊必須保住（AGENTS.md §2.9 / ISSUE-054 / ISSUE-059）---
+        Check("spawn_unit 的小鍵盤預設鍵是 Backspace",
+            string.Equals(Cheats.ById[Cheats.SpawnUnitId].NumpadKey, "Backspace", StringComparison.Ordinal),
+            Cheats.ById[Cheats.SpawnUnitId].NumpadKey);
+        Check("spawn_unit 的 Backspace 即使勾選保留原版仍是自由鍵",
+            Cheats.DescribeConflict("Backspace", keepVanilla: true, numpadKeys: true) is null);
+        Check("所有游標位置類作弊的小鍵盤鍵都不在遊戲保留鍵上",
+            Cheats.CursorPositionCheats.All(id =>
+                Cheats.DescribeConflict(Cheats.ById[id].NumpadKey, keepVanilla: false, numpadKeys: true) is null));
+
+        // --- 7. 容量證明：18 個鍵可同時共存，13 鍵上限是明確拒絕而非靜默忽略 ---
+        var all18 = Cheats.All.Select(c => new CheatSelection { Id = c.Id, Key = c.NumpadKey }).ToList();
+        bool builtWithoutVanilla;
+        try
+        {
+            _ = Cheats.BuildScDebug(all18, "self", 0, keepVanilla: false, numpadKeys: true);
+            builtWithoutVanilla = true;
+        }
+        catch (InvalidOperationException)
+        {
+            builtWithoutVanilla = false;
+        }
+        Check("關閉保留原版時 18 個作弊可同時綁定，BuildScDebug 不丟例外", builtWithoutVanilla);
+
+        bool rejectedWithVanilla = false;
+        try
+        {
+            _ = Cheats.BuildScDebug(all18, "self", 0, keepVanilla: true, numpadKeys: true);
+        }
+        catch (InvalidOperationException)
+        {
+            rejectedWithVanilla = true;
+        }
+        Check("勾選保留原版時 18 個全開必須被明確拒絕（13 鍵上限不被靜默忽略）", rejectedWithVanilla);
+
+        // --- 8. DescribeConflict 三語在地化（ISSUE-063）---
+        string previousLanguage = Strings.Language;
+        try
+        {
+            var gameConflict = new Dictionary<string, string>(StringComparer.Ordinal);
+            var vanillaConflict = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string language in new[] { "zh-TW", "zh-CN", "en" })
+            {
+                Strings.Language = language;
+                gameConflict[language] = Cheats.DescribeConflict("Del", keepVanilla: false, numpadKeys: false) ?? "";
+                vanillaConflict[language] = Cheats.DescribeConflict("Add", keepVanilla: true, numpadKeys: false) ?? "";
+            }
+
+            Check("遊戲保留鍵 Del 的衝突說明三語各不相同",
+                gameConflict["zh-TW"] != gameConflict["zh-CN"]
+                && gameConflict["zh-CN"] != gameConflict["en"]
+                && gameConflict["zh-TW"] != gameConflict["en"],
+                string.Join(" | ", gameConflict.Values));
+
+            // 「原版：加速」在繁簡兩地用字相同，因此只要求英文與中文不同、且三語皆非空。
+            Check("原版保留鍵 Add 的衝突說明英文與中文不同且三語皆非空",
+                vanillaConflict["en"] != vanillaConflict["zh-TW"]
+                && vanillaConflict.Values.All(v => !string.IsNullOrWhiteSpace(v)),
+                string.Join(" | ", vanillaConflict.Values));
+
+            Check("衝突說明不外洩任何原始 I18n 鍵名",
+                gameConflict.Values.Concat(vanillaConflict.Values).All(v =>
+                    !v.Contains("Trainer_ReservedKey_", StringComparison.Ordinal)
+                    && !v.Contains("Trainer_Conflict_", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            Strings.Language = previousLanguage;
+        }
+    }
+
+    #endregion
+
+    #region 45. CLI 選項嚴謹度
+
+    /// <summary>
+    /// ISSUE-065：未知選項以前會被丟進 commands 當成沒人讀的位置參數而靜默忽略，
+    /// 而 --game／--config 會無條件吃掉下一個 token（連 --json 都吃），
+    /// 讓代理程式拿到跑在別的目標上、又不是 JSON 的「成功」結果。
+    /// </summary>
+    private static void TestCliOptionStrictness()
+    {
+        Console.WriteLine("\n45. CLI 未知選項與選項取值嚴謹度測試");
+
+        static (int Code, JsonEnvelope? Envelope, string Raw) Run(params string[] args)
+        {
+            using var outWriter = new StringWriter();
+            using var errWriter = new StringWriter();
+            int code = CliHost.Execute(args, outWriter, errWriter);
+            string raw = outWriter.ToString();
+            JsonEnvelope? envelope = null;
+            try { envelope = JsonSerializer.Deserialize<JsonEnvelope>(raw); }
+            catch (JsonException) { /* 非 JSON 輸出，交由斷言判定 */ }
+            return (code, envelope, raw);
+        }
+
+        // --- 1. 不吃選項的指令必須拒絕未知選項 ---
+        string[][] noOptionCommands =
+        [
+            ["status"], ["verify"], ["version"], ["--help"],
+            ["perf", "get"], ["lang", "list"],
+            ["trainer", "list-cheats"], ["trainer", "list-tweaks"],
+        ];
+        foreach (string[] command in noOptionCommands)
+        {
+            var result = Run([.. command, "--bogus-option", "--json"]);
+            Check($"`{string.Join(' ', command)}` 拒絕未知選項並回傳 InvalidArgs",
+                result.Code == ExitCodes.InvalidArgs
+                && result.Envelope is { Ok: false } env && env.Errors.Count > 0,
+                $"exitCode={result.Code}");
+        }
+
+        // --- 2. 打錯的 --game 不得被靜默忽略（原本會改用自動偵測的安裝目錄）---
+        var typo = Run("status", "--gam", "C:/definitely/not/a/game", "--json");
+        Check("`status --gam <path>` 不再靜默改用自動偵測目錄，而是明確拒絕",
+            typo.Code == ExitCodes.InvalidArgs && typo.Envelope is { Ok: false },
+            $"exitCode={typo.Code}");
+
+        // --- 3. --game／--config 不得吃掉後面的選項，且 --json 不得遺失 ---
+        foreach (string option in new[] { "--game", "--config" })
+        {
+            var swallowed = Run("status", option, "--json");
+            Check($"`status {option} --json` 不吞掉 --json 並以 InvalidArgs 拒絕",
+                swallowed.Code == ExitCodes.InvalidArgs,
+                $"exitCode={swallowed.Code}");
+            Check($"`status {option} --json` 的錯誤仍以 JSON 封套輸出",
+                swallowed.Envelope is { Ok: false },
+                swallowed.Raw.Length > 60 ? swallowed.Raw[..60] : swallowed.Raw);
+
+            var dangling = Run("status", "--json", option);
+            Check($"末位的 {option} 缺少值時明確報錯而非被當成指令 token",
+                dangling.Code == ExitCodes.InvalidArgs && dangling.Envelope is { Ok: false },
+                $"exitCode={dangling.Code}");
+        }
+
+        // --- 4. 合法用法不得被誤殺 ---
+        foreach (string[] command in noOptionCommands)
+        {
+            var ok = Run([.. command, "--json"]);
+            Check($"`{string.Join(' ', command)} --json` 仍正常成功",
+                ok.Code == ExitCodes.Success && ok.Envelope is { Ok: true },
+                $"exitCode={ok.Code}");
+        }
+
+        // --- 5. 有自己選項白名單的子指令仍然收得到選項（不得被全域攔截）---
+        var restoreMissingFlag = Run("restore", "--json");
+        Check("`restore` 缺少 --all 時仍是原本的 InvalidArgs 而非未知選項錯誤",
+            restoreMissingFlag.Code == ExitCodes.InvalidArgs
+            && restoreMissingFlag.Envelope is { Ok: false } restoreEnv
+            && restoreEnv.Errors.Count > 0
+            && restoreEnv.Errors[0] == Strings.Get("Error_RestoreAllMissingFlag"),
+            restoreMissingFlag.Envelope?.Errors.FirstOrDefault());
+
+        var restoreUnknown = Run("restore", "--all", "--bogus-option", "--json");
+        Check("`restore --all --bogus-option` 在碰任何檔案之前就以未知選項拒絕",
+            restoreUnknown.Code == ExitCodes.InvalidArgs
+            && restoreUnknown.Envelope is { Ok: false } unknownEnv
+            && unknownEnv.Errors.Count > 0
+            && unknownEnv.Errors[0].Contains("--bogus-option", StringComparison.Ordinal),
+            restoreUnknown.Envelope?.Errors.FirstOrDefault());
     }
 
     #endregion

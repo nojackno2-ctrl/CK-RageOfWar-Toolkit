@@ -524,10 +524,11 @@ public sealed class TrainerPage : UserControl
             var cheat = (Cheat)row.Tag!;
             bool rowEnabled = Convert.ToBoolean(row.Cells["Enabled"].Value ?? false, CultureInfo.InvariantCulture);
             string? key = row.Cells["Key"].Tag as string;
-            if (key is null)
+            if (string.IsNullOrEmpty(key))
             {
                 // 按了「清除」但沒有重新指定按鍵：已啟用的作弊一定要有按鍵才能觸發，
                 // 停用的作弊按鍵欄本來就不會寫進 scdebug.xml（見 TrainerInstaller），空著沒差。
+                // 該模式沒有合法預設鍵的作弊（DefaultKey 為空）也走這條路，見 Cheats 的按鍵表不變式。
                 if (rowEnabled)
                     throw new InvalidOperationException(Strings.Get("Gui_Trainer_KeyRequired", DisplayCheatName(cheat)));
                 key = string.Empty;
@@ -568,14 +569,14 @@ public sealed class TrainerPage : UserControl
         SaveScopedGrid(_scopedSettlement, config);
 
         // 使用核心產生器做最後驗證：重複按鍵、未知參數或不合法值都在寫檔前被擋下。
-        if (config.Enabled && config.Cheats.Any(c => c.Enabled))
+        if (config.Cheats.Any(c => c.Enabled))
         {
             var selections = config.Cheats.Where(c => c.Enabled).Select(c => new CheatSelection
             {
                 Id = c.Id, Key = c.Key,
                 Parameters = c.Parameters.ToDictionary(p => p.Key, p => (object)p.Value, StringComparer.Ordinal)
             });
-            _ = Cheats.BuildScDebug(selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla);
+            _ = Cheats.BuildScDebug(selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla, config.NumpadKeys);
         }
     }
 
@@ -953,6 +954,16 @@ public sealed class TrainerPage : UserControl
             return;
         }
 
+        // 遊戲與原版 scdebug 已經佔走的鍵在這裡就擋下來，不要拖到套用時才由核心丟例外。
+        // 判定來源與 Cheats.ValidateBindings 相同，並隨兩個核取方塊即時生效。
+        string? reserved = Cheats.DescribeConflict(id, _keepVanilla.Checked, _numpad.Checked);
+        if (reserved is not null)
+        {
+            row.Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyCaptureReserved",
+                KeyMap.Display(id, _numpad.Checked), reserved);
+            return;
+        }
+
         SetKeyCell(row, id);
         _capturingRow = -1;
         _cheats.IsCapturing = false;
@@ -1019,24 +1030,23 @@ public sealed class TrainerPage : UserControl
     private void CheatsCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _cheats.Rows[e.RowIndex].Tag is Cheat cheat)
-            e.ToolTipText = Strings.IsChinese ? cheat.Description : cheat.Id;
+            e.ToolTipText = TrainerStrings.GetCheatDescription(cheat.Id, cheat.Description);
     }
 
     private void TweaksCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (e.RowIndex >= 0 && _tweaks.Rows[e.RowIndex].Tag is Tweak tweak)
-            e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
+            e.ToolTipText = TrainerStrings.GetTweakDescription(tweak.Id, tweak.Description);
     }
 
     private void ScopedCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
     {
         if (sender is DataGridView grid && e.RowIndex >= 0 && grid.Rows[e.RowIndex].Tag is Tweak tweak)
-            e.ToolTipText = Strings.IsChinese ? tweak.Description : tweak.Id;
+            e.ToolTipText = TrainerStrings.GetTweakDescription(tweak.Id, tweak.Description);
     }
 
     private static string FormatSummary(Cheat cheat, IReadOnlyDictionary<string, string> parameters)
     {
-        bool isZh = Strings.IsChinese;
         var visibleParams = cheat.Parameters.Where(p => !p.Hidden).ToList();
         if (visibleParams.Count == 0)
             return Strings.Get("Gui_Trainer_NoParams");
@@ -1083,11 +1093,11 @@ public sealed class TrainerPage : UserControl
                 var items = Cheats.ParseItemList(rawItems, Cheats.MaxItemListLength);
 
                 string lvlStr = level > 1 ? $" · Lv.{level}" : "";
-                string itemStr = items.Count > 0 ? (isZh ? $" · 攜帶 {items.Count} 件物品" : $" · {items.Count} items") : "";
+                string itemStr = items.Count > 0 ? Strings.Get("Gui_Trainer_Summary_CarriedItems", items.Count) : "";
 
                 if (units.Count > 0)
                 {
-                    string sample = string.Join("、", units.Take(2).Select(unit => Cheats.GetUnitLabel(unit, !isZh))) + (units.Count > 2 ? "..." : "");
+                    string sample = string.Join("、", units.Take(2).Select(unit => TrainerStrings.GetUnitLabel(unit))) + (units.Count > 2 ? "..." : "");
                     return Strings.Get("Gui_Trainer_Summary_Spawn", units.Count, sample, count) + lvlStr + itemStr;
                 }
                 return Strings.Get("Gui_Trainer_Summary_SpawnSimple", units.Count, count) + lvlStr + itemStr;
@@ -1098,7 +1108,7 @@ public sealed class TrainerPage : UserControl
                 long spawnItemCount = GetNum("count", 1);
                 if (spawnItems.Count > 0)
                 {
-                    string sample = string.Join("、", spawnItems.Take(2).Select(item => Cheats.GetItemLabel(item, !isZh))) + (spawnItems.Count > 2 ? "..." : "");
+                    string sample = string.Join("、", spawnItems.Take(2).Select(item => TrainerStrings.GetItemLabel(item))) + (spawnItems.Count > 2 ? "..." : "");
                     return Strings.Get("Gui_Trainer_Summary_SpawnItem", spawnItems.Count, sample, spawnItemCount);
                 }
                 return Strings.Get("Gui_Trainer_Summary_SpawnItemSimple", spawnItems.Count, spawnItemCount);
@@ -1106,7 +1116,7 @@ public sealed class TrainerPage : UserControl
             default:
                 return string.Join("; ", visibleParams.Select(p =>
                 {
-                    string label = p.DisplayLabel(!isZh);
+                    string label = TrainerStrings.GetCheatParamLabel(cheat.Id, p);
                     string val = parameters.TryGetValue(p.Name, out string? v) ? v : Convert.ToString(p.Default, CultureInfo.InvariantCulture) ?? "";
                     return $"{label}: {val}";
                 }));
@@ -1120,23 +1130,12 @@ public sealed class TrainerPage : UserControl
     private static string FormatDecimal(decimal value) => value.ToString(CultureInfo.InvariantCulture);
 
     private static string DisplayCheatName(Cheat cheat) =>
-        Strings.IsChinese ? cheat.Name : Humanize(cheat.Id);
+        TrainerStrings.GetCheatName(cheat.Id, cheat.Name);
 
     private static string DisplayTweakName(Tweak tweak) =>
-        Strings.IsChinese ? tweak.Label : Humanize(tweak.Id);
+        TrainerStrings.GetTweakName(tweak.Id, tweak.Label);
 
-    private static string DisplayGroup(string group) => Strings.IsChinese ? group : group switch
-    {
-        Tweaks.GroupHero => "Hero",
-        Tweaks.GroupTown => "Settlements",
-        Tweaks.GroupEconomy => "Economy",
-        Tweaks.GroupProduction => "Production & Research",
-        Tweaks.GroupUnits => "Unit Stats",
-        _ => group
-    };
-
-    private static string Humanize(string id) => CultureInfo.InvariantCulture.TextInfo
-        .ToTitleCase(id.Replace('_', ' '));
+    private static string DisplayGroup(string group) => TrainerStrings.GetGroupName(group);
 }
 
 /// <summary>

@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Perf;
 using CKToolkit.Core.Runtime;
@@ -39,13 +40,25 @@ public sealed class InGamePanelForm : Form
     private readonly List<Button> _cheatButtons = [];
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly bool _hasCursorCheats;
-    private System.Windows.Forms.Timer? _cursorRestore;
     private Point _savedCursor;
+    private bool _cursorMoved;
+    private bool _isSpawning;
+    private CancellationTokenSource? _spawnCts;
     private IntPtr _memHandle = IntPtr.Zero;
     private IntPtr _memBase = IntPtr.Zero;
     private uint _memPid;
     private string? _memProblem;
     private IntPtr _hwnd = IntPtr.Zero;
+
+    // 測試專用內部接縫（避免測試時操作真實滑鼠或行程記憶體）
+    internal Func<Point>? GetCursorPositionSeam;
+    internal Action<Point>? SetCursorPositionSeam;
+    internal Func<int, CancellationToken, Task>? DelayAsyncSeam;
+    internal Func<IntPtr, (bool success, Rectangle rect)>? GetWindowRectSeam;
+    internal Func<IntPtr, uint, bool>? PostKeySeam;
+    internal Func<IntPtr, IntPtr, (bool success, GameMemory.MapPoint point)>? ReadMousePointSeam;
+    internal Func<IntPtr, IntPtr, GameMemory.MapPoint, bool>? WriteMousePointSeam;
+    internal bool IsSpawningActive => _isSpawning;
 
     protected override CreateParams CreateParams
     {
@@ -63,6 +76,7 @@ public sealed class InGamePanelForm : Form
     {
         // 可縮放：作弊數量差很多，固定尺寸不是太擠就是浪費畫面。
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
+        AutoScaleMode = AutoScaleMode.Dpi;
         MinimumSize = new Size(150, 120);
         TopMost = true;
         ShowInTaskbar = false;
@@ -103,7 +117,7 @@ public sealed class InGamePanelForm : Form
             uint? vk = KeyMap.VirtualKeyFor(id, config.NumpadKeys);
             if (vk is null) continue;
 
-            string cheatName = Strings.IsChinese ? cheatDef.Name : cheatDef.Id;
+            string cheatName = TrainerStrings.GetCheatName(cheatDef.Id, cheatDef.Name);
             string label = $"{cheatName}（{KeyMap.Display(id, config.NumpadKeys)}）";
 
             uint virtualKey = vk.Value;
@@ -124,10 +138,12 @@ public sealed class InGamePanelForm : Form
             // 座標取自 MousePtm() 的作弊不能立刻送鍵：游標此刻正停在這顆按鈕上。
             // 見 Cheats.CursorPositionCheats 的說明。
             bool needsCursor = Cheats.CursorPositionCheats.Contains(c.Id);
-            btn.Click += (_, _) =>
+            btn.Click += async (_, _) =>
             {
-                if (needsCursor) SpawnAtViewCentre(virtualKey);
-                else SendKey(virtualKey);
+                if (needsCursor)
+                    await SpawnAtViewCentreAsync(virtualKey);
+                else
+                    SendKey(virtualKey);
             };
 
             _buttons.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -200,10 +216,13 @@ public sealed class InGamePanelForm : Form
         _timer.Tick += (_, _) => RefreshConnection();
         _timer.Start();
 
+        FormClosing += (_, _) => CancelActiveSpawn();
+
         FormClosed += (_, _) =>
         {
             _timer.Stop();
             _timer.Dispose();
+            CancelActiveSpawn();
         };
 
         RefreshConnection();
@@ -220,11 +239,85 @@ public sealed class InGamePanelForm : Form
         {
             _timer.Stop();
             _timer.Dispose();
-            _cursorRestore?.Stop();
-            _cursorRestore?.Dispose();
+            CancelActiveSpawn();
             ReleaseMemory();
         }
         base.Dispose(disposing);
+    }
+
+    private void CancelActiveSpawn()
+    {
+        // CTS 由非同步操作在 finally 唯一釋放；關窗或連線中斷只送出取消訊號，
+        // 避免與 Task.Delay 的 continuation 同時 Dispose。
+        try { _spawnCts?.Cancel(); } catch (ObjectDisposedException) { }
+        RestoreCursorIfNeeded();
+    }
+
+    private void RestoreCursorIfNeeded()
+    {
+        if (!_cursorMoved) return;
+        try
+        {
+            SetCursorPosition(_savedCursor);
+            _cursorMoved = false;
+        }
+        catch { }
+    }
+
+    private Point GetCursorPosition() =>
+        GetCursorPositionSeam?.Invoke() ?? Cursor.Position;
+
+    private void SetCursorPosition(Point p)
+    {
+        if (SetCursorPositionSeam is not null)
+            SetCursorPositionSeam(p);
+        else
+            Cursor.Position = p;
+    }
+
+    private Task DelayAsync(int millisecondsDelay, CancellationToken cancellationToken) =>
+        DelayAsyncSeam is not null
+            ? DelayAsyncSeam(millisecondsDelay, cancellationToken)
+            : Task.Delay(millisecondsDelay, cancellationToken);
+
+    private bool TryGetWindowRect(IntPtr hwnd, out Rectangle rect)
+    {
+        if (GetWindowRectSeam is not null)
+        {
+            var res = GetWindowRectSeam(hwnd);
+            rect = res.rect;
+            return res.success;
+        }
+        return GameWindow.TryGetWindowRect(hwnd, out rect);
+    }
+
+    private bool PostKey(IntPtr hwnd, uint virtualKey) =>
+        PostKeySeam is not null
+            ? PostKeySeam(hwnd, virtualKey)
+            : GameWindow.PostKey(hwnd, virtualKey);
+
+    private bool TryReadMousePoint(IntPtr handle, IntPtr baseAddress, out GameMemory.MapPoint point)
+    {
+        if (ReadMousePointSeam is not null)
+        {
+            var res = ReadMousePointSeam(handle, baseAddress);
+            point = res.point;
+            return res.success;
+        }
+        return GameMemory.TryReadMousePoint(handle, baseAddress, out point);
+    }
+
+    private bool TryWriteMousePoint(IntPtr handle, IntPtr baseAddress, GameMemory.MapPoint point) =>
+        WriteMousePointSeam is not null
+            ? WriteMousePointSeam(handle, baseAddress, point)
+            : GameMemory.TryWriteMousePoint(handle, baseAddress, point);
+
+    internal void SetMockConnectionForTest(IntPtr hwnd, IntPtr memHandle, IntPtr memBase)
+    {
+        _hwnd = hwnd;
+        _memHandle = memHandle;
+        _memBase = memBase;
+        _memPid = 12345;
     }
 
     /// <summary>
@@ -248,68 +341,105 @@ public sealed class InGamePanelForm : Form
     }
 
     /// <summary>
-    /// 在遊戲畫面中央生成。
+    /// 在遊戲畫面中央生成（非阻塞非同步版本，ISSUE-059）。
     ///
     /// 不自己換算螢幕像素到地圖座標（那要重建引擎的相機轉換），而是讓遊戲自己算：
     /// 把游標暫時移到畫面中央，引擎處理滑鼠移動時就會把該點的地圖座標寫進
-    /// MousePtm 讀的那個快取（見 GameMemory 的說明），取樣後游標立刻歸位。
+    /// MousePtm 讀的那個快取（見 GameMemory 的說明），非同步取樣後游標立刻歸位。
     ///
     /// 歸位本身會再產生一次滑鼠移動、把快取蓋掉，所以歸位之後要把取樣到的座標
-    /// 寫回去釘住，然後才送鍵。沒有記憶體路徑時退而求其次：讓游標在中央多停
+    /// 寫回去釘住，然後才送鍵。沒有記憶體路徑或全程讀不到座標則走退路：讓游標在中央多停
     /// CursorHoldMs 再歸位，靠時間差讓腳本先讀到。
     /// </summary>
-    private void SpawnAtViewCentre(uint virtualKey)
+    internal async Task<bool> SpawnAtViewCentreAsync(uint virtualKey)
     {
-        if (_hwnd == IntPtr.Zero) { RefreshConnection(); return; }
-        if (!GameWindow.TryGetWindowRect(_hwnd, out Rectangle rect) || rect.Width <= 0)
+        if (_isSpawning) return false;
+        _isSpawning = true;
+        CancellationTokenSource? operationCts = null;
+
+        try
         {
+            if (IsDisposed || _hwnd == IntPtr.Zero)
+            {
+                RefreshConnection();
+                return false;
+            }
+
+            if (!TryGetWindowRect(_hwnd, out Rectangle rect) || rect.Width <= 0)
+            {
+                SendKey(virtualKey);
+                return false;
+            }
+
+            EnsureMemory();
+
+            operationCts = new CancellationTokenSource();
+            _spawnCts = operationCts;
+            var ct = operationCts.Token;
+
+            var centre = new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
+            _savedCursor = GetCursorPosition();
+            SetCursorPosition(centre);
+            _cursorMoved = true;
+
+            GameMemory.MapPoint? sampled = await SampleMapPointAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            if (sampled is { } point)
+            {
+                RestoreCursorIfNeeded();
+                TryWriteMousePoint(_memHandle, _memBase, point);
+                SendKey(virtualKey);
+                _spawnPoint.Text = Strings.Get("Gui_Panel_SpawnPointAt", point.X, point.Y);
+                return true;
+            }
+
+            // 退路：讀不到座標就把游標留在中央送鍵，稍後再歸位。
             SendKey(virtualKey);
-            return;
+            try
+            {
+                await DelayAsync(CursorHoldMs, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                // 視窗關閉或 Dispose 時中斷停留
+            }
+            RestoreCursorIfNeeded();
+            return false;
         }
-
-        EnsureMemory();
-        var centre = new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
-        _savedCursor = Cursor.Position;
-        Cursor.Position = centre;
-
-        GameMemory.MapPoint? sampled = SampleMapPoint();
-        if (sampled is { } point)
+        catch (OperationCanceledException)
         {
-            Cursor.Position = _savedCursor;
-            GameMemory.TryWriteMousePoint(_memHandle, _memBase, point);
-            SendKey(virtualKey);
-            _spawnPoint.Text = Strings.Get("Gui_Panel_SpawnPointAt", point.X, point.Y);
-            return;
+            return false;
         }
-
-        // 退路：讀不到座標就把游標留在中央送鍵，稍後再歸位。
-        SendKey(virtualKey);
-        _cursorRestore?.Stop();
-        _cursorRestore?.Dispose();
-        _cursorRestore = new System.Windows.Forms.Timer { Interval = CursorHoldMs };
-        _cursorRestore.Tick += (_, _) =>
+        catch
         {
-            Cursor.Position = _savedCursor;
-            _cursorRestore?.Stop();
-            _cursorRestore?.Dispose();
-            _cursorRestore = null;
-        };
-        _cursorRestore.Start();
+            try { operationCts?.Cancel(); } catch (ObjectDisposedException) { }
+            return false;
+        }
+        finally
+        {
+            RestoreCursorIfNeeded();
+            if (ReferenceEquals(_spawnCts, operationCts))
+                _spawnCts = null;
+            operationCts?.Dispose();
+            _isSpawning = false;
+        }
     }
 
     /// <summary>
     /// 等引擎把游標所在點換算好。連續兩次讀到相同的值才算穩定——移動當下讀到的
-    /// 可能還是舊值。逾時就回傳 null，由呼叫端走退路。
+    /// 可能還是舊值。逾時時沿用最後一筆成功讀值；全程讀不到才回傳 null 走退路。
+    /// 以非阻塞 Task.Delay 輪詢，不凍結 WinForms 訊息幫浦。
     /// </summary>
-    private GameMemory.MapPoint? SampleMapPoint()
+    private async Task<GameMemory.MapPoint?> SampleMapPointAsync(CancellationToken cancellationToken)
     {
         if (_memHandle == IntPtr.Zero) return null;
 
         GameMemory.MapPoint? previous = null;
         for (int waited = 0; waited <= SampleTimeoutMs; waited += SampleStepMs)
         {
-            Thread.Sleep(SampleStepMs);
-            if (!GameMemory.TryReadMousePoint(_memHandle, _memBase, out var current)) continue;
+            await DelayAsync(SampleStepMs, cancellationToken);
+            if (_memHandle == IntPtr.Zero) return null;
+            if (!TryReadMousePoint(_memHandle, _memBase, out var current)) continue;
             if (previous is { } p && p == current) return current;
             previous = current;
         }
@@ -319,6 +449,7 @@ public sealed class InGamePanelForm : Form
     /// <summary>依目前的遊戲行程建立／維持記憶體連線；遊戲換了行程就重新連。</summary>
     private void EnsureMemory()
     {
+        if (_memHandle != IntPtr.Zero && ReadMousePointSeam is not null) return;
         uint pid = GameWindow.GetProcessId(_hwnd);
         if (pid == 0) { ReleaseMemory(); return; }
         if (_memHandle != IntPtr.Zero && pid == _memPid) return;
@@ -347,8 +478,20 @@ public sealed class InGamePanelForm : Form
 
     private void RefreshConnection()
     {
-        _hwnd = GameWindow.Find();
+        IntPtr previousHwnd = _hwnd;
+        IntPtr currentHwnd = GameWindow.Find();
+        uint currentPid = currentHwnd == IntPtr.Zero ? 0 : GameWindow.GetProcessId(currentHwnd);
+        bool connectionChanged = _isSpawning
+            && (currentHwnd == IntPtr.Zero
+                || currentHwnd != previousHwnd
+                || (_memPid != 0 && currentPid != _memPid));
+
+        _hwnd = currentHwnd;
         bool ok = _hwnd != IntPtr.Zero;
+        if (connectionChanged)
+        {
+            CancelActiveSpawn();
+        }
         foreach (var b in _cheatButtons) b.Enabled = ok;
         _speed.Enabled = ok;
         _speedApply.Enabled = ok;
@@ -362,7 +505,7 @@ public sealed class InGamePanelForm : Form
     private void SendKey(uint virtualKey)
     {
         if (_hwnd == IntPtr.Zero) { RefreshConnection(); return; }
-        if (!GameWindow.PostKey(_hwnd, virtualKey))
+        if (!PostKey(_hwnd, virtualKey))
             _status.Text = Strings.Get("Gui_Panel_SendFailed");
     }
 
