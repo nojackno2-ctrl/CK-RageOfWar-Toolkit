@@ -73,6 +73,7 @@
 | [ISSUE-063](#issue-063-修改器按鍵擷取只擋格線內重複不檢查遊戲與原版保留鍵) | **修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵** | ⏳ 待實測 | 於修改器頁點選任一作弊的按鍵欄進入擷取狀態，分別按下 Del、Ins，以及勾選／取消「保留原版功能」後按下 Add。 | 當場顯示三語正確的「已被佔用」訊息且不寫入該鍵，改按自由鍵可正常設定；套用時不再出現延後爆出的按鍵衝突例外。 |
 | [ISSUE-064](#issue-064-關閉主視窗時設定儲存失敗會被空-catch-靜默吞掉) | **關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉** | ⏳ 待實測 | 在修改器頁把某個 tweak 填成超出範圍的值或清空已啟用作弊的按鍵，然後直接關閉主視窗並重新開啟。 | 關閉前記錄區出現未儲存的原因訊息，關窗流程不被阻擋，重開後設定維持上一次成功儲存的狀態。 |
 | [ISSUE-065](#issue-065-cli-靜默接受未知選項--game---config-會吞掉下一個選項) | **CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項** | ⏳ 待實測 | 以 AI 代理程式驅動 CLI 時故意打錯選項名稱（如 `--gam`），或在 `--game` / `--config` 後面直接接 `--json`。 | 未知選項一律以 InvalidArgs 拒絕並回傳合規 JSON 封套；`--game` / `--config` 缺少值或值本身是另一個選項時明確報錯，`--json` 永不遺失。 |
+| [ISSUE-066](#issue-066-修改器兩個分頁重複列出同一批-tweak可分流項目仍提供誤導性全域值) | **修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值** | ⏳ 待實測 | 開啟修改器的「永久規則調整」分頁，確認已無「敵我／聚落分流」分頁、可分流項目只在下方分流表格出現且沒有全域欄，調整後套用並進單人遊戲確認生效。 | 單一分頁內同一個 tweak 只出現一次；21 個可分流項目只能設分流值；7 個尚無 hook 的項目仍有全域值且多人生效。 |
 
 ---
 
@@ -171,6 +172,29 @@
 ## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
 
 > 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+
+---
+
+### ISSUE-066: 修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值
+
+- **問題編號**: `ISSUE-066`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 修改器有「永久規則調整」與「敵我／聚落分流」兩個子分頁。前者列出全部 28 個 tweak 的單一全域值，後者再列出其中支援 owner-aware hook 的項目並提供分流欄，因此同一個 tweak 同時出現在兩個分頁、有兩個互相競爭的輸入位置。
+  - `Gui_Trainer_TweaksScopeNotice` 甚至明文寫著「要分開設定我方與敵方數值，請改用『敵我／聚落分流』分頁」，把這個割裂直接暴露給使用者。
+  - 更關鍵的是那個全域值是誤導性的：`ScopedTweakPatch.ShouldRouteToScopedPatch` 顯示，只要該 tweak 支援分流且值不等於原廠值，`TrainerInstaller` 就會跳過 `data.pak` 寫入、整筆改走 `.cktw`。也就是說可分流項目的「全域值」早就不是多人可用的路徑，使用者卻會以為那是一個適用敵我雙方與多人的設定。
+- **修復與證據**:
+  - 依使用者決定（2026-09-01）：所有可以分敵我的修改一律只保留分流設定，不再提供全域值。兩個分頁合併為一個「永久規則調整」，垂直堆疊為 警語 → 全域數值表格 → 重設 → 我方／敵方與聚落分流兩表並排 → 重設。
+  - 全域表格改為只列出 `ScopedTweakPatch.IsSupportedScopedTweakId` 為 false 的項目：目前是 7 個（`hero_maxhealth`、`hero_speed`、`hero_sight`、`hero_health_per_level`、`hero_exp_divider`、`gaul_unit_power`、`roman_unit_power`）。其餘 21 個（15 個我方／敵方、6 個四向聚落）只在分流表格編輯。
+  - 這是無損改動：那 21 個項目的全域值本來就不會寫進 `data.pak`。移除後未設定的 scope 依 `GetScopedFallbackValue` 退回原廠值，`ShouldRouteToScopedPatch` 也改為純粹依明確分流值判斷，語意更乾淨。
+  - 三語新增 `Gui_Trainer_TweaksGlobalLabel`，並改寫 `Gui_Trainer_TweaksScopeNotice` 使其不再指向已不存在的分頁（739→740 鍵，parity 0/0，佔位符一致）。警語依使用者決定保留而非改為逐列 tooltip。
+  - 警語的數量參數改為 `Tweaks.All.Count(t => ScopedTweakPatch.IsSupportedScopedTweakId(t.Id))` 動態計算，不再硬編。
+  - SelfTest 第 40 組新增 6 個斷言鎖定合併後的組成：只剩兩個子分頁、全域表格只含無 hook 項目、分流表格完整覆蓋 21 項、無任何 tweak 同時出現在兩處、合計恰好 28 且不重複。
+  - 連帶修正過時斷言：第 43 組的 `VerifyTrainerPageDescriptionAdapter` 原本在全域表格查找 `townhall_maxgold`，該項目已正確移入分流表格，改為查找仍無 hook 的 `hero_maxhealth`；斷言目的（全域表格 tooltip 走 description adapter）未放寬。
+  - Debug／Release 建置 0 warning / 0 error，SelfTest 1008 → 1014 個斷言全綠。CLI `trainer list-tweaks` 契約不變，仍回報 28 個 tweak、其中 21 個 `scopedSupported`。
+- **後續**:
+  - 全域表格的 7 個項目是暫時狀態。依 ISSUE-049，高盧／羅馬種族倍率因無反組譯證據而明確擱置，5 個英雄屬性則是尚未實作 hook。等 ISSUE-049 補完，這些項目也應轉為分流，全域表格屆時會縮減至消失。
 
 ---
 

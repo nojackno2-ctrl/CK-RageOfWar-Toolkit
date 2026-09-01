@@ -4491,6 +4491,56 @@ internal static class Program
                 Strings.Get("Error_TrainerKeyConflict", "gold_fill", "F2");
         }
         Check("GUI SaveConfig 即使總開關關閉仍拒絕已啟用列的 F2 遊戲保留鍵", keyConflictRejected);
+
+        // --- 合併後的分頁組成不變式（使用者要求：可分流的項目不得再有全域值）---
+        using (var mergedPage = new TrainerPage())
+        {
+            var gf = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var mg_subTabs = (TabControl)typeof(TrainerPage).GetField("_subTabs", gf)!.GetValue(mergedPage)!;
+            var mg_globalGrid = (DataGridView)typeof(TrainerPage).GetField("_tweaks", gf)!.GetValue(mergedPage)!;
+            var mg_simpleGrid = (DataGridView)typeof(TrainerPage).GetField("_scopedSimple", gf)!.GetValue(mergedPage)!;
+            var mg_settlementGrid = (DataGridView)typeof(TrainerPage).GetField("_scopedSettlement", gf)!.GetValue(mergedPage)!;
+
+            static List<string> mg_IdsOf(DataGridView grid) =>
+                grid.Rows.Cast<DataGridViewRow>()
+                    .Where(r => r.Tag is Tweak)
+                    .Select(r => ((Tweak)r.Tag!).Id)
+                    .ToList();
+
+            List<string> mg_globalIds = mg_IdsOf(mg_globalGrid);
+            List<string> mg_scopedIds = [.. mg_IdsOf(mg_simpleGrid), .. mg_IdsOf(mg_settlementGrid)];
+            var mg_expectedScoped = Tweaks.All.Where(t => ScopedTweakPatch.IsSupportedScopedTweakId(t.Id))
+                                           .Select(t => t.Id).ToList();
+            var mg_expectedGlobal = Tweaks.All.Where(t => !ScopedTweakPatch.IsSupportedScopedTweakId(t.Id))
+                                           .Select(t => t.Id).ToList();
+
+            Check("修改器只剩「作弊」與「永久規則調整」兩個子分頁",
+                mg_subTabs.Controls.Count == 2, $"Count={mg_subTabs.Controls.Count}");
+
+            Check("全域表格只列出沒有分流 hook 的項目",
+                mg_globalIds.Count == mg_expectedGlobal.Count
+                && mg_globalIds.OrderBy(x => x, StringComparer.Ordinal)
+                    .SequenceEqual(mg_expectedGlobal.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal),
+                $"Count={mg_globalIds.Count}");
+
+            Check("全域表格不含任何支援分流的項目",
+                !mg_globalIds.Any(ScopedTweakPatch.IsSupportedScopedTweakId),
+                string.Join(", ", mg_globalIds.Where(ScopedTweakPatch.IsSupportedScopedTweakId)));
+
+            Check("兩個分流表格完整覆蓋所有支援分流的項目",
+                mg_scopedIds.OrderBy(x => x, StringComparer.Ordinal)
+                    .SequenceEqual(mg_expectedScoped.OrderBy(x => x, StringComparer.Ordinal), StringComparer.Ordinal),
+                $"Count={mg_scopedIds.Count}/{mg_expectedScoped.Count}");
+
+            Check("沒有任何 tweak 同時出現在全域與分流表格",
+                !mg_globalIds.Intersect(mg_scopedIds, StringComparer.Ordinal).Any(),
+                string.Join(", ", mg_globalIds.Intersect(mg_scopedIds, StringComparer.Ordinal)));
+
+            Check("全域與分流表格合計恰好覆蓋 28 個 tweak 且不重複",
+                mg_globalIds.Count + mg_scopedIds.Count == Tweaks.All.Count
+                && mg_globalIds.Concat(mg_scopedIds).Distinct(StringComparer.Ordinal).Count() == Tweaks.All.Count,
+                $"{mg_globalIds.Count}+{mg_scopedIds.Count} vs {Tweaks.All.Count}");
+        }
     }
 
     // --- 41. scoped tweaks (.cktw) + HiRes 1920 (.ckhr) 複合套用與精確反轉 (ISSUE-052) ---
@@ -5504,7 +5554,8 @@ internal static class Program
             typeof(TrainerPage).GetMethod("CheatsCellToolTipTextNeeded", flags)!
                 .Invoke(page, [cheatsGrid, cheatArgs]);
 
-            var tweakArgs = CreateToolTipArgs(FindRow(tweaksGrid, "townhall_maxgold"));
+            // townhall_maxgold 已改為只在分流表格編輯，全域表格改用仍無 hook 的 hero_maxhealth。
+            var tweakArgs = CreateToolTipArgs(FindRow(tweaksGrid, "hero_maxhealth"));
             typeof(TrainerPage).GetMethod("TweaksCellToolTipTextNeeded", flags)!
                 .Invoke(page, [tweaksGrid, tweakArgs]);
 
@@ -5514,7 +5565,7 @@ internal static class Program
 
             IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
             return cheatArgs.ToolTipText == strings[TrainerStrings.CheatDescriptionKey("gold_fill")] &&
-                   tweakArgs.ToolTipText == strings[TrainerStrings.TweakDescriptionKey("townhall_maxgold")] &&
+                   tweakArgs.ToolTipText == strings[TrainerStrings.TweakDescriptionKey("hero_maxhealth")] &&
                    scopedArgs.ToolTipText == strings[TrainerStrings.TweakDescriptionKey("townhall_maxgold")];
         }
         finally

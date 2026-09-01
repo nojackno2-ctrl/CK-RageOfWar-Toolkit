@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
@@ -17,7 +18,6 @@ public sealed class TrainerPage : UserControl
     private readonly TabControl _subTabs = new();
     private readonly TabPage _cheatsTab = new();
     private readonly TabPage _tweaksTab = new();
-    private readonly TabPage _scopedTweaksTab = new();
     private readonly KeyCaptureGrid _cheats = new();
     private readonly DataGridView _tweaks = new();
     private readonly DataGridView _scopedSimple = new();
@@ -31,6 +31,7 @@ public sealed class TrainerPage : UserControl
     private readonly Label _hint = new();
     private readonly Label _tweaksWarning = new();
     private readonly Label _tweaksScopeNotice = new();
+    private readonly Label _tweaksGlobalLabel = new();
     private readonly Label _scopedWarning = new();
     private readonly Label _scopedSimpleLabel = new();
     private readonly Label _scopedSettlementLabel = new();
@@ -144,10 +145,9 @@ public sealed class TrainerPage : UserControl
 
         _subTabs.Dock = DockStyle.Fill;
         _subTabs.MinimumSize = new Size(0, 240);
-        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab, _scopedTweaksTab]);
+        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
         BuildCheatsTab();
         BuildTweaksTab();
-        BuildScopedTweaksTab();
         root.Controls.Add(_subTabs, 0, 3);
         root.Controls.Add(launchRow, 0, 4);
         Controls.Add(root);
@@ -187,18 +187,19 @@ public sealed class TrainerPage : UserControl
 
     private void BuildTweaksTab()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 6,
+            Padding = new Padding(4)
+        };
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-        _tweaksWarning.AutoSize = true;
-        _tweaksWarning.MaximumSize = new Size(1000, 0);
-        _tweaksWarning.ForeColor = Color.FromArgb(180, 83, 9);
-        _tweaksWarning.Font = new Font(Font, FontStyle.Bold);
-        _tweaksWarning.Padding = new Padding(8, 6, 8, 6);
-        panel.Controls.Add(_tweaksWarning, 0, 0);
+        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 70F));
+        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         // 多人失效提示：本頁只要有值被路由到 .cktw，多人連線就會退回原版數值。
         // 樣式沿用分流子分頁的藍色資訊框，但不加粗，以免蓋過上面的橘色風險警告。
@@ -209,7 +210,10 @@ public sealed class TrainerPage : UserControl
         _tweaksScopeNotice.Margin = new Padding(2, 2, 2, 6);
         _tweaksScopeNotice.BackColor = Color.FromArgb(239, 246, 255);
         _tweaksScopeNotice.ForeColor = Color.FromArgb(30, 64, 175);
-        panel.Controls.Add(_tweaksScopeNotice, 0, 1);
+        panel.Controls.Add(_tweaksScopeNotice, 0, 0);
+
+        ConfigureSectionLabel(_tweaksGlobalLabel);
+        panel.Controls.Add(_tweaksGlobalLabel, 0, 1);
 
         ConfigureGrid(_tweaks);
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Group", ReadOnly = true, Width = 120 });
@@ -220,35 +224,12 @@ public sealed class TrainerPage : UserControl
         _tweaks.CellToolTipTextNeeded += TweaksCellToolTipTextNeeded;
         _tweaks.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
         _tweaks.CellEndEdit += (_, _) => UpdateRiskBanner();
-        _resetTweaks.AutoSize = true;
-        _resetTweaks.Margin = new Padding(6);
-        _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
         panel.Controls.Add(_tweaks, 0, 2);
+
+        _resetTweaks.AutoSize = true;
+        _resetTweaks.Margin = new Padding(2, 7, 2, 2);
+        _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
         panel.Controls.Add(_resetTweaks, 0, 3);
-        _tweaksTab.Controls.Add(panel);
-    }
-
-    private void BuildScopedTweaksTab()
-    {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(4)
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-        _scopedWarning.AutoSize = true;
-        _scopedWarning.Dock = DockStyle.Fill;
-        _scopedWarning.MaximumSize = new Size(1600, 0);
-        _scopedWarning.Padding = new Padding(10, 8, 10, 8);
-        _scopedWarning.Margin = new Padding(2, 2, 2, 6);
-        _scopedWarning.BackColor = Color.FromArgb(239, 246, 255);
-        _scopedWarning.ForeColor = Color.FromArgb(30, 64, 175);
-        panel.Controls.Add(_scopedWarning, 0, 0);
 
         // 兩個分流表格改為左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
         var split = new TableLayoutPanel
@@ -279,13 +260,14 @@ public sealed class TrainerPage : UserControl
 
         split.Controls.Add(BuildScopedColumn(_scopedSimpleLabel, _scopedSimple), 0, 0);
         split.Controls.Add(BuildScopedColumn(_scopedSettlementLabel, _scopedSettlement), 1, 0);
-        panel.Controls.Add(split, 0, 1);
+        panel.Controls.Add(split, 0, 4);
 
         _resetScopedTweaks.AutoSize = true;
         _resetScopedTweaks.Margin = new Padding(2, 7, 2, 2);
         _resetScopedTweaks.Click += (_, _) => ResetAllScopedTweaks();
-        panel.Controls.Add(_resetScopedTweaks, 0, 2);
-        _scopedTweaksTab.Controls.Add(panel);
+        panel.Controls.Add(_resetScopedTweaks, 0, 5);
+
+        _tweaksTab.Controls.Add(panel);
     }
 
     /// <summary>一個分流欄：上方區段標題、下方填滿的表格。</summary>
@@ -419,6 +401,10 @@ public sealed class TrainerPage : UserControl
         _tweaks.Rows.Clear();
         foreach (Tweak tweak in Tweaks.All)
         {
+            // 支援敵我分流的項目只在下方分流表格編輯，避免同一個 tweak 出現兩次，
+            // 也避免提供一個實際上不會寫進 data.pak 的誤導性全域值。
+            if (ScopedTweakPatch.IsSupportedScopedTweakId(tweak.Id)) continue;
+
             int rowIndex = _tweaks.Rows.Add(DisplayGroup(tweak.Group), DisplayTweakName(tweak),
                 FormatDecimal(tweak.Default), FormatDecimal(tweak.Default),
                 $"{FormatDecimal(tweak.Minimum)} – {FormatDecimal(tweak.Maximum)}");
@@ -589,7 +575,6 @@ public sealed class TrainerPage : UserControl
         _fixedPlayerLabel.Text = Strings.Get("Gui_Trainer_FixedPlayer");
         _cheatsTab.Text = Strings.Get("Gui_Trainer_Cheats");
         _tweaksTab.Text = Strings.Get("Gui_Trainer_Tweaks");
-        _scopedTweaksTab.Text = Strings.Get("Gui_Trainer_ScopedTweaks");
         _resetCheats.Text = Strings.Get("Gui_Trainer_ResetCheats");
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
         _resetScopedTweaks.Text = Strings.Get("Gui_Trainer_ResetScopedTweaks");
@@ -600,8 +585,9 @@ public sealed class TrainerPage : UserControl
         _tweaksWarning.Text = Strings.Get("Gui_Trainer_TweaksWarning");
         _tweaksScopeNotice.Text = Strings.Get(
             "Gui_Trainer_TweaksScopeNotice",
-            Tweaks.All.Count(t => ScopedTweakPatch.GetSupportedScopes(t.Id).Count > 0));
+            Tweaks.All.Count(t => ScopedTweakPatch.IsSupportedScopedTweakId(t.Id)));
         _scopedWarning.Text = Strings.Get("Gui_Trainer_ScopedWarning");
+        _tweaksGlobalLabel.Text = Strings.Get("Gui_Trainer_TweaksGlobalLabel");
         _scopedSimpleLabel.Text = Strings.Get("Gui_Trainer_ScopedSimple");
         _scopedSettlementLabel.Text = Strings.Get("Gui_Trainer_ScopedSettlement");
         UpdateRiskBanner();
