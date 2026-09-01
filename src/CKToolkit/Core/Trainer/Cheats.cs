@@ -971,7 +971,7 @@ public static class Cheats
         }
         catch (XmlException ex)
         {
-            throw new InvalidOperationException($"產生的 scdebug.xml 不是合法 XML：{ex.Message}", ex);
+            throw new InvalidOperationException(Strings.Get("Error_ScDebugInvalidXml", ex.Message), ex);
         }
 
         return xml;

@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 namespace CKToolkit.Core.Lang;
 
 /// <summary>
@@ -96,7 +97,7 @@ public static class FontBuilder
 
                 if (!isCompatible)
                 {
-                    throw new InvalidOperationException($"系統沒有字型「{face}」（實際取得「{gdi.ActualFace}」）");
+                    throw new InvalidOperationException(Strings.Get("Error_FontFaceUnavailable", face, gdi.ActualFace));
                 }
             }
 
@@ -149,7 +150,7 @@ public static class FontBuilder
         IEnumerable<Glyph> additionalGlyphs)
     {
         var targetRange = font.Ranges.FirstOrDefault(r => r.First == rangeFirst)
-            ?? throw new ArgumentException($"字型中找不到起始碼位為 0x{rangeFirst:X} 之範圍", nameof(rangeFirst));
+            ?? throw new ArgumentException(Strings.Get("Error_FontRangeNotFound", $"0x{rangeFirst:X}"), nameof(rangeFirst));
 
         if (!targetRange.OriginalCount.HasValue)
         {

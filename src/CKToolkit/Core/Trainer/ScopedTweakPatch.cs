@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using CKToolkit.Core.Common;
 
 namespace CKToolkit.Core.Trainer;
@@ -694,7 +695,7 @@ public static class ScopedTweakPatch
         {
             PatchInfo existing = ReadInfo(pe);
             if (!HasKnownCommandHook(pe, existing))
-                throw new InvalidOperationException(".cktw 存在，但 command-delay hook/helper 不是本工具產生的已知狀態。");
+                throw new InvalidOperationException(Strings.Get("Error_CktwUnknownHookState"));
 
             CommandSettings effectiveCommand = settings is null ? existing.Settings : ValidateSettings(settings);
             ProductionSettings updatedProduction = production ?? existing.Production;
@@ -721,13 +722,13 @@ public static class ScopedTweakPatch
 
         byte[] current = pe.ReadBytesAtVa(CommandDelaySiteVa, CommandDelayOriginal.Length);
         if (!current.AsSpan().SequenceEqual(CommandDelayOriginal))
-            throw new InvalidOperationException("command-delay 原始指令不符，拒絕建立 .cktw。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwOriginalMismatch", "command-delay"));
         if (!pe.ReadBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal.Length)
                .AsSpan().SequenceEqual(GoldProductionOriginal))
-            throw new InvalidOperationException("gold-production 原始指令不符，拒絕建立 .cktw。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwOriginalMismatch", "gold-production"));
         if (!pe.ReadBytesAtVa(FoodProductionSiteVa, FoodProductionOriginal.Length)
                .AsSpan().SequenceEqual(FoodProductionOriginal))
-            throw new InvalidOperationException("food-production 原始指令不符，拒絕建立 .cktw。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwOriginalMismatch", "food-production"));
         ValidateOriginalSite(pe, PopulationGrowthAmountSiteVa, PopulationGrowthAmountOriginal, "population-growth-amount");
         ValidateOriginalSite(pe, PopulationGrowthIntervalSiteVa, PopulationGrowthIntervalOriginal, "population-growth-interval");
         ValidateOriginalSite(pe, PopulationLossPercentSiteVa, PopulationLossPercentOriginal, "population-loss-percent");
@@ -781,7 +782,7 @@ public static class ScopedTweakPatch
             ownerScalarHelper.Length > SpeedHelperOffset - OwnerScalarHelperOffset ||
             speedHelper.Length > FeedsHelperOffset - SpeedHelperOffset ||
             feedsHelper.Length > ConfigOffset - FeedsHelperOffset)
-            throw new InvalidOperationException(".cktw helper 超出保留空間。");
+            throw new InvalidOperationException("Internal: .cktw helper exceeds the reserved space.");
 
         pe.WriteUInt32AtVa(sectionVa + 40, checked((uint)helper.Length));
         pe.WriteUInt32AtVa(sectionVa + 44, GoldHelperOffset);
@@ -854,13 +855,13 @@ public static class ScopedTweakPatch
                    .AsSpan().SequenceEqual(SpeedOriginal) ||
                 !pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length)
                    .AsSpan().SequenceEqual(FeedsOriginal))
-                throw new InvalidOperationException("找不到 .cktw，但 scoped hook 指令也不是原版；拒絕猜測還原。");
+                throw new InvalidOperationException(Strings.Get("Error_CktwMissingButPatched"));
             return pe.ToBytes();
         }
 
         PatchInfo info = ReadInfo(pe);
         if (!HasKnownCommandHook(pe, info))
-            throw new InvalidOperationException(".cktw command-delay hook/helper 已遭修改；拒絕猜測還原。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwHookModified"));
 
         pe.WriteBytesAtVa(CommandDelaySiteVa, CommandDelayOriginal);
         pe.WriteBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal);
@@ -882,20 +883,20 @@ public static class ScopedTweakPatch
     private static PatchInfo ReadInfo(PeFile pe)
     {
         int index = pe.FindSection(SectionName);
-        if (index < 0) throw new InvalidOperationException("找不到 .cktw section。");
+        if (index < 0) throw new InvalidOperationException(Strings.Get("Error_CktwSectionNotFound"));
 
         PeSection section = pe.Sections[index];
         int raw = pe.RvaToFileOffset(section.VirtualAddress);
         if (section.SizeOfRawData < HeaderSize || pe.ReadUInt32(raw) != Magic)
-            throw new InvalidOperationException(".cktw header magic 不符。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwBadMagic"));
         if (pe.ReadUInt32(raw + 4) != FormatVersion)
-            throw new InvalidOperationException(".cktw 格式版本不支援。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwUnsupportedVersion"));
         if (pe.ReadUInt32(raw + 12) != HeaderSize || pe.ReadUInt32(raw + 20) != CommandHelperOffset)
-            throw new InvalidOperationException(".cktw header layout 不符。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwBadHeaderLayout"));
         if (pe.ReadUInt32(raw + 24) != ConfigOffset || pe.ReadUInt32(raw + 28) != ConfigCount)
-            throw new InvalidOperationException(".cktw command 設定表 layout 不符。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwBadCommandTableLayout"));
         if (pe.ReadUInt32(raw + 32) != HookCount)
-            throw new InvalidOperationException(".cktw hook manifest 數量不符。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwHookManifestCountMismatch"));
 
         uint helperSize = pe.ReadUInt32(raw + 40);
         uint goldHelperOffset = pe.ReadUInt32(raw + 44);
@@ -907,11 +908,11 @@ public static class ScopedTweakPatch
             goldHelperSize > FoodHelperOffset - GoldHelperOffset ||
             foodHelperOffset != FoodHelperOffset || foodHelperSize == 0 ||
             foodHelperSize > PopulationGrowthAmountHelperOffset - FoodHelperOffset)
-            throw new InvalidOperationException(".cktw command helper 長度不合法。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwBadCommandHelperLength"));
 
         uint payloadSize = pe.ReadUInt32(raw + 16);
         if (payloadSize > section.SizeOfRawData || payloadSize < ConfigOffset + ConfigCount * 4)
-            throw new InvalidOperationException(".cktw payload 長度不合法。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwBadPayloadLength"));
 
         int originalLength = checked((int)pe.ReadUInt32(raw + 8));
         uint flags = pe.ReadUInt32(raw + 36);
@@ -1166,7 +1167,7 @@ public static class ScopedTweakPatch
     {
         if (settings.SelfTrainSpeedQ16 == 0 || settings.EnemyTrainSpeedQ16 == 0 ||
             settings.SelfResearchSpeedQ16 == 0 || settings.EnemyResearchSpeedQ16 == 0)
-            throw new ArgumentOutOfRangeException(nameof(settings), "command 速度 Q16.16 必須大於 0。");
+            throw new ArgumentOutOfRangeException(nameof(settings), Strings.Get("Error_ScopedSpeedMustBePositive"));
         return settings;
     }
 
@@ -1197,7 +1198,7 @@ public static class ScopedTweakPatch
             growthIntervals.Any(value => value is < 100 or > 10_000_000) ||
             lossPercents.Any(value => value > 100) ||
             lossIntervals.Any(value => value is < 100 or > 2_000_000_000))
-            throw new ArgumentOutOfRangeException(nameof(population), "人口 scoped 設定超出安全範圍。");
+            throw new ArgumentOutOfRangeException(nameof(population), Strings.Get("Error_ScopedPopulationOutOfRange"));
 
         return population;
     }
@@ -1219,7 +1220,7 @@ public static class ScopedTweakPatch
 
         if (resourceCaps.Any(value => value > 100_000_000) ||
             populationCaps.Any(value => value is < 1 or > 100_000))
-            throw new ArgumentOutOfRangeException(nameof(capacity), "聚落容量 scoped 設定超出安全範圍。");
+            throw new ArgumentOutOfRangeException(nameof(capacity), Strings.Get("Error_ScopedCapacityOutOfRange"));
 
         return capacity;
     }
@@ -1231,7 +1232,7 @@ public static class ScopedTweakPatch
                 initialGold.SelfTownhall, initialGold.SelfVillage,
                 initialGold.EnemyTownhall, initialGold.EnemyVillage
             }.Any(value => value > 100_000_000))
-            throw new ArgumentOutOfRangeException(nameof(initialGold), "聚落初始金錢 scoped 設定超出安全範圍。");
+            throw new ArgumentOutOfRangeException(nameof(initialGold), Strings.Get("Error_ScopedInitialGoldOutOfRange"));
         return initialGold;
     }
 
@@ -1249,13 +1250,13 @@ public static class ScopedTweakPatch
         ];
         // Existing multiplier UI allows 0.01x..100x. Q16 minimum 656 rounds up from 0.01.
         if (factors.Any(value => value is < 656 or > 6_553_600))
-            throw new ArgumentOutOfRangeException(nameof(settings), "單位 scoped 倍率必須介於 0.01x 與 100x。");
+            throw new ArgumentOutOfRangeException(nameof(settings), Strings.Get("Error_ScopedUnitMultiplierOutOfRange"));
 
         if (settings.SelfMaxArmy > 2000 || settings.EnemyMaxArmy > 2000)
-            throw new ArgumentOutOfRangeException(nameof(settings), "英雄帶兵上限 scoped 設定超出安全範圍（0 或 1..2000）。");
+            throw new ArgumentOutOfRangeException(nameof(settings), Strings.Get("Error_ScopedHeroArmyOutOfRange"));
 
         if (settings.SelfFeeds > 2 || settings.EnemyFeeds > 2)
-            throw new ArgumentOutOfRangeException(nameof(settings), "單位進食 scoped 設定超出安全範圍（0=保持原版、1=不進食、2=進食）。");
+            throw new ArgumentOutOfRangeException(nameof(settings), Strings.Get("Error_ScopedUnitFeedsOutOfRange"));
 
         return settings;
     }
@@ -1263,7 +1264,7 @@ public static class ScopedTweakPatch
     private static void ValidateOriginalSite(PeFile pe, uint siteVa, byte[] original, string name)
     {
         if (!pe.ReadBytesAtVa(siteVa, original.Length).AsSpan().SequenceEqual(original))
-            throw new InvalidOperationException($"{name} 原始指令不符，拒絕建立 .cktw。");
+            throw new InvalidOperationException(Strings.Get("Error_CktwOriginalMismatch", name));
     }
 
     private static void WriteSettings(
@@ -2087,7 +2088,7 @@ public static class ScopedTweakPatch
         public void Label(string name)
         {
             if (!_labels.TryAdd(name, _bytes.Count))
-                throw new InvalidOperationException($"重複的 x86 label：{name}");
+                throw new InvalidOperationException($"Internal: duplicate x86 label '{name}'.");
         }
 
         public void Jump(string label)
@@ -2108,7 +2109,7 @@ public static class ScopedTweakPatch
             foreach ((int displacementOffset, string label) in _fixups)
             {
                 if (!_labels.TryGetValue(label, out int target))
-                    throw new InvalidOperationException($"找不到 x86 label：{label}");
+                    throw new InvalidOperationException($"Internal: unknown x86 label '{label}'.");
                 int displacement = checked(target - (displacementOffset + 4));
                 BitConverter.TryWriteBytes(result.AsSpan(displacementOffset, 4), displacement);
             }

@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using CKToolkit.Core.Common;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -279,7 +280,7 @@ public sealed class AttrTweak : Tweak
         }, 1);
 
         if (hits != 1)
-            throw new InvalidOperationException($"在 {_path} 找不到屬性 {_attribute}");
+            throw new InvalidOperationException(Strings.Get("Error_TweakAttributeNotFound", _path, _attribute));
 
         pak.WriteText(_path, updated);
         return 1;
@@ -312,7 +313,7 @@ public sealed class IniTweak : Tweak
         }, 1);
 
         if (hits != 1)
-            throw new InvalidOperationException($"在 vxConst.ini 找不到常數 {_key}");
+            throw new InvalidOperationException(Strings.Get("Error_TweakConstNotFound", _key));
 
         pak.WriteText(Tweaks.VxConst, updated);
         return 1;

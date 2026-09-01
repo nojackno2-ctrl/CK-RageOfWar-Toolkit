@@ -433,7 +433,7 @@ public sealed class ProfilerPage : UserControl
         catch (Exception ex)
         {
             string fallback = Profiler.DefaultLogDirectory();
-            LogMessage?.Invoke($"輸出資料夾建立失敗（{text}）：{ex.Message}，這次改用預設位置 {fallback}");
+            LogMessage?.Invoke(Strings.Get("Gui_Profiler_OutputDirFallback", text, ex.Message, fallback));
             DiagnosticOutputLayout.EnsureCollectionDirectory(fallback);
             _output.Text = fallback;
             return fallback;

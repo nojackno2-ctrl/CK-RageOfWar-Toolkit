@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Reflection;
 using CKToolkit.Core.Common;
 
@@ -157,7 +158,7 @@ public static class GameRunner
     public static Result<RunOutcome> LaunchPlain(string gameDir)
     {
         if (!GamePaths.IsGameDir(gameDir))
-            return Result<RunOutcome>.Fail($"不是有效的遊戲目錄：{gameDir}", ExitCodes.GameNotFound);
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameDirInvalid", gameDir), ExitCodes.GameNotFound);
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo
@@ -169,7 +170,7 @@ public static class GameRunner
             using var process = System.Diagnostics.Process.Start(psi);
             uint pid = (uint)(process?.Id ?? 0);
             return pid == 0
-                ? Result<RunOutcome>.Fail("遊戲行程沒有成功建立。")
+                ? Result<RunOutcome>.Fail(Strings.Get("Error_GameProcessNotCreated"))
                 : Result<RunOutcome>.Ok(new RunOutcome(pid, string.Empty, "未注入執行期穩定保護。", false));
         }
         catch (Exception ex)
@@ -196,7 +197,7 @@ public static class GameRunner
         string gameDir, DiagnosticsOptions options, Action<string>? log = null)
     {
         if (!GamePaths.IsGameDir(gameDir))
-            return Result<RunOutcome>.Fail($"不是有效的遊戲目錄：{gameDir}", ExitCodes.GameNotFound);
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameDirInvalid", gameDir), ExitCodes.GameNotFound);
 
         string exe = Path.Combine(gameDir, GamePaths.ExeFileName);
 
@@ -239,7 +240,7 @@ public static class GameRunner
     {
         int pid = FindGameProcessId();
         if (pid == 0)
-            return Result<RunOutcome>.Fail("找不到執行中的《Celtic Kings》行程。請先開遊戲，或改用「帶診斷啟動遊戲」。");
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameProcessNotFound"));
 
         return AttachToProcess((uint)pid, options, log);
     }
@@ -259,7 +260,7 @@ public static class GameRunner
         while (DateTime.UtcNow < deadline)
         {
             if (cancel.IsCancellationRequested)
-                return Result<RunOutcome>.Fail("已取消等待。");
+                return Result<RunOutcome>.Fail(Strings.Get("Error_WaitCancelled"));
 
             int pid = FindGameProcessId();
             if (pid != 0)
@@ -269,7 +270,7 @@ public static class GameRunner
             }
             Thread.Sleep(250);
         }
-        return Result<RunOutcome>.Fail("等待逾時，期間沒有偵測到《Celtic Kings》啟動。");
+        return Result<RunOutcome>.Fail(Strings.Get("Error_WaitTimeout"));
     }
 
     /// <summary>
@@ -464,7 +465,7 @@ public static class GameRunner
 
             using Stream? src = Assembly.GetExecutingAssembly().GetManifestResourceStream(EmbeddedDllResource);
             if (src is null)
-                return Result<string>.Fail("執行檔內找不到內嵌的 ckperf.dll；請以 tools/perf/build-ckperf.ps1 重建後再建置。");
+                return Result<string>.Fail(Strings.Get("Error_CkPerfNotEmbedded"));
 
             byte[] wanted = new byte[src.Length];
             src.ReadExactly(wanted);
@@ -479,11 +480,11 @@ public static class GameRunner
         }
         catch (IOException ex)
         {
-            return Result<string>.Fail($"展開 ckperf.dll 失敗（可能有另一個遊戲行程仍載入著它）：{ex.Message}", ExitCodes.FileLocked);
+            return Result<string>.Fail(Strings.Get("Error_CkPerfExtractLocked", ex.Message), ExitCodes.FileLocked);
         }
         catch (Exception ex)
         {
-            return Result<string>.Fail($"展開 ckperf.dll 失敗：{ex.Message}");
+            return Result<string>.Fail(Strings.Get("Error_CkPerfExtractFailed", ex.Message));
         }
     }
 }

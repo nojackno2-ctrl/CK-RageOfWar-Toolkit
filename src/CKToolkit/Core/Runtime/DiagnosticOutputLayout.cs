@@ -1,3 +1,5 @@
+using CKToolkit.I18n;
+
 namespace CKToolkit.Core.Runtime;
 
 /// <summary>
@@ -19,7 +21,7 @@ public static class DiagnosticOutputLayout
     public static string GetCollectionDirectory(string selectedLocation)
     {
         if (string.IsNullOrWhiteSpace(selectedLocation))
-            throw new ArgumentException("儲存位置不能是空的。", nameof(selectedLocation));
+            throw new ArgumentException(Strings.Get("Error_DiagLocationEmpty"), nameof(selectedLocation));
 
         string location = Path.GetFullPath(selectedLocation.Trim());
         string leaf = Path.GetFileName(Path.TrimEndingDirectorySeparator(location));
@@ -62,7 +64,7 @@ public static class DiagnosticOutputLayout
             return candidate;
         }
 
-        throw new IOException($"同一秒內的分析資料夾已超過上限：{day}");
+        throw new IOException(Strings.Get("Error_DiagFolderLimitReached", day));
     }
 
     private static string SanitizeMode(string mode)

@@ -408,7 +408,7 @@ public static partial class Profiler
                 if (FindProcess(target) == 0)
                 {
                     CloseHandle(proc);
-                    return Result<RunResult>.Fail("遊戲在開始取樣前已結束", ExitCodes.GeneralFailure);
+                    return Result<RunResult>.Fail(Strings.Get("Error_ProfilerGameExitedEarly"), ExitCodes.GeneralFailure);
                 }
                 Sleep(50);
             }

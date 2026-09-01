@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Text;
 
 namespace CKToolkit.Core.Common;
@@ -57,13 +58,13 @@ public sealed class HmmPak
     public static HmmPak FromBytes(byte[] data)
     {
         if (data.Length < HeaderSize || !data.AsSpan(0, Magic.Length).SequenceEqual(Magic))
-            throw new PakException("不是 HMMSYS PackFile：magic 不符");
+            throw new PakException(Strings.Get("Error_PakBadMagic"));
 
         int count = (int)BitConverter.ToUInt32(data, 0x20);
         int dirSize = (int)BitConverter.ToUInt32(data, 0x24);
         int dirEnd = HeaderSize + dirSize;
         if (count < 0 || dirSize < 0 || dirEnd > data.Length)
-            throw new PakException("目錄長度超出檔案大小");
+            throw new PakException(Strings.Get("Error_PakDirTooLong"));
 
         var entries = new List<PakEntry>(count);
         var blobs = new Dictionary<string, byte[]>(count, StringComparer.OrdinalIgnoreCase);
@@ -72,15 +73,15 @@ public sealed class HmmPak
         string prev = string.Empty;
         for (int i = 0; i < count; i++)
         {
-            if (pos + 2 > dirEnd) throw new PakException("目錄提前結束");
+            if (pos + 2 > dirEnd) throw new PakException(Strings.Get("Error_PakDirTruncated"));
             int nameLen = data[pos];
             int prefixLen = data[pos + 1];
             if (prefixLen > nameLen || prefixLen > prev.Length)
-                throw new PakException($"目錄損毀：第 {i} 筆的前綴長度不合理");
+                throw new PakException(Strings.Get("Error_PakDirCorruptPrefix", i));
 
             int suffixLen = nameLen - prefixLen;
             int suffixEnd = pos + 2 + suffixLen;
-            if (suffixEnd + 8 > dirEnd) throw new PakException("目錄提前結束");
+            if (suffixEnd + 8 > dirEnd) throw new PakException(Strings.Get("Error_PakDirTruncated"));
 
             string name = string.Concat(
                 prev.AsSpan(0, prefixLen),
@@ -89,7 +90,7 @@ public sealed class HmmPak
             uint offset = BitConverter.ToUInt32(data, suffixEnd);
             uint size = BitConverter.ToUInt32(data, suffixEnd + 4);
             if (offset + (long)size > data.Length)
-                throw new PakException($"項目 {name} 的資料超出檔案範圍");
+                throw new PakException(Strings.Get("Error_PakEntryOutOfRange", name));
 
             entries.Add(new PakEntry(name, size));
             blobs[name] = data.AsSpan((int)offset, (int)size).ToArray();
@@ -99,7 +100,7 @@ public sealed class HmmPak
         }
 
         if (pos != dirEnd)
-            throw new PakException($"目錄尾端不對齊：0x{pos:X} != 0x{dirEnd:X}");
+            throw new PakException(Strings.Get("Error_PakDirMisaligned", $"0x{pos:X}", $"0x{dirEnd:X}"));
 
         for (int i = 0; i < count; i++)
             entries[i].MTime = BitConverter.ToUInt32(data, dirEnd + i * 4);
@@ -127,7 +128,7 @@ public sealed class HmmPak
         string key = Normalize(name);
         return _blobs.TryGetValue(key, out var blob)
             ? blob
-            : throw new PakException($"pak 內沒有檔案：{name}");
+            : throw new PakException(Strings.Get("Error_PakFileNotFound", name));
     }
 
     public string ReadText(string name, Encoding? encoding = null) =>
@@ -240,7 +241,7 @@ public sealed class HmmPak
         }
 
         if (pos != dataStart)
-            throw new PakException($"目錄寫入長度不符：0x{pos:X} != 0x{dataStart:X}");
+            throw new PakException(Strings.Get("Error_PakDirWriteLengthMismatch", $"0x{pos:X}", $"0x{dataStart:X}"));
 
         foreach (var e in _entries)
         {

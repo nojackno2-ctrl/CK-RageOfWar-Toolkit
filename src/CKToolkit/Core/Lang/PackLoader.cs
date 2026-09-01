@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Lang;
 
@@ -23,7 +24,7 @@ public static class PackLoader
         string packJsonResName = FindResource(resourceNames, packId, "pack.json");
         if (string.IsNullOrEmpty(packJsonResName))
         {
-            return Result<LanguagePack>.Fail($"內嵌資源中找不到語言包 '{packId}' 之 pack.json", ExitCodes.InvalidArgs);
+            return Result<LanguagePack>.Fail(Strings.Get("Error_LangPackEmbeddedNotFound", packId), ExitCodes.InvalidArgs);
         }
 
         string packJsonText = ReadResourceText(targetAsm, packJsonResName);
@@ -100,13 +101,13 @@ public static class PackLoader
     {
         if (!Directory.Exists(dirPath))
         {
-            return Result<LanguagePack>.Fail($"語言包目錄不存在：{dirPath}", ExitCodes.InvalidArgs);
+            return Result<LanguagePack>.Fail(Strings.Get("Error_LangPackDirMissing", dirPath), ExitCodes.InvalidArgs);
         }
 
         string packJsonPath = Path.Combine(dirPath, "pack.json");
         if (!File.Exists(packJsonPath))
         {
-            return Result<LanguagePack>.Fail($"目錄缺少 pack.json：{packJsonPath}", ExitCodes.InvalidArgs);
+            return Result<LanguagePack>.Fail(Strings.Get("Error_LangPackJsonMissing", packJsonPath), ExitCodes.InvalidArgs);
         }
 
         string packJsonText;
@@ -116,7 +117,7 @@ public static class PackLoader
         }
         catch (Exception ex)
         {
-            return Result<LanguagePack>.Fail($"讀取 pack.json 失敗：{ex.Message}", ExitCodes.GeneralFailure);
+            return Result<LanguagePack>.Fail(Strings.Get("Error_LangPackJsonReadFailed", ex.Message), ExitCodes.GeneralFailure);
         }
 
         var metaRes = LanguagePack.ParseMeta(packJsonText);

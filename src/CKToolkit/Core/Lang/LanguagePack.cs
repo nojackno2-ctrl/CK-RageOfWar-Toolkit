@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Lang;
 
@@ -104,7 +105,7 @@ public sealed class LanguagePack
             var meta = JsonSerializer.Deserialize<LanguagePackMeta>(json, JsonOpts);
             if (meta is null)
             {
-                return Result<LanguagePackMeta>.Fail("pack.json 解析為空物件", ExitCodes.InvalidArgs);
+                return Result<LanguagePackMeta>.Fail(Strings.Get("Error_LangPackEmptyJson"), ExitCodes.InvalidArgs);
             }
 
             var valRes = ValidateMeta(meta);
@@ -117,7 +118,7 @@ public sealed class LanguagePack
         }
         catch (Exception ex)
         {
-            return Result<LanguagePackMeta>.Fail($"pack.json 解析失敗：{ex.Message}", ExitCodes.InvalidArgs);
+            return Result<LanguagePackMeta>.Fail(Strings.Get("Error_LangPackParseFailed", ex.Message), ExitCodes.InvalidArgs);
         }
     }
 
@@ -127,36 +128,34 @@ public sealed class LanguagePack
     public static Result ValidateMeta(LanguagePackMeta meta)
     {
         if (string.IsNullOrWhiteSpace(meta.Id))
-            return Result.Fail("缺少必要欄位 'id' (Missing required field 'id' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "id"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.Name))
-            return Result.Fail("缺少必要欄位 'name' (Missing required field 'name' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "name"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.NativeName))
-            return Result.Fail("缺少必要欄位 'nativeName' (Missing required field 'nativeName' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "nativeName"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.Version))
-            return Result.Fail("缺少必要欄位 'version' (Missing required field 'version' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "version"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.GameLangFolder))
-            return Result.Fail("缺少必要欄位 'gameLangFolder' (Missing required field 'gameLangFolder' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "gameLangFolder"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.GameLangKey))
-            return Result.Fail("缺少必要欄位 'gameLangKey' (Missing required field 'gameLangKey' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "gameLangKey"), ExitCodes.InvalidArgs);
 
         if (!IsSafeGameLanguageIdentifier(meta.GameLangFolder))
         {
             return Result.Fail(
-                $"'gameLangFolder' 必須是 1–{MaxGameLanguageIdentifierLength} 個 ASCII 英數字、底線或連字號"
-                + " ('gameLangFolder' must contain only ASCII letters, digits, underscore, or hyphen)",
+                Strings.Get("Error_LangPackIdentifierInvalid", "gameLangFolder", MaxGameLanguageIdentifierLength),
                 ExitCodes.InvalidArgs);
         }
 
         if (!IsSafeGameLanguageIdentifier(meta.GameLangKey))
         {
             return Result.Fail(
-                $"'gameLangKey' 必須是 1–{MaxGameLanguageIdentifierLength} 個 ASCII 英數字、底線或連字號"
-                + " ('gameLangKey' must contain only ASCII letters, digits, underscore, or hyphen)",
+                Strings.Get("Error_LangPackIdentifierInvalid", "gameLangKey", MaxGameLanguageIdentifierLength),
                 ExitCodes.InvalidArgs);
         }
 
@@ -166,24 +165,23 @@ public sealed class LanguagePack
         // 正確做法是取一個不撞名的資料夾（例如 SPANISH_CK），原廠翻譯就能原封保留。
         if (LangInstaller.StockLanguages.Contains(meta.GameLangFolder.Trim()))
         {
+            string upper = meta.GameLangFolder.Trim().ToUpperInvariant();
             return Result.Fail(
-                $"'gameLangFolder' 不得使用遊戲原廠語系名稱 '{meta.GameLangFolder.Trim().ToUpperInvariant()}'，"
-                + $"否則安裝會覆蓋原廠翻譯且無法還原。請改用不撞名的名稱，例如 '{meta.GameLangFolder.Trim().ToUpperInvariant()}_CK'。"
-                + $" ('gameLangFolder' must not reuse a stock game language folder; use e.g. '{meta.GameLangFolder.Trim().ToUpperInvariant()}_CK')",
+                Strings.Get("Error_LangPackStockFolderClash", upper, upper + "_CK"),
                 ExitCodes.InvalidArgs);
         }
 
         if (string.IsNullOrWhiteSpace(meta.TemplateLang))
-            return Result.Fail("缺少必要欄位 'templateLang' (Missing required field 'templateLang' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "templateLang"), ExitCodes.InvalidArgs);
 
         if (meta.Font is null)
-            return Result.Fail("缺少必要欄位 'font' (Missing required field 'font' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "font"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.Font.Face))
-            return Result.Fail("缺少必要欄位 'font.face' (Missing required field 'font.face' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "font.face"), ExitCodes.InvalidArgs);
 
         if (meta.Font.Ranges is null || meta.Font.Ranges.Count == 0)
-            return Result.Fail("缺少必要欄位 'font.ranges' (Missing required field 'font.ranges' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "font.ranges"), ExitCodes.InvalidArgs);
 
         try
         {
@@ -191,14 +189,14 @@ public sealed class LanguagePack
         }
         catch (InvalidDataException ex)
         {
-            return Result.Fail($"'font.ranges' 無效：{ex.Message} (Invalid 'font.ranges')", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackRangesInvalid", ex.Message), ExitCodes.InvalidArgs);
         }
 
         if (meta.Files is null)
-            return Result.Fail("缺少必要欄位 'files' (Missing required field 'files' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "files"), ExitCodes.InvalidArgs);
 
         if (string.IsNullOrWhiteSpace(meta.Files.Ui))
-            return Result.Fail("缺少必要欄位 'files.ui' (Missing required field 'files.ui' in pack.json)", ExitCodes.InvalidArgs);
+            return Result.Fail(Strings.Get("Error_LangPackMissingField", "files.ui"), ExitCodes.InvalidArgs);
 
         return Result.Ok();
     }
@@ -209,7 +207,7 @@ public sealed class LanguagePack
     public HashSet<int> GetDeclaredCodepoints()
     {
         if (Meta.Font?.Ranges is null)
-            throw new InvalidDataException("font.ranges 不得為 null。");
+            throw new InvalidDataException(Strings.Get("Error_LangPackRangesNull"));
 
         return BuildDeclaredCodepoints(Meta.Font.Ranges);
     }
@@ -231,14 +229,14 @@ public sealed class LanguagePack
             Match match = CodepointRangePattern.Match(range);
             if (!match.Success)
             {
-                throw new InvalidDataException($"無法解析 Unicode 範圍 '{range}'。");
+                throw new InvalidDataException(Strings.Get("Error_LangPackRangeUnparsable", range));
             }
 
             if (!uint.TryParse(match.Groups[1].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint first) ||
                 !uint.TryParse(match.Groups[2].Success ? match.Groups[2].Value : match.Groups[1].Value,
                     NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint last))
             {
-                throw new InvalidDataException($"Unicode 範圍 '{range}' 超出可解析範圍。");
+                throw new InvalidDataException(Strings.Get("Error_LangPackRangeOutOfBounds", range));
             }
 
             uint min = Math.Min(first, last);
@@ -246,21 +244,21 @@ public sealed class LanguagePack
             if (!IsUnicodeScalar(min) || !IsUnicodeScalar(max) ||
                 (min <= 0xDFFF && max >= 0xD800))
             {
-                throw new InvalidDataException($"Unicode 範圍 '{range}' 包含無效 scalar 或代理字元。");
+                throw new InvalidDataException(Strings.Get("Error_LangPackRangeInvalidScalar", range));
             }
 
             long span = (long)max - min + 1;
             if (span > MaxDeclaredRangeSpan)
             {
                 throw new InvalidDataException(
-                    $"Unicode 範圍 '{range}' 含 {span} 個碼位，超過單一範圍上限 {MaxDeclaredRangeSpan}。");
+                    Strings.Get("Error_LangPackRangeTooWide", range, span, MaxDeclaredRangeSpan));
             }
 
             declaredTotal += span;
             if (declaredTotal > MaxDeclaredCodepoints)
             {
                 throw new InvalidDataException(
-                    $"宣告碼位總數 {declaredTotal} 超過上限 {MaxDeclaredCodepoints}。");
+                    Strings.Get("Error_LangPackTooManyCodepoints", declaredTotal, MaxDeclaredCodepoints));
             }
 
             for (uint cp = min; cp <= max; cp++)

@@ -175,7 +175,7 @@ public sealed class PatchPipeline
     {
         if (_modules.Any(m => string.Equals(m.ModuleId, module.ModuleId, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidOperationException($"模組 {module.ModuleId} 已經註冊過");
+            throw new InvalidOperationException($"Internal: module '{module.ModuleId}' is already registered.");
         }
         _modules.Add(module);
         _modules.Sort((a, b) => a.Order.CompareTo(b.Order));

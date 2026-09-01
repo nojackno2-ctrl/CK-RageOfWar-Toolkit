@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using CKToolkit.Core.Common;
 
 namespace CKToolkit.Core.Perf;
@@ -180,7 +181,7 @@ public static class ZoomTables
     {
         if (enable && (maxDimension < StockCount || maxDimension > 16384))
         {
-            throw new ArgumentOutOfRangeException(nameof(maxDimension), "表格容量維度必須介於 1600 與 16384 之間");
+            throw new ArgumentOutOfRangeException(nameof(maxDimension), Strings.Get("Error_ZoomTableDimensionOutOfRange"));
         }
 
         int secIndex = pe.FindSection(SectionName);

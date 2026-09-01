@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
@@ -378,7 +379,7 @@ public sealed class IniFile
     {
         if (text is not null && text.IndexOfAny(['\r', '\n']) >= 0)
         {
-            throw new ArgumentException("INI 節區、鍵和值不得包含 CR 或 LF 字元。", paramName);
+            throw new ArgumentException(Strings.Get("Error_IniNoCrLf"), paramName);
         }
     }
 

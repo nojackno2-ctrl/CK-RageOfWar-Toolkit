@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -52,7 +53,7 @@ public sealed class GdiFont : IDisposable
         _hfont = CreateFontIndirect(ref lf);
         if (_hfont == IntPtr.Zero)
         {
-            throw new InvalidOperationException($"無法建立字型 {face} {pixelSize}px");
+            throw new InvalidOperationException(Strings.Get("Error_FontCreateFailed", face, pixelSize));
         }
 
         _hdc = CreateCompatibleDC(IntPtr.Zero);
