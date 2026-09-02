@@ -6400,82 +6400,99 @@ internal static class Program
     {
         Console.WriteLine("\n45. CLI 未知選項與選項取值嚴謹度測試");
 
-        static (int Code, JsonEnvelope? Envelope, string Raw) Run(params string[] args)
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cli_strict_" + Guid.NewGuid().ToString("N")[..8]);
+        string tempConfigPath = Path.Combine(tempGameDir, "cktoolkit_config.json");
+
+        try
         {
-            using var outWriter = new StringWriter();
-            using var errWriter = new StringWriter();
-            int code = CliHost.Execute(args, outWriter, errWriter);
-            string raw = outWriter.ToString();
-            JsonEnvelope? envelope = null;
-            try { envelope = JsonSerializer.Deserialize<JsonEnvelope>(raw); }
-            catch (JsonException) { /* 非 JSON 輸出，交由斷言判定 */ }
-            return (code, envelope, raw);
-        }
+            Directory.CreateDirectory(tempGameDir);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), CreateSyntheticExe32());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), CreateSyntheticLauncher64());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), CreateSyntheticDataPak().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), HmmPak.CreateEmpty().ToBytes());
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings()));
 
-        // --- 1. 不吃選項的指令必須拒絕未知選項 ---
-        string[][] noOptionCommands =
-        [
-            ["status"], ["verify"], ["version"], ["--help"],
-            ["perf", "get"], ["lang", "list"],
-            ["trainer", "list-cheats"], ["trainer", "list-tweaks"],
-        ];
-        foreach (string[] command in noOptionCommands)
+            static (int Code, JsonEnvelope? Envelope, string Raw) Run(params string[] args)
+            {
+                using var outWriter = new StringWriter();
+                using var errWriter = new StringWriter();
+                int code = CliHost.Execute(args, outWriter, errWriter);
+                string raw = outWriter.ToString();
+                JsonEnvelope? envelope = null;
+                try { envelope = JsonSerializer.Deserialize<JsonEnvelope>(raw); }
+                catch (JsonException) { /* 非 JSON 輸出，交由斷言判定 */ }
+                return (code, envelope, raw);
+            }
+
+            // --- 1. 不吃選項的指令必須拒絕未知選項 ---
+            string[][] noOptionCommands =
+            [
+                ["status"], ["verify"], ["version"], ["--help"],
+                ["perf", "get"], ["lang", "list"],
+                ["trainer", "list-cheats"], ["trainer", "list-tweaks"],
+            ];
+            foreach (string[] command in noOptionCommands)
+            {
+                var result = Run([.. command, "--game", tempGameDir, "--config", tempConfigPath, "--bogus-option", "--json"]);
+                Check($"`{string.Join(' ', command)}` 拒絕未知選項並回傳 InvalidArgs",
+                    result.Code == ExitCodes.InvalidArgs
+                    && result.Envelope is { Ok: false } env && env.Errors.Count > 0,
+                    $"exitCode={result.Code}");
+            }
+
+            // --- 2. 打錯的 --game 不得被靜默忽略（原本會改用自動偵測的安裝目錄）---
+            var typo = Run("status", "--gam", "C:/definitely/not/a/game", "--json");
+            Check("`status --gam <path>` 不再靜默改用自動偵測目錄，而是明確拒絕",
+                typo.Code == ExitCodes.InvalidArgs && typo.Envelope is { Ok: false },
+                $"exitCode={typo.Code}");
+
+            // --- 3. --game／--config 不得吃掉後面的選項，且 --json 不得遺失 ---
+            foreach (string option in new[] { "--game", "--config" })
+            {
+                var swallowed = Run("status", option, "--json");
+                Check($"`status {option} --json` 不吞掉 --json 並以 InvalidArgs 拒絕",
+                    swallowed.Code == ExitCodes.InvalidArgs,
+                    $"exitCode={swallowed.Code}");
+                Check($"`status {option} --json` 的錯誤仍以 JSON 封套輸出",
+                    swallowed.Envelope is { Ok: false },
+                    swallowed.Raw.Length > 60 ? swallowed.Raw[..60] : swallowed.Raw);
+
+                var dangling = Run("status", "--json", option);
+                Check($"末位的 {option} 缺少值時明確報錯而非被當成指令 token",
+                    dangling.Code == ExitCodes.InvalidArgs && dangling.Envelope is { Ok: false },
+                    $"exitCode={dangling.Code}");
+            }
+
+            // --- 4. 合法用法不得被誤殺 ---
+            foreach (string[] command in noOptionCommands)
+            {
+                var ok = Run([.. command, "--game", tempGameDir, "--config", tempConfigPath, "--json"]);
+                Check($"`{string.Join(' ', command)} --json` 仍正常成功",
+                    ok.Code == ExitCodes.Success && ok.Envelope is { Ok: true },
+                    $"exitCode={ok.Code}");
+            }
+
+            // --- 5. 有自己選項白名單的子指令仍然收得到選項（不得被全域攔截）---
+            var restoreMissingFlag = Run("restore", "--game", tempGameDir, "--config", tempConfigPath, "--json");
+            Check("`restore` 缺少 --all 時仍是原本的 InvalidArgs 而非未知選項錯誤",
+                restoreMissingFlag.Code == ExitCodes.InvalidArgs
+                && restoreMissingFlag.Envelope is { Ok: false } restoreEnv
+                && restoreEnv.Errors.Count > 0
+                && restoreEnv.Errors[0] == Strings.Get("Error_RestoreAllMissingFlag"),
+                restoreMissingFlag.Envelope?.Errors.FirstOrDefault());
+
+            var restoreUnknown = Run("restore", "--game", tempGameDir, "--config", tempConfigPath, "--all", "--bogus-option", "--json");
+            Check("`restore --all --bogus-option` 在碰任何檔案之前就以未知選項拒絕",
+                restoreUnknown.Code == ExitCodes.InvalidArgs
+                && restoreUnknown.Envelope is { Ok: false } unknownEnv
+                && unknownEnv.Errors.Count > 0
+                && unknownEnv.Errors[0].Contains("--bogus-option", StringComparison.Ordinal),
+                restoreUnknown.Envelope?.Errors.FirstOrDefault());
+        }
+        finally
         {
-            var result = Run([.. command, "--bogus-option", "--json"]);
-            Check($"`{string.Join(' ', command)}` 拒絕未知選項並回傳 InvalidArgs",
-                result.Code == ExitCodes.InvalidArgs
-                && result.Envelope is { Ok: false } env && env.Errors.Count > 0,
-                $"exitCode={result.Code}");
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
         }
-
-        // --- 2. 打錯的 --game 不得被靜默忽略（原本會改用自動偵測的安裝目錄）---
-        var typo = Run("status", "--gam", "C:/definitely/not/a/game", "--json");
-        Check("`status --gam <path>` 不再靜默改用自動偵測目錄，而是明確拒絕",
-            typo.Code == ExitCodes.InvalidArgs && typo.Envelope is { Ok: false },
-            $"exitCode={typo.Code}");
-
-        // --- 3. --game／--config 不得吃掉後面的選項，且 --json 不得遺失 ---
-        foreach (string option in new[] { "--game", "--config" })
-        {
-            var swallowed = Run("status", option, "--json");
-            Check($"`status {option} --json` 不吞掉 --json 並以 InvalidArgs 拒絕",
-                swallowed.Code == ExitCodes.InvalidArgs,
-                $"exitCode={swallowed.Code}");
-            Check($"`status {option} --json` 的錯誤仍以 JSON 封套輸出",
-                swallowed.Envelope is { Ok: false },
-                swallowed.Raw.Length > 60 ? swallowed.Raw[..60] : swallowed.Raw);
-
-            var dangling = Run("status", "--json", option);
-            Check($"末位的 {option} 缺少值時明確報錯而非被當成指令 token",
-                dangling.Code == ExitCodes.InvalidArgs && dangling.Envelope is { Ok: false },
-                $"exitCode={dangling.Code}");
-        }
-
-        // --- 4. 合法用法不得被誤殺 ---
-        foreach (string[] command in noOptionCommands)
-        {
-            var ok = Run([.. command, "--json"]);
-            Check($"`{string.Join(' ', command)} --json` 仍正常成功",
-                ok.Code == ExitCodes.Success && ok.Envelope is { Ok: true },
-                $"exitCode={ok.Code}");
-        }
-
-        // --- 5. 有自己選項白名單的子指令仍然收得到選項（不得被全域攔截）---
-        var restoreMissingFlag = Run("restore", "--json");
-        Check("`restore` 缺少 --all 時仍是原本的 InvalidArgs 而非未知選項錯誤",
-            restoreMissingFlag.Code == ExitCodes.InvalidArgs
-            && restoreMissingFlag.Envelope is { Ok: false } restoreEnv
-            && restoreEnv.Errors.Count > 0
-            && restoreEnv.Errors[0] == Strings.Get("Error_RestoreAllMissingFlag"),
-            restoreMissingFlag.Envelope?.Errors.FirstOrDefault());
-
-        var restoreUnknown = Run("restore", "--all", "--bogus-option", "--json");
-        Check("`restore --all --bogus-option` 在碰任何檔案之前就以未知選項拒絕",
-            restoreUnknown.Code == ExitCodes.InvalidArgs
-            && restoreUnknown.Envelope is { Ok: false } unknownEnv
-            && unknownEnv.Errors.Count > 0
-            && unknownEnv.Errors[0].Contains("--bogus-option", StringComparison.Ordinal),
-            restoreUnknown.Envelope?.Errors.FirstOrDefault());
     }
 
     #endregion
