@@ -338,13 +338,22 @@ internal sealed partial class CrashCatcher : IDisposable
         bool nullPage = (code == 0xC0000005 || code == 0xC0000006)
                         && ev.ExceptionInformation1 < 0x10000;
 
+        bool writeDump = false;
+        string? customStatePath = null;
+        string? customDumpPath = null;
+
         if (_capturesWritten >= MaxCaptures)
         {
-            _toLog($"[偵錯器] 已經寫過 {MaxCaptures} 份現場，這一次只記錄。");
+            customStatePath = $"{_logBasePath}-crash-latest.json";
+            if (!first)
+            {
+                customDumpPath = $"{_logBasePath}-crash-latest.dmp";
+                writeDump = true;
+            }
+            _toLog($"[偵錯器] 已達 {MaxCaptures} 份上限，本次例外滾動寫入最新候選狀態：{System.IO.Path.GetFileName(customStatePath)}。");
         }
         else
         {
-            bool writeDump;
             if (nullPage && _nullPageDumps >= MaxNullPageDumps)
             {
                 writeDump = false;
@@ -363,14 +372,15 @@ internal sealed partial class CrashCatcher : IDisposable
             }
 
             _capturesWritten++;
-            try
-            {
-                Capture(ref ev, kind, detail, writeDump);
-            }
-            catch (Exception ex)
-            {
-                _toLog($"[偵錯器] 寫出崩潰現場時發生錯誤：{ex.Message}");
-            }
+        }
+
+        try
+        {
+            Capture(ref ev, kind, detail, writeDump, customStatePath, customDumpPath);
+        }
+        catch (Exception ex)
+        {
+            _toLog($"[偵錯器] 寫出崩潰現場時發生錯誤：{ex.Message}");
         }
 
         // Never freeze this at the first first-chance AV. The engine/CKPerf may repair
@@ -385,11 +395,12 @@ internal sealed partial class CrashCatcher : IDisposable
 
     #region 現場輸出
 
-    private void Capture(ref DebugEvent ev, string kind, string detail, bool writeDump)
+    private void Capture(ref DebugEvent ev, string kind, string detail, bool writeDump,
+                         string? customStatePath = null, string? customDumpPath = null)
     {
-        string suffix = _capturesWritten == 1 ? string.Empty : $"-{_capturesWritten}";
-        string dumpPath = $"{_logBasePath}-crash{suffix}.dmp";
-        string statePath = $"{_logBasePath}-crash{suffix}.json";
+        string suffix = _capturesWritten <= 1 ? string.Empty : $"-{_capturesWritten}";
+        string dumpPath = customDumpPath ?? $"{_logBasePath}-crash{suffix}.dmp";
+        string statePath = customStatePath ?? $"{_logBasePath}-crash{suffix}.json";
 
         _toConsole($"攔到例外 {kind}，正在寫出崩潰現場…");
 

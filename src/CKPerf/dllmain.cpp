@@ -45,6 +45,11 @@ static DWORD WINAPI InitThread(LPVOID) {
     GuardInstall();
     ArrayGuardInstall();
     FrameTimingInstall();
+    // After FrameTimingInstall, because the channel's only main-thread call site is that
+    // hook. Before TelemetryStart purely so the verification verdict lands in the log
+    // above the first telemetry line, where a user looking for "did it turn on?" will
+    // find it.
+    ScriptChannelInstall();
     TelemetryStart();
 
     Logf("ckperf ready.");
@@ -86,10 +91,13 @@ static void Startup(HMODULE self) {
     char logPath[MAX_PATH * 3];
     Logf("log file: %s  (flushed after every line)",
          WideToUtf8(LogFilePath(), logPath, (int)sizeof(logPath)));
-    Logf("options: crash=%d dump=%d telemetry=%d frames=%d guard=%d repair=%d arrayguard=%d maxreports=%d telemetryms=%d",
+    // The token itself is never logged; only whether one arrived. A log file is not the
+    // place for the shared secret that authenticates script execution.
+    Logf("options: crash=%d dump=%d telemetry=%d frames=%d guard=%d repair=%d arrayguard=%d "
+         "scriptchannel=%d maxreports=%d telemetryms=%d",
          g_cfg.crashReports ? 1 : 0, g_cfg.miniDumps ? 1 : 0,
          g_cfg.telemetry ? 1 : 0, g_cfg.frameTiming ? 1 : 0, g_cfg.nullGuard ? 1 : 0, g_cfg.nullStoreRepair ? 1 : 0,
-         g_cfg.arrayGuard ? 1 : 0, g_cfg.maxReports, g_cfg.telemetryMs);
+         g_cfg.arrayGuard ? 1 : 0, g_cfg.scriptChannel ? 1 : 0, g_cfg.maxReports, g_cfg.telemetryMs);
 
     // Installed before anything else can fault.
     NullStoreInit();
@@ -125,6 +133,9 @@ static void Shutdown(bool processExiting) {
     }
 
     TelemetryStop();
+    // Before FrameTimingUninstall: the channel's pump runs from that hook, so the hook
+    // must outlive the last thread that could still be queueing a script.
+    ScriptChannelUninstall();
     FrameTimingUninstall();
     CrashUninstall();
     if (g_initThread) {

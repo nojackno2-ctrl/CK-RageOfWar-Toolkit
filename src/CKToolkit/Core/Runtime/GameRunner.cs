@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Reflection;
 using CKToolkit.Core.Common;
 
@@ -37,6 +38,20 @@ public sealed class DiagnosticsOptions
     public int TelemetryMs { get; set; } = 1000;
 
     /// <summary>
+    /// 執行期腳本通道（ISSUE-068）。開啟後 <c>ckperf.dll</c> 會驗證引擎的腳本編譯鏈、
+    /// 通過自測後開一條具名管線，讓遊戲中面板不必再依賴引擎那 20 個硬編按鍵。
+    /// 預設關閉：只有修改器頁真的要用面板時才開。
+    /// </summary>
+    public bool ScriptChannel { get; set; }
+
+    /// <summary>
+    /// 通道的共用權杖。原生端只在「有要求通道」且「權杖長度正確」時才啟用，
+    /// 所以留空等同於通道關閉——不會出現一條誰都能連的管線。
+    /// 由 <see cref="Runtime.ScriptChannel.NewToken"/> 每次注入現產。
+    /// </summary>
+    public string? ScriptToken { get; set; }
+
+    /// <summary>
     /// 診斷輸出資料夾。<c>null</c> 代表沿用 <see cref="GameRunner.DiagnosticsDirectory"/>。
     ///
     /// 存在的理由是整合：注入層以前一律寫 LocalAppData 底下的 diag 資料夾，
@@ -45,12 +60,23 @@ public sealed class DiagnosticsOptions
     /// </summary>
     public string? OutputDirectory { get; set; }
 
-    internal string ToOptionString() =>
-        $"crash={(CrashReports ? 1 : 0)},dump={(MiniDumps ? 1 : 0)}," +
-        $"telemetry={(Telemetry ? 1 : 0)},frames={(FrameTiming ? 1 : 0)}," +
-        $"guard={(NullGuard ? 1 : 0)},repair={(NullStoreRepair ? 1 : 0)}," +
-        $"arrayguard={(ArrayGuard ? 1 : 0)}," +
-        $"maxreports={MaxReports},telemetryms={TelemetryMs}";
+    internal string ToOptionString()
+    {
+        // 權杖長度不對就連 scriptchannel 都不寫出去，讓「開了通道卻沒有共用祕密」
+        // 這種狀態在來源端就不可能發生（原生端另有一道同樣的檢查）。
+        bool channel = ScriptChannel && Runtime.ScriptChannel.IsValidToken(ScriptToken);
+
+        string options =
+            $"crash={(CrashReports ? 1 : 0)},dump={(MiniDumps ? 1 : 0)}," +
+            $"telemetry={(Telemetry ? 1 : 0)},frames={(FrameTiming ? 1 : 0)}," +
+            $"guard={(NullGuard ? 1 : 0)},repair={(NullStoreRepair ? 1 : 0)}," +
+            $"arrayguard={(ArrayGuard ? 1 : 0)}," +
+            $"maxreports={MaxReports},telemetryms={TelemetryMs}";
+
+        return channel
+            ? options + $",scriptchannel=1,scripttoken={ScriptToken}"
+            : options;
+    }
 }
 
 public sealed record RunOutcome(uint ProcessId, string OutputDirectory, string Detail, bool InjectedBeforeEntryPoint);
@@ -83,7 +109,7 @@ public static class GameRunner
     /// 把產品頁面的兩層選擇轉成 ckperf 的底層開關。日常模式不做效能取樣、不寫 dump；
     /// 只有實驗性層才需要 VEH crash handler，因為通用修復是由它承接例外。
     /// </summary>
-    public static DiagnosticsOptions CreateStabilityOptions(PerfConfig perf)
+    public static DiagnosticsOptions CreateStabilityOptions(PerfConfig perf, bool scriptChannel = false)
     {
         bool enabled = perf.StabilityProtection;
         bool experimental = enabled && perf.ExperimentalStability;
@@ -99,14 +125,40 @@ public static class GameRunner
             MaxReports = 5,
             TelemetryMs = 5000,
             OutputDirectory = StabilityDirectory,
+            ScriptChannel = scriptChannel,
+            ScriptToken = scriptChannel ? ScriptChannelSession.Begin() : null,
         };
     }
+
+    /// <summary>
+    /// 只為了執行期腳本通道而注入：所有 guard、取樣、故障報告全部關閉。
+    ///
+    /// 使用者可以把效能頁的執行期保護整個關掉，但修改器的遊戲中面板仍然需要
+    /// <c>ckperf.dll</c> 在行程裡才有通道可用（ISSUE-068）。這條路徑讓「不要保護、
+    /// 但要能改遊戲」成立，而且不偷偷替使用者打開任何他關掉的東西。
+    /// </summary>
+    public static DiagnosticsOptions CreateScriptChannelOnlyOptions() =>
+        new()
+        {
+            CrashReports = false,
+            MiniDumps = false,
+            Telemetry = false,
+            FrameTiming = false,
+            NullGuard = false,
+            ArrayGuard = false,
+            NullStoreRepair = false,
+            MaxReports = 0,
+            TelemetryMs = 5000,
+            OutputDirectory = StabilityDirectory,
+            ScriptChannel = true,
+            ScriptToken = ScriptChannelSession.Begin(),
+        };
 
     /// <summary>完全不注入的普通啟動，供使用者明確關閉所有執行期保護時使用。</summary>
     public static Result<RunOutcome> LaunchPlain(string gameDir)
     {
         if (!GamePaths.IsGameDir(gameDir))
-            return Result<RunOutcome>.Fail($"不是有效的遊戲目錄：{gameDir}", ExitCodes.GameNotFound);
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameDirInvalid", gameDir), ExitCodes.GameNotFound);
         try
         {
             var psi = new System.Diagnostics.ProcessStartInfo
@@ -118,7 +170,7 @@ public static class GameRunner
             using var process = System.Diagnostics.Process.Start(psi);
             uint pid = (uint)(process?.Id ?? 0);
             return pid == 0
-                ? Result<RunOutcome>.Fail("遊戲行程沒有成功建立。")
+                ? Result<RunOutcome>.Fail(Strings.Get("Error_GameProcessNotCreated"))
                 : Result<RunOutcome>.Ok(new RunOutcome(pid, string.Empty, "未注入執行期穩定保護。", false));
         }
         catch (Exception ex)
@@ -145,7 +197,7 @@ public static class GameRunner
         string gameDir, DiagnosticsOptions options, Action<string>? log = null)
     {
         if (!GamePaths.IsGameDir(gameDir))
-            return Result<RunOutcome>.Fail($"不是有效的遊戲目錄：{gameDir}", ExitCodes.GameNotFound);
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameDirInvalid", gameDir), ExitCodes.GameNotFound);
 
         string exe = Path.Combine(gameDir, GamePaths.ExeFileName);
 
@@ -169,6 +221,8 @@ public static class GameRunner
         if (r.ProcessId == 0)
             return Result<RunOutcome>.Fail(r.Detail);
 
+        if (options.ScriptChannel) ScriptChannelSession.Attached(r.ProcessId);
+
         var warnings = new List<string>();
         if (!r.InjectedBeforeEntryPoint)
             warnings.Add("診斷層未能在進入點之前就位；遊戲啟動最初數毫秒內的事件不會被記錄。");
@@ -186,7 +240,7 @@ public static class GameRunner
     {
         int pid = FindGameProcessId();
         if (pid == 0)
-            return Result<RunOutcome>.Fail("找不到執行中的《Celtic Kings》行程。請先開遊戲，或改用「帶診斷啟動遊戲」。");
+            return Result<RunOutcome>.Fail(Strings.Get("Error_GameProcessNotFound"));
 
         return AttachToProcess((uint)pid, options, log);
     }
@@ -206,7 +260,7 @@ public static class GameRunner
         while (DateTime.UtcNow < deadline)
         {
             if (cancel.IsCancellationRequested)
-                return Result<RunOutcome>.Fail("已取消等待。");
+                return Result<RunOutcome>.Fail(Strings.Get("Error_WaitCancelled"));
 
             int pid = FindGameProcessId();
             if (pid != 0)
@@ -216,7 +270,7 @@ public static class GameRunner
             }
             Thread.Sleep(250);
         }
-        return Result<RunOutcome>.Fail("等待逾時，期間沒有偵測到《Celtic Kings》啟動。");
+        return Result<RunOutcome>.Fail(Strings.Get("Error_WaitTimeout"));
     }
 
     /// <summary>
@@ -338,6 +392,8 @@ public static class GameRunner
         if (r.ProcessId == 0)
             return Result<RunOutcome>.Fail(r.Detail);
 
+        if (options.ScriptChannel) ScriptChannelSession.Attached(r.ProcessId);
+
         return Result<RunOutcome>.Ok(
             new RunOutcome(r.ProcessId, outDir, r.Detail, InjectedBeforeEntryPoint: false),
             ["以掛載方式就位，遊戲啟動到掛載之間發生的事件不會被記錄。"]);
@@ -409,7 +465,7 @@ public static class GameRunner
 
             using Stream? src = Assembly.GetExecutingAssembly().GetManifestResourceStream(EmbeddedDllResource);
             if (src is null)
-                return Result<string>.Fail("執行檔內找不到內嵌的 ckperf.dll；請以 tools/perf/build-ckperf.ps1 重建後再建置。");
+                return Result<string>.Fail(Strings.Get("Error_CkPerfNotEmbedded"));
 
             byte[] wanted = new byte[src.Length];
             src.ReadExactly(wanted);
@@ -424,11 +480,11 @@ public static class GameRunner
         }
         catch (IOException ex)
         {
-            return Result<string>.Fail($"展開 ckperf.dll 失敗（可能有另一個遊戲行程仍載入著它）：{ex.Message}", ExitCodes.FileLocked);
+            return Result<string>.Fail(Strings.Get("Error_CkPerfExtractLocked", ex.Message), ExitCodes.FileLocked);
         }
         catch (Exception ex)
         {
-            return Result<string>.Fail($"展開 ckperf.dll 失敗：{ex.Message}");
+            return Result<string>.Fail(Strings.Get("Error_CkPerfExtractFailed", ex.Message));
         }
     }
 }

@@ -22,7 +22,27 @@ public sealed class TrainerModule : IPatchModule
 
     public void ApplyExe(ref byte[] exeBytes, ToolkitConfig config)
     {
-        if (!config.Trainer.Enabled || !config.Trainer.NumpadKeys)
+        if (!config.Trainer.Enabled)
+        {
+            return;
+        }
+
+        // Explicit scoped values override legacy single-value fallbacks. Only
+        // IDs with completed owner-aware hooks enter the version-specific
+        // .cktw section; unsupported tweaks remain on the data.pak path.
+        if (ScopedTweakPatch.TryBuildSettings(config.Trainer, out var scoped))
+        {
+            exeBytes = ScopedTweakPatch.Apply(
+                exeBytes,
+                scoped.Command,
+                scoped.Production,
+                scoped.Population,
+                scoped.Capacity,
+                scoped.InitialGold,
+                scoped.UnitScalars);
+        }
+
+        if (!config.Trainer.NumpadKeys)
         {
             return;
         }
@@ -46,6 +66,7 @@ public sealed class TrainerModule : IPatchModule
 
         bool anyCheat = config.Trainer.Cheats.Any(c => c.Enabled);
         bool anyTweak = config.Trainer.Tweaks.Any(kv =>
+            !ScopedTweakPatch.ShouldRouteToScopedPatch(config.Trainer, kv.Key) &&
             Tweaks.ById.TryGetValue(kv.Key, out var t) && kv.Value != t.Default);
 
         if (!anyCheat && !anyTweak)

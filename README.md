@@ -217,7 +217,26 @@ CKToolkit.exe save stats set --profile noname --military-rating 50 --single-game
   - **切換生成物品 (`cycle_item`)**：熱鍵循環切換當前生成物品。
 - **選取單位等級修改 (`set_selected_level`)**：直接將目前選取之單位或英雄部隊設定為指定等級（Lv.1~1000）。
 - **圖形化參數設定對話框**：提供整齊對齊的兵種挑選器、全裝備屬性說明（如王者腰帶、狂亂皮手套、專注之石等）與一鍵神裝推薦組合。
-- **鍵盤配置**：支援標準鍵盤與九宮格小鍵盤 (Numpad) 專屬獨立鍵位配置。
+- **鍵盤配置**：支援標準鍵盤與九宮格小鍵盤 (Numpad) 專屬獨立鍵位配置（**選用**，見下）。
+
+#### 主要用法：遊戲中面板（不需要綁按鍵）
+
+2004 年的引擎只認 **20 個硬編按鍵代號**，其中 9 個被遊戲自己用掉（F1 說明、F2 存檔、
+F3 讀檔、F5 外交、F6 快速存檔、F7 選隊、F8 筆記、F9 快速讀檔、F10 主選單）、
+5 個被原版除錯腳本綁走（`Add`／`Sub`／`Mul`／`Pause`／`Tab`），實際只剩 4 個自由鍵；
+小鍵盤模式雖然能解放 F1–F12，但那些鍵在筆電上根本不存在。也就是說**光靠按鍵，
+18 個作弊本來就放不下**。
+
+因此修改器的主要操作介面是**遊戲中面板**：從修改器頁啟動遊戲（或在遊戲已經開著時
+按「遊戲中面板」，工具會自動掛上去），面板會列出**全部作弊**，點一下就立刻生效。
+面板走的是引擎自己的腳本編譯器——與按下熱鍵是同一條執行路徑，只是不需要那顆鍵。
+按鍵綁定因此變成純選用：想用鍵盤的人可以綁，不想綁也完全不影響功能。
+
+面板只在開著時與執行中的遊戲連線，**完全不碰磁碟**，關掉就什麼都不剩。連線建立前
+會先逐一核對引擎腳本函式的原始位元組，並實際編譯一段無副作用的探針腳本自證；
+任一項對不上就整條路徑停用並在記錄檔說明原因，絕不亂寫（見
+[`AGENTS.md`](AGENTS.md) §2.9 與 [`docs/reverse-engineering-notes.md`](docs/reverse-engineering-notes.md)
+的「引擎腳本執行鏈」一節）。
 
 ---
 
@@ -296,6 +315,8 @@ CKToolkit.exe verify  [--json]              唯讀驗證現行檔案（零寫入
 CKToolkit.exe perf get|set ...              效能與 HD 解析度設定
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
+CKToolkit.exe trainer exec --cheat <id> [--param k=v]... [--json]
+CKToolkit.exe trainer exec --script "<VS>" [--json]
 CKToolkit.exe save list|export|import|delete|player|stats ...
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] [--log-dir <dir>] 完整診斷記錄
 CKToolkit.exe run [--plain|--watch|--attach] 帶診斷執行或掛載遊戲
@@ -314,6 +335,7 @@ CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
 ```
 
 - **標準退出碼**：`0` 成功、`1` 一般失敗、`2` 參數錯誤、`3` 找不到遊戲目錄、`4` 檔案狀態無法辨識（需 Steam 驗證）、`5` 檔案被佔用中。
+- **`trainer apply` 與 `trainer exec` 的差別**：`apply` 改的是磁碟上的檔案，下一次開遊戲才生效；`exec` 改的是**現在正在跑的這一場**，透過遊戲中面板所用的同一條執行期腳本通道。`exec` 需要遊戲正在執行、而且這一場是由本工具啟動或掛載過的；不符合就直接回錯誤，不會自作主張去注入。
 
 ---
 
@@ -551,7 +573,32 @@ Supports 17 cheats and dozens of gameplay balance tweaks:
   - **Cycle Item (`cycle_item`)**: Hotkey to cycle through available items.
 - **Set Selected Unit Level (`set_selected_level`)**: Instantly set the selected unit or hero army to any level (1–1000).
 - **Graphical Parameter Dialog**: Clean 3-column aligned grid with item ability descriptions and recommended gear presets (Godly Gear, Max ATK, Max DEF).
-- **Key Remapping**: Comprehensive keyboard and Numpad key binding support.
+- **Key Remapping**: Comprehensive keyboard and Numpad key binding support (**optional** — see below).
+
+#### The main way to use it: the In-Game Panel (no key binding required)
+
+The 2004 engine recognises exactly **20 hard-coded key ids**. Nine are taken by the game
+itself (F1 help, F2 save, F3 load, F5 diplomacy, F6 quicksave, F7 select team, F8 notes,
+F9 quickload, F10 main menu) and five more by the stock debug script (`Add`, `Sub`,
+`Mul`, `Pause`, `Tab`), leaving four free keys. Numpad mode frees up F1–F12, but those
+map onto a numeric keypad a laptop does not have. In other words, **keys alone were
+never going to fit 18 cheats.**
+
+So the trainer's primary surface is the **In-Game Panel**: launch from the Trainer page
+(or press "In-Game Panel" while the game is already running and the tool attaches
+itself), and the panel lists **every** cheat — click one and it takes effect
+immediately. The panel goes through the engine's own script compiler, which is the same
+execution path a hotkey would have taken, just without needing the key. Key bindings are
+therefore purely optional: bind them if you like the keyboard, skip them with no loss of
+functionality.
+
+The panel talks to the running game only while it is open, **never touches the disk**,
+and leaves nothing behind when closed. Before connecting it verifies the original bytes
+of every engine script entry point it uses and proves the chain by compiling a
+side-effect-free probe script. If anything does not match, the whole path is disabled
+and the reason is written to the log rather than guessed around — see
+[`AGENTS.md`](AGENTS.md) §2.9 and the "engine script execution chain" section of
+[`docs/reverse-engineering-notes.md`](docs/reverse-engineering-notes.md).
 
 ---
 
@@ -639,6 +686,8 @@ CKToolkit.exe verify  [--json]              Read-only verification (zero writes)
 CKToolkit.exe perf get|set ...              Performance & resolution settings
 CKToolkit.exe lang list|install|uninstall|import|export-template ...
 CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
+CKToolkit.exe trainer exec --cheat <id> [--param k=v]... [--json]
+CKToolkit.exe trainer exec --script "<VS>" [--json]
 CKToolkit.exe save list|export|import|delete|player|stats ...
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] Full diagnostics run
 CKToolkit.exe run [--plain|--watch|--attach] Launch or attach with diagnostics

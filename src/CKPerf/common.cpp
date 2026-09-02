@@ -45,6 +45,25 @@ static int OptInt(const wchar_t* opts, const wchar_t* key, int dflt) {
     return v > 0 ? v : dflt;
 }
 
+// Copies the value of "key=..." into an ASCII buffer, stopping at the first space or
+// comma. Used for the script-channel token, which is hex and therefore always ASCII;
+// anything outside 0x21..0x7E is refused rather than silently mangled, because a
+// half-copied token would fail authentication in a way that is hard to diagnose.
+static void OptAscii(const wchar_t* opts, const wchar_t* key, char* dst, int cch) {
+    dst[0] = 0;
+    const wchar_t* p = wcsstr(opts, key);
+    if (!p) return;
+    p += wcslen(key);
+    if (*p != L'=') return;
+    ++p;
+    int i = 0;
+    while (*p && *p != L' ' && *p != L',' && i < cch - 1) {
+        if (*p < 0x21 || *p > 0x7E) { dst[0] = 0; return; }
+        dst[i++] = (char)*p++;
+    }
+    dst[i] = 0;
+}
+
 // Locates ckperf.ini beside this DLL. Returns false when the path cannot be built.
 static bool SettingsPath(HMODULE self, wchar_t* dst, size_t cch) {
     wchar_t modulePath[MAX_PATH];
@@ -88,6 +107,13 @@ void LoadConfig(HMODULE selfModule) {
     g_cfg.arrayGuard   = OptFlag(opts, L"arrayguard", true);
     g_cfg.maxReports   = OptInt (opts, L"maxreports",   20);
     g_cfg.telemetryMs  = OptInt (opts, L"telemetryms", 1000);
+
+    // Off unless CKToolkit asks for it AND supplies a full-length token. An enabled
+    // channel with no shared secret would accept requests from any local process, so
+    // the two settings are deliberately coupled here rather than trusted separately.
+    OptAscii(opts, L"scripttoken", g_cfg.scriptToken, (int)sizeof(g_cfg.scriptToken));
+    g_cfg.scriptChannel = OptFlag(opts, L"scriptchannel", false) &&
+                          strlen(g_cfg.scriptToken) == kScriptTokenChars;
 
     // SHCreateDirectoryExW builds the whole chain and is happy if it already exists.
     SHCreateDirectoryExW(nullptr, g_cfg.outDir, nullptr);

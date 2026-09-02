@@ -175,7 +175,7 @@ public sealed class PatchPipeline
     {
         if (_modules.Any(m => string.Equals(m.ModuleId, module.ModuleId, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidOperationException($"模組 {module.ModuleId} 已經註冊過");
+            throw new InvalidOperationException($"Internal: module '{module.ModuleId}' is already registered.");
         }
         _modules.Add(module);
         _modules.Sort((a, b) => a.Order.CompareTo(b.Order));
@@ -276,6 +276,8 @@ public sealed class PatchPipeline
         if (config.Perf.VideoFix) layered[GameFile.Exe].Add("video_fix");
         if (config.Perf.Hires >= 1600) layered[GameFile.Exe].Add($"hires_zoom ({config.Perf.Hires})");
         if (config.Perf.KeepRes) layered[GameFile.Exe].Add("res_writeback");
+        if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer))
+            layered[GameFile.Exe].Add("scoped_tweaks");
         if (config.Trainer.Enabled && config.Trainer.NumpadKeys) layered[GameFile.Exe].Add("key_map");
         foreach (IPatchModule module in _modules)
         {
@@ -325,7 +327,7 @@ public sealed class PatchPipeline
              !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) ||
             config.Perf.AddRes.Count > 0;
         if (hasCustomRes) layered[GameFile.DataPak].Add("resolutions_append");
-        if (TrainerHasPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
+        if (TrainerHasDataPakPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
         foreach (IPatchModule module in _modules)
         {
             try
@@ -349,6 +351,10 @@ public sealed class PatchPipeline
                 ExitCodes.GeneralFailure);
         }
 
+        // 沒有任何模組要動 local.pak 時，連解析都不做。
+        // HmmPak 的 FromBytes -> ToBytes 往返不保證位元組恆等（重建時的版面配置
+        // 與原檔的死空間不同），所以白繞一圈會讓 4.8MB 的檔案被無謂重寫。
+        // 正規化結果仍留在 stagedFiles，因此移除先前語言包的路徑照樣會寫入。
         if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
         {
             layered[GameFile.LocalPak].Add($"langpack ({config.Lang.Pack})");
@@ -543,7 +549,8 @@ public sealed class PatchPipeline
                 ExitCodes.InvalidArgs);
         }
 
-        if (config.Trainer.Cheats is null || config.Trainer.Tweaks is null)
+        if (config.Trainer.Cheats is null || config.Trainer.Tweaks is null ||
+            config.Trainer.ScopedTweaks is null)
             return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
 
         foreach (CheatConfig cheat in config.Trainer.Cheats)
@@ -558,6 +565,8 @@ public sealed class PatchPipeline
 
         foreach ((string id, decimal value) in config.Trainer.Tweaks)
         {
+            if (Tweaks.Retired.Contains(id))
+                continue;
             if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
                 return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
             if (value < tweak.Minimum || value > tweak.Maximum)
@@ -565,6 +574,44 @@ public sealed class PatchPipeline
                 return Result.Fail(
                     Strings.Get("Error_TrainerTweakOutOfRange", id, value, tweak.Minimum, tweak.Maximum),
                     ExitCodes.InvalidArgs);
+            }
+        }
+
+        foreach ((string id, Dictionary<string, decimal> values) in config.Trainer.ScopedTweaks)
+        {
+            if (Tweaks.Retired.Contains(id))
+                continue;
+            if (!Tweaks.ById.TryGetValue(id, out Tweak? tweak))
+                return Result.Fail(Strings.Get("Error_TrainerUnknownTweak", id), ExitCodes.InvalidArgs);
+            if (!ScopedTweakPatch.IsSupportedScopedTweakId(id))
+            {
+                return Result.Fail(
+                    Strings.Get("Error_TrainerScopedTweakUnsupported", id),
+                    ExitCodes.InvalidArgs);
+            }
+            if (values is null)
+                return Result.Fail(Strings.Get("Error_InvalidConfig"), ExitCodes.InvalidArgs);
+
+            IReadOnlyList<string> allowedScopes = ScopedTweakPatch.GetSupportedScopes(id);
+            foreach ((string scope, decimal value) in values)
+            {
+                if (!allowedScopes.Contains(scope, StringComparer.Ordinal))
+                {
+                    return Result.Fail(
+                        Strings.Get("Error_TrainerScopedTweakUnknownScope", id, scope),
+                        ExitCodes.InvalidArgs);
+                }
+                if (value < tweak.Minimum || value > tweak.Maximum)
+                {
+                    return Result.Fail(
+                        Strings.Get(
+                            "Error_TrainerTweakOutOfRange",
+                            $"{id}.{scope}",
+                            value,
+                            tweak.Minimum,
+                            tweak.Maximum),
+                        ExitCodes.InvalidArgs);
+                }
             }
         }
 
@@ -616,312 +663,6 @@ public sealed class PatchPipeline
         Result<T>.Fail(
             Strings.Get("Error_ModuleApplyFailed", module.ModuleId, fileName, exception.Message),
             ExitCodes.GeneralFailure);
-
-    private Result<ApplyReport> ApplyAllLegacy(string gameDir, ToolkitConfig config)
-    {
-        if (GamePaths.IsGameRunning(gameDir))
-        {
-            return Result<ApplyReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
-        }
-
-        if (!GamePaths.IsGameDir(gameDir))
-        {
-            return Result<ApplyReport>.Fail(Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound);
-        }
-
-        // 1. 事前檢查：先讀取並檢查所有目標檔案是否均存在且可辨識（若有任何檔案無法辨識，嚴格零寫入）
-        var rawFiles = new Dictionary<GameFile, byte[]>();
-        foreach (GameFile f in Enum.GetValues<GameFile>())
-        {
-            string fileName = PatchState.GetFileName(f);
-            string filePath = Path.Combine(gameDir, fileName);
-
-            if (!File.Exists(filePath))
-            {
-                return Result<ApplyReport>.Fail(
-                    Strings.Get("Error_GameNotFound") + $" ({filePath})",
-                    ExitCodes.GameNotFound);
-            }
-
-            byte[] liveBytes;
-            try
-            {
-                liveBytes = File.ReadAllBytes(filePath);
-            }
-            catch (Exception ex)
-            {
-                return Result<ApplyReport>.Fail(
-                    Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
-                    ExitCodes.FileLocked);
-            }
-
-            var state = PatchState.Inspect(f, liveBytes);
-            if (state.IsUnrecognised)
-            {
-                return Result<ApplyReport>.Fail(
-                    Strings.Get("Error_UnrecognisedFileNeedsSteamVerify", fileName),
-                    ExitCodes.BackupMissingNeedsSteamVerify);
-            }
-
-            rawFiles[f] = liveBytes;
-        }
-
-        var report = new ApplyReport { GameDir = gameDir };
-        var writtenFiles = new List<string>();
-        var warnings = new List<string>();
-
-        // 2. Exe 重建與條件寫入
-        {
-            byte[] liveBytes = rawFiles[GameFile.Exe];
-            var normRes = PatchState.Normalise(GameFile.Exe, liveBytes);
-            if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-
-            byte[] exeBytes = normRes.Value!;
-
-            // 組建版本檢查：本工具所有位址都是特定 Steam 組建專屬的。對不上就警告，
-            // 但不阻止套用——真正的安全網是每個修補站點寫入前的原始位元組比對，
-            // 那一關過不了本來就會在上面的 Unrecognised 檢查被擋下來。
-            // 用正規化後的位元組來測，HiRes 附加的 .ckhr 節區才不會干擾 SizeOfImage。
-            var build = GameVersion.Detect(exeBytes);
-            report.GameBuild = build;
-            GameVersion.WarnIfUnknown(build, warnings);
-
-            var exeLayered = new List<string>();
-            if (config.Perf.Laa) exeLayered.Add("laa");
-            if (config.Perf.VideoFix) exeLayered.Add("video_fix");
-            if (config.Perf.Hires >= 1600) exeLayered.Add($"hires_zoom ({config.Perf.Hires})");
-            if (config.Perf.KeepRes) exeLayered.Add("res_writeback");
-            if (config.Trainer.Enabled && config.Trainer.NumpadKeys) exeLayered.Add("key_map");
-
-            foreach (var mod in _modules)
-            {
-                mod.ApplyExe(ref exeBytes, config);
-            }
-
-            if (!exeBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(GamePaths.GetExePath(gameDir), exeBytes, GamePaths.ExeFileName);
-                if (!writeRes.Success)
-                {
-                    report.Files[GamePaths.ExeFileName] = new FileApplyResult { File = GamePaths.ExeFileName, Written = false, Layered = exeLayered };
-                    report.FilesWritten = writtenFiles;
-                    string err = writtenFiles.Count > 0
-                        ? Strings.Get("Error_ApplyPartialFailure", GamePaths.ExeFileName, string.Join(", ", writtenFiles))
-                        : writeRes.ErrorMessage!;
-                    return Result<ApplyReport>.Fail(err, writeRes.ExitCode);
-                }
-                writtenFiles.Add(GamePaths.ExeFileName);
-                report.Files[GamePaths.ExeFileName] = new FileApplyResult { File = GamePaths.ExeFileName, Written = true, Layered = exeLayered };
-            }
-            else
-            {
-                report.Files[GamePaths.ExeFileName] = new FileApplyResult { File = GamePaths.ExeFileName, Written = false, Layered = exeLayered };
-            }
-        }
-
-        // 3. Launcher 重建與條件寫入
-        {
-            byte[] liveBytes = rawFiles[GameFile.Launcher];
-            var normRes = PatchState.Normalise(GameFile.Launcher, liveBytes);
-            if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-
-            byte[] launcherBytes = normRes.Value!;
-            var launcherLayered = new List<string>();
-            if (string.Equals(config.Perf.DesktopMode, "suppress", StringComparison.OrdinalIgnoreCase))
-            {
-                launcherLayered.Add("launcher_display");
-            }
-            else if (string.Equals(config.Perf.DesktopMode, "autoSwitch", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(config.Perf.Resolution))
-            {
-                launcherLayered.Add($"launcher_mode_table ({config.Perf.Resolution})");
-            }
-
-            foreach (var mod in _modules)
-            {
-                mod.ApplyLauncher(ref launcherBytes, config);
-            }
-
-            if (!launcherBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(GamePaths.GetLauncherPath(gameDir), launcherBytes, GamePaths.LauncherFileName);
-                if (!writeRes.Success)
-                {
-                    report.Files[GamePaths.LauncherFileName] = new FileApplyResult { File = GamePaths.LauncherFileName, Written = false, Layered = launcherLayered };
-                    report.FilesWritten = writtenFiles;
-                    string err = Strings.Get("Error_ApplyPartialFailure", GamePaths.LauncherFileName, string.Join(", ", writtenFiles));
-                    return Result<ApplyReport>.Fail(err, writeRes.ExitCode);
-                }
-                writtenFiles.Add(GamePaths.LauncherFileName);
-                report.Files[GamePaths.LauncherFileName] = new FileApplyResult { File = GamePaths.LauncherFileName, Written = true, Layered = launcherLayered };
-            }
-            else
-            {
-                report.Files[GamePaths.LauncherFileName] = new FileApplyResult { File = GamePaths.LauncherFileName, Written = false, Layered = launcherLayered };
-            }
-        }
-
-        // 4. data.pak 重建與條件寫入
-        IReadOnlyList<string>? availableResolutions = null;
-        {
-            byte[] liveBytes = rawFiles[GameFile.DataPak];
-            var normRes = PatchState.Normalise(GameFile.DataPak, liveBytes);
-            if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-
-            HmmPak dataPak;
-            try
-            {
-                dataPak = HmmPak.FromBytes(normRes.Value!);
-            }
-            catch (PakException ex)
-            {
-                return Result<ApplyReport>.Fail($"解析 data.pak 失敗：{ex.Message}", ExitCodes.GeneralFailure);
-            }
-
-            var dataPakLayered = new List<string>();
-            bool hasCustomRes = (config.Perf.Hires >= 1600 && !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) || (config.Perf.AddRes is { Count: > 0 });
-            if (hasCustomRes)
-            {
-                dataPakLayered.Add("resolutions_append");
-            }
-            if (TrainerHasPayload(config.Trainer))
-            {
-                dataPakLayered.Add("trainer_marker");
-            }
-
-            foreach (var mod in _modules)
-            {
-                mod.ApplyDataPak(dataPak, config, warnings);
-            }
-
-            availableResolutions = Resolutions.GetAvailableResolutionsList(dataPak);
-            byte[] dataPakBytes = dataPak.ToBytes();
-
-            if (!dataPakBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(GamePaths.GetDataPakPath(gameDir), dataPakBytes, GamePaths.DataPakFileName);
-                if (!writeRes.Success)
-                {
-                    report.Files[GamePaths.DataPakFileName] = new FileApplyResult { File = GamePaths.DataPakFileName, Written = false, Layered = dataPakLayered };
-                    report.FilesWritten = writtenFiles;
-                    string err = Strings.Get("Error_ApplyPartialFailure", GamePaths.DataPakFileName, string.Join(", ", writtenFiles));
-                    return Result<ApplyReport>.Fail(err, writeRes.ExitCode);
-                }
-                writtenFiles.Add(GamePaths.DataPakFileName);
-                report.Files[GamePaths.DataPakFileName] = new FileApplyResult { File = GamePaths.DataPakFileName, Written = true, Layered = dataPakLayered };
-            }
-            else
-            {
-                report.Files[GamePaths.DataPakFileName] = new FileApplyResult { File = GamePaths.DataPakFileName, Written = false, Layered = dataPakLayered };
-            }
-        }
-
-        // 5. local.pak 重建與條件寫入（若無修改則絕對不重寫 4.8MB 檔案）
-        {
-            byte[] liveBytes = rawFiles[GameFile.LocalPak];
-            var normRes = PatchState.Normalise(GameFile.LocalPak, liveBytes);
-            if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-
-            var localPakLayered = new List<string>();
-            if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
-            {
-                localPakLayered.Add($"langpack ({config.Lang.Pack})");
-            }
-
-            // 沒有任何模組要動 local.pak 時，連解析都不做。
-            // HmmPak 的 FromBytes -> ToBytes 往返不保證位元組恆等（重建時的版面配置
-            // 與原檔的死空間不同），所以白繞一圈會讓 4.8MB 的檔案被無謂重寫，
-            // 每次 apply 看起來都動過遊戲檔案。正規化的結果仍會參與下面的比對，
-            // 所以「移除先前安裝的語言包」這條路徑照樣會寫入。
-            byte[] localPakBytes = normRes.Value!;
-
-            if (localPakLayered.Count > 0)
-            {
-                HmmPak localPak;
-                try
-                {
-                    localPak = HmmPak.FromBytes(localPakBytes);
-                }
-                catch (PakException ex)
-                {
-                    return Result<ApplyReport>.Fail($"解析 local.pak 失敗：{ex.Message}", ExitCodes.GeneralFailure);
-                }
-
-                foreach (var mod in _modules)
-                {
-                    mod.ApplyLocalPak(localPak, config);
-                }
-
-                localPakBytes = localPak.ToBytes();
-            }
-
-            if (!localPakBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(GamePaths.GetLocalPakPath(gameDir), localPakBytes, GamePaths.LocalPakFileName);
-                if (!writeRes.Success)
-                {
-                    report.Files[GamePaths.LocalPakFileName] = new FileApplyResult { File = GamePaths.LocalPakFileName, Written = false, Layered = localPakLayered };
-                    report.FilesWritten = writtenFiles;
-                    string err = Strings.Get("Error_ApplyPartialFailure", GamePaths.LocalPakFileName, string.Join(", ", writtenFiles));
-                    return Result<ApplyReport>.Fail(err, writeRes.ExitCode);
-                }
-                writtenFiles.Add(GamePaths.LocalPakFileName);
-                report.Files[GamePaths.LocalPakFileName] = new FileApplyResult { File = GamePaths.LocalPakFileName, Written = true, Layered = localPakLayered };
-            }
-            else
-            {
-                // 略過未變更檔案之寫入
-                report.Files[GamePaths.LocalPakFileName] = new FileApplyResult { File = GamePaths.LocalPakFileName, Written = false, Layered = localPakLayered };
-            }
-        }
-
-        // 6. vxSettings.ini 重建與條件寫入
-        {
-            byte[] liveBytes = rawFiles[GameFile.VxSettings];
-            var normRes = PatchState.Normalise(GameFile.VxSettings, liveBytes);
-            if (!normRes.Success) return Result<ApplyReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-
-            string vxText = IniEncoding.GetString(normRes.Value!);
-            var ini = IniFile.FromText(vxText);
-
-            var vxLayered = new List<string>();
-            if (config.Perf.NoObjectAnimations) vxLayered.Add("no_object_animations");
-            if (config.Perf.NoWaterAnimation) vxLayered.Add("no_water_animation");
-            if (!string.IsNullOrWhiteSpace(config.Perf.Resolution)) vxLayered.Add($"resolution ({config.Perf.Resolution})");
-            if (!string.IsNullOrWhiteSpace(config.Lang.Pack))
-            {
-                vxLayered.Add($"lang_default ({PackLoader.ResolveGameLangIdentity(config.Lang.Pack).Key})");
-            }
-
-            foreach (var mod in _modules)
-            {
-                mod.ApplyVxSettings(ini, config, availableResolutions, warnings);
-            }
-
-            byte[] iniBytes = IniEncoding.GetBytes(ini.ToText());
-
-            if (!iniBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(GamePaths.GetVxSettingsPath(gameDir), iniBytes, GamePaths.VxSettingsFileName);
-                if (!writeRes.Success)
-                {
-                    report.Files[GamePaths.VxSettingsFileName] = new FileApplyResult { File = GamePaths.VxSettingsFileName, Written = false, Layered = vxLayered };
-                    report.FilesWritten = writtenFiles;
-                    string err = Strings.Get("Error_ApplyPartialFailure", GamePaths.VxSettingsFileName, string.Join(", ", writtenFiles));
-                    return Result<ApplyReport>.Fail(err, writeRes.ExitCode);
-                }
-                writtenFiles.Add(GamePaths.VxSettingsFileName);
-                report.Files[GamePaths.VxSettingsFileName] = new FileApplyResult { File = GamePaths.VxSettingsFileName, Written = true, Layered = vxLayered };
-            }
-            else
-            {
-                report.Files[GamePaths.VxSettingsFileName] = new FileApplyResult { File = GamePaths.VxSettingsFileName, Written = false, Layered = vxLayered };
-            }
-        }
-
-        report.FilesWritten = writtenFiles;
-
-        return Result<ApplyReport>.Ok(report, warnings);
-    }
 
     /// <summary>
     /// 將所有目標檔案正規化反轉回原版 (Vanilla)。
@@ -984,119 +725,6 @@ public sealed class PatchPipeline
 
             report.Files[fileName].Restored = true;
             report.RestoredFiles.Add(fileName);
-        }
-
-        return Result<RestoreReport>.Ok(report);
-    }
-
-    private Result<RestoreReport> RestoreAllLegacy(string gameDir)
-    {
-        if (GamePaths.IsGameRunning(gameDir))
-        {
-            return Result<RestoreReport>.Fail(Strings.Get("Error_GameRunning"), ExitCodes.FileLocked);
-        }
-
-        if (!GamePaths.IsGameDir(gameDir))
-        {
-            return Result<RestoreReport>.Fail(Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound);
-        }
-
-        var report = new RestoreReport { GameDir = gameDir };
-        var unrecognisedFiles = new List<string>();
-
-        foreach (GameFile f in Enum.GetValues<GameFile>())
-        {
-            string fileName = PatchState.GetFileName(f);
-            string filePath = Path.Combine(gameDir, fileName);
-
-            if (!File.Exists(filePath))
-            {
-                unrecognisedFiles.Add(fileName);
-                report.Files[fileName] = new FileRestoreResult
-                {
-                    File = fileName,
-                    Restored = false,
-                    State = "missing"
-                };
-                continue;
-            }
-
-            byte[] liveBytes;
-            try
-            {
-                liveBytes = File.ReadAllBytes(filePath);
-            }
-            catch (Exception ex)
-            {
-                return Result<RestoreReport>.Fail(
-                    Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
-                    ExitCodes.FileLocked);
-            }
-
-            var state = PatchState.Inspect(f, liveBytes);
-            if (state.IsUnrecognised)
-            {
-                unrecognisedFiles.Add(fileName);
-                report.Files[fileName] = new FileRestoreResult
-                {
-                    File = fileName,
-                    Restored = false,
-                    State = "unrecognised"
-                };
-                continue;
-            }
-
-            if (state.IsVanilla)
-            {
-                report.Files[fileName] = new FileRestoreResult
-                {
-                    File = fileName,
-                    Restored = false,
-                    State = "vanilla"
-                };
-                continue;
-            }
-
-            // state.IsPatched: 正規化還原
-            var normRes = PatchState.Normalise(f, liveBytes);
-            if (!normRes.Success)
-            {
-                return Result<RestoreReport>.Fail(normRes.ErrorMessage!, normRes.ExitCode);
-            }
-
-            byte[] vanillaBytes = normRes.Value!;
-            if (!vanillaBytes.AsSpan().SequenceEqual(liveBytes))
-            {
-                var writeRes = WriteAtomic(filePath, vanillaBytes, fileName);
-                if (!writeRes.Success)
-                {
-                    return Result<RestoreReport>.Fail(writeRes.ErrorMessage!, writeRes.ExitCode);
-                }
-
-                report.RestoredFiles.Add(fileName);
-                report.Files[fileName] = new FileRestoreResult
-                {
-                    File = fileName,
-                    Restored = true,
-                    State = "vanilla"
-                };
-            }
-            else
-            {
-                report.Files[fileName] = new FileRestoreResult
-                {
-                    File = fileName,
-                    Restored = false,
-                    State = "vanilla"
-                };
-            }
-        }
-
-        if (unrecognisedFiles.Count > 0)
-        {
-            return Result<RestoreReport>.Fail(
-                Strings.Get("Error_RestoreUnrecognisedFile", string.Join(", ", unrecognisedFiles)),
-                ExitCodes.BackupMissingNeedsSteamVerify);
         }
 
         return Result<RestoreReport>.Ok(report);
@@ -1193,6 +821,15 @@ public sealed class PatchPipeline
                 ? appliedPatches.OrderBy(x => x).SequenceEqual(expectedPatches.OrderBy(x => x))
                 : false;
 
+            if (matchesConfig && f == GameFile.Exe)
+            {
+                matchesConfig = ScopedTweakPatch.MatchesLegacySettings(liveBytes, effectiveConfig.Trainer);
+            }
+            else if (matchesConfig && f == GameFile.DataPak)
+            {
+                matchesConfig = TrainerMarkerMatchesConfig(liveBytes, effectiveConfig.Trainer);
+            }
+
             string stateStr = fileState.Kind switch
             {
                 FileStateKind.Vanilla => "vanilla",
@@ -1242,6 +879,7 @@ public sealed class PatchPipeline
                     list.Add("cell_grid");
                 }
                 if (config.Perf.KeepRes) list.Add("res_writeback");
+                if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer)) list.Add("scoped_tweaks");
                 if (config.Trainer.Enabled && config.Trainer.NumpadKeys) list.Add("key_map");
                 break;
 
@@ -1262,7 +900,7 @@ public sealed class PatchPipeline
                 {
                     list.Add("resolutions_append");
                 }
-                if (TrainerHasPayload(config.Trainer)) list.Add("trainer_marker");
+                if (TrainerHasDataPakPayload(config.Trainer)) list.Add("trainer_marker");
                 break;
 
             case GameFile.LocalPak:
@@ -1297,10 +935,47 @@ public sealed class PatchPipeline
         return list;
     }
 
-    private static bool TrainerHasPayload(TrainerConfig trainer) =>
+    private static bool TrainerHasDataPakPayload(TrainerConfig trainer) =>
         trainer.Enabled &&
         (trainer.Cheats.Any(c => c.Enabled) ||
-         trainer.Tweaks.Any(kv => Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
+         trainer.Tweaks.Any(kv =>
+             !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
+             Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
+
+    private static bool TrainerMarkerMatchesConfig(byte[] dataPakBytes, TrainerConfig trainer)
+    {
+        bool expected = TrainerHasDataPakPayload(trainer);
+        HmmPak pak;
+        try
+        {
+            pak = HmmPak.FromBytes(dataPakBytes);
+        }
+        catch
+        {
+            return false;
+        }
+
+        TrainerMarker? marker = TrainerInstaller.ReadMarker(pak);
+        if (!expected)
+            return marker is null;
+        if (marker is null)
+            return false;
+
+        var expectedCheats = trainer.Cheats
+            .Where(c => c.Enabled)
+            .Select(c => c.Id)
+            .ToList();
+        var expectedTweaks = trainer.Tweaks
+            .Where(kv =>
+                !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
+                Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        return marker.Cheats.SequenceEqual(expectedCheats, StringComparer.Ordinal) &&
+               marker.Tweaks.Count == expectedTweaks.Count &&
+               marker.Tweaks.All(kv => expectedTweaks.TryGetValue(kv.Key, out decimal value) &&
+                                       value == kv.Value);
+    }
 
     // ---- 先寫 .cktmp 再取代之安全寫檔輔助 ----------------------------------
 

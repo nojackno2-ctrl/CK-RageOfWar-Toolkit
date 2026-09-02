@@ -32,7 +32,7 @@ internal static class RunManifest
         AppendFileStates(sb, gameDir);
         AppendPerf(sb, config);
         AppendLang(sb, config);
-        AppendTrainer(sb, config);
+        AppendTrainer(sb, gameDir, config);
         AppendDiag(sb, diag);
 
         string path = Path.Combine(diagDir, FileName);
@@ -109,10 +109,86 @@ internal static class RunManifest
         sb.AppendLine();
     }
 
-    private static void AppendTrainer(StringBuilder sb, ToolkitConfig config)
+    private static void AppendTrainer(StringBuilder sb, string gameDir, ToolkitConfig config)
     {
+        sb.AppendLine("--- 修改器（遊戲檔案實際狀態） ---");
+
+        string dataPakPath = Path.Combine(gameDir, GamePaths.DataPakFileName);
+        if (!File.Exists(dataPakPath))
+        {
+            sb.AppendLine("  data.pak      檔案不存在，無法讀取 trainer marker");
+        }
+        else
+        {
+            try
+            {
+                var pak = HmmPak.FromBytes(File.ReadAllBytes(dataPakPath));
+                TrainerMarker? marker = TrainerInstaller.ReadMarker(pak);
+                if (marker is null)
+                {
+                    sb.AppendLine("  data.pak      沒有可讀取的 trainer marker");
+                }
+                else
+                {
+                    sb.AppendLine($"  data.pak      trainer marker v{marker.Version}");
+                    sb.AppendLine($"  實際作弊      {(marker.Cheats.Count > 0 ? string.Join(", ", marker.Cheats) : "—")}");
+                    if (marker.Tweaks.Count == 0)
+                    {
+                        sb.AppendLine("  實際 data tweak  —");
+                    }
+                    else
+                    {
+                        sb.AppendLine("  實際 data tweak：");
+                        foreach (var (id, value) in marker.Tweaks.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+                            sb.AppendLine($"    {id,-22} = {value}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"  data.pak      讀取 trainer marker 失敗：{ex.Message}");
+            }
+        }
+
+        string exePath = Path.Combine(gameDir, GamePaths.ExeFileName);
+        if (File.Exists(exePath))
+        {
+            try
+            {
+                byte[] exeBytes = File.ReadAllBytes(exePath);
+                if (!ScopedTweakPatch.IsApplied(exeBytes))
+                {
+                    sb.AppendLine("  .cktw          實際不存在");
+                }
+                else
+                {
+                    var info = ScopedTweakPatch.ReadInfo(exeBytes);
+                    sb.AppendLine("  .cktw          實際存在（單人 fail-closed scoped hook）");
+                    AppendScopedSettings(
+                        sb,
+                        "實際",
+                        new ScopedTweakPatch.LegacySettings(
+                            info.Settings,
+                            info.Production,
+                            info.Population,
+                            info.Capacity,
+                            info.InitialGold,
+                            info.UnitScalars));
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"  .cktw          讀取失敗：{ex.Message}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("  .cktw          執行檔不存在，無法讀取");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("--- 修改器（本次期望設定） ---");
         TrainerConfig t = config.Trainer;
-        sb.AppendLine("--- 修改器 ---");
         sb.AppendLine($"  啟用          {(t.Enabled ? "是" : "否")}");
         if (!t.Enabled)
         {
@@ -153,8 +229,54 @@ internal static class RunManifest
             sb.AppendLine("    若崩潰只在這種狀態下發生，要修的是這一項，不是引擎本身。");
             sb.AppendLine("    要分辨的話，把這些調回預設再重現一次即可。");
         }
+
+        if (ScopedTweakPatch.TryBuildSettings(t, out ScopedTweakPatch.LegacySettings expectedScoped))
+        {
+            sb.AppendLine();
+            sb.AppendLine("  有效 scoped 值（明確值 + legacy fallback）：");
+            AppendScopedSettings(sb, "期望", expectedScoped);
+        }
         sb.AppendLine();
     }
+
+    private static void AppendScopedSettings(
+        StringBuilder sb,
+        string prefix,
+        ScopedTweakPatch.LegacySettings settings)
+    {
+        var c = settings.Command;
+        var p = settings.Production;
+        var pop = settings.Population;
+        var cap = settings.Capacity;
+        var gold = settings.InitialGold;
+        var unit = settings.UnitScalars;
+
+        sb.AppendLine($"  {prefix} train       self {Q16ToMultiplier(c.SelfTrainSpeedQ16):0.####}x / enemy {Q16ToMultiplier(c.EnemyTrainSpeedQ16):0.####}x");
+        sb.AppendLine($"  {prefix} research    self {Q16ToMultiplier(c.SelfResearchSpeedQ16):0.####}x / enemy {Q16ToMultiplier(c.EnemyResearchSpeedQ16):0.####}x");
+        sb.AppendLine($"  {prefix} gold rate   self TH/V {p.SelfTownhallGold}/{p.SelfVillageGold} / enemy TH/V {p.EnemyTownhallGold}/{p.EnemyVillageGold}");
+        sb.AppendLine($"  {prefix} food rate   self TH/V {p.SelfTownhallFood}/{p.SelfVillageFood} / enemy TH/V {p.EnemyTownhallFood}/{p.EnemyVillageFood}");
+        sb.AppendLine($"  {prefix} pop growth  self TH/V {pop.SelfTownhallGrowthAmount}/{pop.SelfVillageGrowthAmount} / enemy TH/V {pop.EnemyTownhallGrowthAmount}/{pop.EnemyVillageGrowthAmount}");
+        sb.AppendLine($"  {prefix} pop grow ms self TH/V {pop.SelfTownhallGrowthInterval}/{pop.SelfVillageGrowthInterval} / enemy TH/V {pop.EnemyTownhallGrowthInterval}/{pop.EnemyVillageGrowthInterval}");
+        sb.AppendLine($"  {prefix} pop loss %  self TH/V {pop.SelfTownhallLossPercent}/{pop.SelfVillageLossPercent} / enemy TH/V {pop.EnemyTownhallLossPercent}/{pop.EnemyVillageLossPercent}");
+        sb.AppendLine($"  {prefix} pop loss ms self TH/V {pop.SelfTownhallLossInterval}/{pop.SelfVillageLossInterval} / enemy TH/V {pop.EnemyTownhallLossInterval}/{pop.EnemyVillageLossInterval}");
+
+        if (cap.Enabled)
+        {
+            sb.AppendLine($"  {prefix} max gold    self TH/V {cap.SelfTownhallMaxGold}/{cap.SelfVillageMaxGold} / enemy TH/V {cap.EnemyTownhallMaxGold}/{cap.EnemyVillageMaxGold}");
+            sb.AppendLine($"  {prefix} max food    self TH/V {cap.SelfTownhallMaxFood}/{cap.SelfVillageMaxFood} / enemy TH/V {cap.EnemyTownhallMaxFood}/{cap.EnemyVillageMaxFood}");
+            sb.AppendLine($"  {prefix} max pop     self TH/V {cap.SelfTownhallMaxPopulation}/{cap.SelfVillageMaxPopulation} / enemy TH/V {cap.EnemyTownhallMaxPopulation}/{cap.EnemyVillageMaxPopulation}");
+        }
+        if (gold.Enabled)
+            sb.AppendLine($"  {prefix} start gold  self TH/V {gold.SelfTownhall}/{gold.SelfVillage} / enemy TH/V {gold.EnemyTownhall}/{gold.EnemyVillage}");
+        if (unit.Enabled)
+        {
+            sb.AppendLine($"  {prefix} unit health self {Q16ToMultiplier(unit.SelfHealthQ16):0.####}x / enemy {Q16ToMultiplier(unit.EnemyHealthQ16):0.####}x");
+            sb.AppendLine($"  {prefix} unit attack self {Q16ToMultiplier(unit.SelfAttackQ16):0.####}x / enemy {Q16ToMultiplier(unit.EnemyAttackQ16):0.####}x");
+            sb.AppendLine($"  {prefix} unit defend self {Q16ToMultiplier(unit.SelfDefenseQ16):0.####}x / enemy {Q16ToMultiplier(unit.EnemyDefenseQ16):0.####}x");
+        }
+    }
+
+    private static decimal Q16ToMultiplier(uint value) => value / 65_536m;
 
     private static void AppendDiag(StringBuilder sb, DiagnosticsOptions diag)
     {

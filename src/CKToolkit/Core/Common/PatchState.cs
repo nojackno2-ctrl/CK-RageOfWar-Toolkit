@@ -153,6 +153,13 @@ public static class PatchState
         bool cgOrig = CellGridPatch.IsOriginal(pe);
         if (!cgApplied && !cgOrig) return FileState.Unrecognised();
 
+        // Scoped permanent tweaks live in a self-describing executable section.
+        // Treat a malformed/tampered section or a mixed hook state as unknown;
+        // normalization must never guess how to remove it.
+        bool scopedApplied = ScopedTweakPatch.IsApplied(bytes);
+        bool scopedOrig = ScopedTweakPatch.IsOriginal(bytes);
+        if (!scopedApplied && !scopedOrig) return FileState.Unrecognised();
+
         // 4. LAA 檢查
         bool laaApplied = LargeAddressAware.IsApplied(bytes);
 
@@ -169,6 +176,7 @@ public static class PatchState
         if (ztApplied) patches.Add("hires_zoom");
         if (cgApplied) patches.Add("cell_grid");
         if (rwApplied) patches.Add("res_writeback");
+        if (scopedApplied) patches.Add("scoped_tweaks");
         if (keyMapApplied) patches.Add("key_map");
 
         return patches.Count > 0 ? FileState.PatchedByUs(patches) : FileState.Vanilla();
@@ -192,6 +200,15 @@ public static class PatchState
         try
         {
             var pe = PeFile.Parse(liveBytes);
+
+            // Remove the owner-aware section before restoring the older EXE
+            // patches. ScopedTweakPatch independently validates every hook and
+            // helper, so a damaged .cktw is rejected rather than guessed.
+            if (state.AppliedPatches.Contains("scoped_tweaks", StringComparer.Ordinal))
+            {
+                liveBytes = ScopedTweakPatch.Reverse(liveBytes);
+                pe = PeFile.Parse(liveBytes);
+            }
 
             // 1. 還原 LAA 旗標
             LargeAddressAware.Apply(pe, false);

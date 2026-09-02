@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Perf;
 
@@ -115,7 +116,7 @@ public static class DiagnosticSession
         }
         catch (Exception ex)
         {
-            return Result<SessionResult>.Fail($"診斷輸出資料夾建立失敗（{selectedLocation}）：{ex.Message}");
+            return Result<SessionResult>.Fail(Strings.Get("Error_DiagOutputDirFailed", selectedLocation, ex.Message));
         }
 
         // 兩層都指到同一個資料夾。這是整合最實際的那一半：事後撿檔案時不必再記得
@@ -140,7 +141,7 @@ public static class DiagnosticSession
             // 所以拆不開：啟動失敗就是整場失敗，沒有可以退而求其次的東西。
             Result<RunOutcome> launched = GameRunner.LaunchWithDiagnostics(opt.GameDirectory, opt.Runtime, Output);
             if (!launched.Success || launched.Value is null)
-                return Result<SessionResult>.Fail(launched.ErrorMessage ?? "帶診斷層啟動遊戲失敗。", launched.ExitCode);
+                return Result<SessionResult>.Fail(launched.ErrorMessage ?? Strings.Get("Error_DiagLaunchFailed"), launched.ExitCode);
 
             pid = launched.Value.ProcessId;
             beforeEntryPoint = launched.Value.InjectedBeforeEntryPoint;

@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Common;
@@ -119,6 +120,15 @@ public sealed class TrainerConfig
     /// <summary>數值調整。預設為空，代表全部維持遊戲原廠數值。</summary>
     [JsonPropertyName("tweaks")]
     public Dictionary<string, decimal> Tweaks { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 依目標分流的永久數值調整。外層 key 是 tweak ID，內層 key 是
+    /// <c>self</c>／<c>enemy</c> 或聚落四 scope；未指定的 scope 會回退到
+    /// 舊版 <see cref="Tweaks"/>，再回退到原廠值。
+    /// </summary>
+    [JsonPropertyName("scopedTweaks")]
+    public Dictionary<string, Dictionary<string, decimal>> ScopedTweaks { get; set; } =
+        new(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -166,8 +176,107 @@ public sealed class ToolkitConfig
 
     public static ToolkitConfig CreateDefault() => new();
 
-    public static ToolkitConfig FromJson(string json) =>
-        JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+    public static ToolkitConfig FromJson(string json)
+    {
+        var config = JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+        CleanRetiredTweaks(config);
+        ResolveConflictingTrainerBindings(config);
+        return config;
+    }
+
+    /// <summary>
+    /// 舊版把遊戲保留鍵當成安全預設（見 ISSUE-053／ISSUE-062），既有設定檔因此留著一批
+    /// 撞到遊戲功能或原版 scdebug 的綁定。載入時先試著把它們改回該作弊「目前」的預設鍵；
+    /// 預設鍵同樣不可用、或已被其他啟用綁定佔走時才停用。
+    ///
+    /// 只在記憶體中生效，讓 GUI／CLI 可以顯示警告並由下一次明確儲存持久化；
+    /// 單純讀取設定絕不寫回磁碟（AGENTS.md §2.1 的唯讀保證）。
+    /// </summary>
+    private static void ResolveConflictingTrainerBindings(ToolkitConfig config)
+    {
+        if (config.Trainer?.Cheats is not { Count: > 0 }) return;
+
+        bool numpad = config.Trainer.NumpadKeys;
+        bool keepVanilla = config.Trainer.KeepVanilla;
+
+        // 第一遍：把沒有衝突的已啟用綁定佔走的鍵記下來，第二遍改綁時才不會撞上它們。
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var conflicting = new List<(CheatConfig Config, Cheat Cheat, string Key)>();
+
+        foreach (CheatConfig cheatConfig in config.Trainer.Cheats)
+        {
+            if (!cheatConfig.Enabled || !Cheats.ById.TryGetValue(cheatConfig.Id, out Cheat? cheat))
+                continue;
+
+            string key = Cheats.EffectiveKey(cheat, cheatConfig.Key, numpad);
+            if (Cheats.DescribeConflict(key, keepVanilla, numpad) is null)
+            {
+                taken.Add(key);
+                continue;
+            }
+
+            conflicting.Add((cheatConfig, cheat, key));
+        }
+
+        // 第二遍：能改綁就改綁，改不了才停用。
+        var rebound = new List<string>();
+        var disabled = new List<string>();
+
+        foreach ((CheatConfig cheatConfig, Cheat cheat, string key) in conflicting)
+        {
+            string fallback = cheat.DefaultKeyFor(numpad);
+            if (!string.IsNullOrEmpty(fallback)
+                && !taken.Contains(fallback)
+                && Cheats.DescribeConflict(fallback, keepVanilla, numpad) is null)
+            {
+                cheatConfig.Key = fallback;
+                taken.Add(fallback);
+                rebound.Add($"{cheatConfig.Id}: {key} → {fallback}");
+                continue;
+            }
+
+            cheatConfig.Enabled = false;
+            disabled.Add($"{cheatConfig.Id}/{key}");
+        }
+
+        if (rebound.Count > 0)
+        {
+            config.MigrationsApplied.Add(
+                Strings.Get("Migration_TrainerReboundConflictingKeys", string.Join(", ", rebound)));
+        }
+
+        if (disabled.Count > 0)
+        {
+            config.MigrationsApplied.Add(
+                Strings.Get("Migration_TrainerDisabledConflictingKeys", string.Join(", ", disabled)));
+
+            // 只有在「保留原版功能」確實擋掉了鍵時才提示解法；已經關掉的話這條建議是錯的。
+            if (keepVanilla && disabled.Any(entry =>
+                    Cheats.VanillaReservedKeys.ContainsKey(entry[(entry.IndexOf('/') + 1)..])))
+            {
+                config.MigrationsApplied.Add(Strings.Get("Migration_TrainerKeepVanillaHint"));
+            }
+        }
+    }
+
+    private static void CleanRetiredTweaks(ToolkitConfig config)
+    {
+        if (config.Trainer == null) return;
+        if (config.Trainer.Tweaks != null && config.Trainer.Tweaks.Count > 0)
+        {
+            foreach (string retired in Tweaks.Retired)
+            {
+                config.Trainer.Tweaks.Remove(retired);
+            }
+        }
+        if (config.Trainer.ScopedTweaks != null && config.Trainer.ScopedTweaks.Count > 0)
+        {
+            foreach (string retired in Tweaks.Retired)
+            {
+                config.Trainer.ScopedTweaks.Remove(retired);
+            }
+        }
+    }
 
     public string ToJson() =>
         JsonSerializer.Serialize(this, JsonOpts);

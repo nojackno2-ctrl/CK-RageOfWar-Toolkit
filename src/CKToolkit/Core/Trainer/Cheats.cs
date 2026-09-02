@@ -1,4 +1,5 @@
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 using System.Globalization;
 using System.Text;
 using System.Xml;
@@ -37,50 +38,66 @@ public static class Cheats
     /// 按下 Ctrl+F1 送進來的還是 VK_F1，原本的遊戲功能一樣會被觸發。
     /// 唯一可靠的辦法就是避開這些鍵。
     ///
-    /// 清單來自 data/interface/cmdbar/*.ini 的 HelpText（30 種在地化一致）。
+    /// 清單來自 data/interface/cmdbar/*.ini 的 HelpText 與遊戲內建說明的
+    /// "General shortcuts" 段（assets/langpacks/*/help.json，30 種在地化一致）。
     /// </summary>
+    // 字典的值是 I18n 鍵名，不是顯示文字；實際文案由 DescribeConflict 透過 Strings.Get 解析。
     public static readonly IReadOnlyDictionary<string, string> GameReservedKeys =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["F1"] = "說明",
-            ["F5"] = "外交",
-            ["F6"] = "快速存檔",
-            ["F7"] = "選擇隊伍",
-            ["F8"] = "筆記",
-            ["F9"] = "快速讀取",
-            ["F10"] = "主選單",
+            ["F1"] = "Trainer_ReservedKey_Help",
+            ["F2"] = "Trainer_ReservedKey_Save",
+            ["F3"] = "Trainer_ReservedKey_Load",
+            ["F5"] = "Trainer_ReservedKey_Diplomacy",
+            ["F6"] = "Trainer_ReservedKey_QuickSave",
+            ["F7"] = "Trainer_ReservedKey_SelectTeam",
+            ["F8"] = "Trainer_ReservedKey_Notes",
+            ["F9"] = "Trainer_ReservedKey_QuickLoad",
+            ["F10"] = "Trainer_ReservedKey_MainMenu",
+            ["Del"] = "Trainer_ReservedKey_SelectByExp",
+            ["Ins"] = "Trainer_ReservedKey_SelectByExp",
         };
 
     /// <summary>原版 scdebug 已經綁走的按鍵（勾選保留原版功能時不可用）。</summary>
+    // 字典的值是 I18n 鍵名，不是顯示文字；實際文案由 DescribeConflict 透過 Strings.Get 解析。
     public static readonly IReadOnlyDictionary<string, string> VanillaReservedKeys =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Add"] = "加速",
-            ["Sub"] = "減速",
-            ["Mul"] = "極速切換",
-            ["Pause"] = "暫停",
-            ["Tab"] = "跳到最近通知",
+            ["Add"] = "Trainer_ReservedKey_SpeedUp",
+            ["Sub"] = "Trainer_ReservedKey_SlowDown",
+            ["Mul"] = "Trainer_ReservedKey_TurboToggle",
+            ["Pause"] = "Trainer_ReservedKey_Pause",
+            ["Tab"] = "Trainer_ReservedKey_LastNotification",
         };
 
     /// <summary>
     /// 回傳這顆鍵已被誰佔用；沒被佔用回傳 null。
     ///
-    /// 小鍵盤模式下 F1–F12 這幾個名稱已經被改到小鍵盤上（見 <see cref="KeyMap"/>），
-    /// 實體 F 鍵不會再觸發作弊，所以遊戲的說明／外交／快速存讀檔就不算衝突了。
+    /// 小鍵盤模式只把 F1–F12 這幾個名稱改到小鍵盤上（見 <see cref="KeyMap"/>），
+    /// 實體 F 鍵不會再觸發作弊，所以遊戲的說明／外交／快速存讀檔就不算衝突。
+    /// Del／Ins／Pause／Add／Sub／Mul／Tab 都不會重對應，仍須按實體鍵衝突處理。
     /// </summary>
     public static string? DescribeConflict(string key, bool keepVanilla, bool numpadKeys = false)
     {
         if (!(numpadKeys && KeyMap.IsRemapped(key))
             && GameReservedKeys.TryGetValue(key, out string? game))
-            return $"遊戲：{game}";
+            return Strings.Get("Trainer_Conflict_Game", Strings.Get(game));
         if (keepVanilla && VanillaReservedKeys.TryGetValue(key, out string? vanilla))
-            return $"原版：{vanilla}";
+            return Strings.Get("Trainer_Conflict_Vanilla", Strings.Get(vanilla));
         return null;
     }
 
     /// <summary>
-    /// 遊戲沒用、原版 scdebug 也沒用的按鍵。原版 8 個；
-    /// 小鍵盤模式下 F1–F12 全部解放，變成 17 個。
+    /// 遊戲沒用、原版 scdebug 也沒用的按鍵。原版模式 4 個；
+    /// 小鍵盤模式＋保留原版時，F1–F12 全部解放，加上 Backspace，共 13 個；
+    /// 關閉保留原版時，小鍵盤模式的 18 個可用鍵全部可用。
+    ///
+    /// 作弊預設按鍵表必須維持以下不變量：任何作弊的 DefaultKey／NumpadKey
+    /// 都不得落在 GameReservedKeys（那些鍵永遠無法解放）；同一模式內按鍵必須唯一；
+    /// 該模式沒有合法鍵時一律留空，交由使用者手動綁定。
+    /// 引擎只有 20 個鍵，因此原版模式＋保留原版只有 4 個自由鍵
+    /// （F4／F11／F12／Backspace），小鍵盤模式＋保留原版有 13 個
+    /// （F1..F12／Backspace）；關閉保留原版時，小鍵盤模式 18 個全可用。
     /// </summary>
     public static IEnumerable<string> FreeKeys(bool numpadKeys = false) =>
         Keys.Where(k => DescribeConflict(k, keepVanilla: true, numpadKeys) is null);
@@ -189,6 +206,53 @@ public static class Cheats
 
     /// <summary>「在滑鼠位置生成物品」的作弊代號。</summary>
     public const string SpawnItemId = "spawn_item";
+
+    /// <summary>「循環切換遊戲速度」的作弊代號。</summary>
+    public const string GameSpeedId = "game_speed";
+
+    /// <summary>速度循環的位置記在這個「每位玩家一份」的環境變數裡（同 UnitVar 的作法）。</summary>
+    private const string SpeedVar = "cktrainerspeed";
+
+    /// <summary>
+    /// 引擎的原生速度基準是 1000（<c>SetSpeed(1000)</c> = 正常速度），
+    /// 所以 n 倍速就是 <c>SetSpeed(n * 1000)</c>。原版 scdebug.xml 的「極速切換」
+    /// 用的正是 <c>SetSpeed(10000)</c>，也就是 10 倍——這是原廠功能，不是新發明。
+    /// 見 docs/VS腳本速查.md 與 Core/Perf/GameSpeed.cs。
+    /// </summary>
+    public const int NormalSpeedValue = 1000;
+
+    /// <summary>可放進循環清單的倍率。上限 100 倍與分析器的 --speed 一致。</summary>
+    public static readonly IReadOnlyList<CheatParamOption> SpeedOptions =
+    [
+        new("1",   "1 倍（正常）", englishLabel: "1x (normal)"),
+        new("2",   "2 倍",  englishLabel: "2x"),
+        new("3",   "3 倍",  englishLabel: "3x"),
+        new("5",   "5 倍",  englishLabel: "5x"),
+        new("10",  "10 倍（原版極速）", englishLabel: "10x (vanilla turbo)"),
+        new("20",  "20 倍", englishLabel: "20x"),
+        new("50",  "50 倍", englishLabel: "50x"),
+        new("100", "100 倍", englishLabel: "100x"),
+    ];
+
+    /// <summary>速度循環的出廠清單。</summary>
+    public const string DefaultSpeedList = "1,2,5,10";
+
+    /// <summary>
+    /// 座標取自 <c>MousePtm()</c> 的作弊——觸發當下游標必須正停在目標地點。
+    ///
+    /// <c>MousePtm</c> 的實作在 .text VA 0x005CBD40，它不呼叫 GetCursorPos，只是把
+    /// <c>[[0x008AAB80] + 0x20]</c> 與 <c>+0x24</c> 這兩個 dword 推進 VM 堆疊：
+    ///
+    ///     005CBD40  a1 80 ab 8a 00   mov eax, [0x8AAB80]
+    ///     005CBD45  8d 48 20         lea ecx, [eax + 0x20]
+    ///     005CBD4F  8b 31            mov esi, [ecx]
+    ///
+    /// 那是一個由滑鼠移動訊息更新的快取。所以用面板按鈕代按熱鍵時，游標從目標點
+    /// 移到按鈕的路上會一路更新這個快取，最後生成在面板邊緣而不是使用者要的位置。
+    /// 面板因此對這些作弊改用延遲觸發，讓游標在送鍵當下仍停在目標上。
+    /// </summary>
+    public static readonly IReadOnlySet<string> CursorPositionCheats =
+        new HashSet<string>(StringComparer.Ordinal) { SpawnUnitId, SpawnItemId };
 
     /// <summary>「切換生成物品」的作弊代號。</summary>
     public const string CycleItemId = "cycle_item";
@@ -364,6 +428,38 @@ public static class Cheats
     /// VS 沒有陣列也沒有 switch，只能展開成 if 串；
     /// 先給第 0 個當底，後面比中了就覆蓋，所以 n 落在範圍外也一定有值可用。
     /// </summary>
+    /// <summary>
+    /// 把逗號分隔的倍率清單解析成整數。只接受 <see cref="SpeedOptions"/> 列出的值，
+    /// 全部不合法就退回出廠清單——腳本不能生成空的 if 鏈，否則引擎會噴編譯錯誤。
+    /// </summary>
+    private static IReadOnlyList<int> ParseSpeedList(string raw)
+    {
+        var allowed = SpeedOptions
+            .Select(o => int.Parse(o.Value, CultureInfo.InvariantCulture))
+            .ToHashSet();
+
+        var parsed = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(t => int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : 0)
+            .Where(allowed.Contains)
+            .Distinct()
+            .OrderBy(v => v)
+            .ToList();
+
+        return parsed.Count > 0
+            ? parsed
+            : DefaultSpeedList.Split(',').Select(t => int.Parse(t, CultureInfo.InvariantCulture)).ToList();
+    }
+
+    /// <summary>依循環索引 n 選出速度值與顯示名稱，作法同 <see cref="UnitPick"/>。</summary>
+    private static string SpeedPick(IReadOnlyList<int> speeds)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"s = {speeds[0] * NormalSpeedValue}; name = \"{speeds[0]}\";");
+        for (int i = 1; i < speeds.Count; i++)
+            sb.Append($" if (n == {i}) {{ s = {speeds[i] * NormalSpeedValue}; name = \"{speeds[i]}\"; }}");
+        return sb.ToString();
+    }
+
     private static string UnitPick(IReadOnlyList<string> units)
     {
         var firstCls = units[0];
@@ -406,13 +502,13 @@ public static class Cheats
             + "「遊戲設定」分頁的聚落容量只對遊戲中新建立的聚落有效。",
             (player, p) => ForEachSettlement(player, "s.SetGold(s.max_gold);",
                                              "[修改器] 金錢已補滿"),
-            defaultEnabled: true, defaultKey: "F2", numpadKey: "F1"),
+            defaultEnabled: true, defaultKey: "", numpadKey: "F1"),
 
         new Cheat("food_fill", "食物補滿",
             "把我方每座聚落的食物補到儲存上限（max_food）。",
             (player, p) => ForEachSettlement(player, "s.SetFood(s.max_food);",
                                              "[修改器] 食物已補滿"),
-            defaultEnabled: true, defaultKey: "F3", numpadKey: "F2"),
+            defaultEnabled: true, defaultKey: "", numpadKey: "F2"),
 
         new Cheat("population_boost", "人口暴增（突破人口上限）",
             "把我方每座城鎮／村莊的人口直接往上加。收入是「人口 × 生產率 ÷ 100」"
@@ -485,7 +581,7 @@ public static class Cheats
             [new CheatParam("attack", "攻擊加成（原版步兵約 8~40）", 50, 0, 1000000, englishLabel: "Attack Bonus (Vanilla Infantry ~8-40)"),
              new CheatParam("defense", "防禦加成（斬擊與穿刺，原版約 4~26）", 50, 0, 1000000, englishLabel: "Defense Bonus (Slash & Pierce, Vanilla ~4-26)"),
              new CheatParam("health", "血量上限加成（原版步兵約 220）", 500, 0, 1000000, englishLabel: "Health Bonus (Vanilla Infantry ~220)")],
-            defaultEnabled: true, defaultKey: "Del", numpadKey: "F5"),
+            defaultEnabled: true, defaultKey: "", numpadKey: "F5"),
 
         new Cheat("heal_buildings", "我方建築修復",
             "我方所有建築補滿耐久。",
@@ -513,12 +609,12 @@ public static class Cheats
         new Cheat("explore_all", "探索全地圖",
             "一次揭開整張地圖（ExploreAll）。不可逆，但不影響戰爭迷霧。",
             (player, p) => "ExploreAll(); pr(\"[修改器] 全地圖已探索\");",
-            defaultEnabled: true, defaultKey: "Ins", numpadKey: "F8"),
+            defaultEnabled: true, defaultKey: "", numpadKey: "F8"),
 
         new Cheat("toggle_fog", "切換戰爭迷霧",
             "開關戰爭迷霧（ToggleFog）。可重複按，來回切換。",
             (player, p) => "ToggleFog(); pr(\"[修改器] 戰爭迷霧已切換\");",
-            defaultEnabled: false, defaultKey: "Del", numpadKey: "F9"),
+            defaultEnabled: false, defaultKey: "", numpadKey: "F9"),
 
         new Cheat(SpawnUnitId, "在滑鼠位置生成單位",
             "在滑鼠游標所指的地面上生成指定數量、等級與攜帶物品的單位。"
@@ -574,10 +670,10 @@ public static class Cheats
             },
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
                             options: UnitOptions, multi: true, englishLabel: "Switchable Units"),
-             new CheatParam("count", "數量", 5, 1, 50, englishLabel: "Spawn Count"),
+             new CheatParam("count", "數量", 5, 1, 1000, englishLabel: "Spawn Count"),
              new CheatParam("level", "初始等級", 1, 1, 1000, englishLabel: "Spawn Level"),
              new CheatParam("items", "攜帶物品", string.Empty, options: ItemOptions, multi: true, englishLabel: "Carried Items")],
-            experimental: true, defaultKey: "Pause", numpadKey: "Sub"),
+            experimental: true, defaultKey: "Pause", numpadKey: "Backspace"),
 
         new Cheat(CycleUnitId, "切換生成單位",
             "在遊戲中按一下就換成清單裡的下一種單位，並把單位名稱印在畫面上。"
@@ -599,7 +695,7 @@ public static class Cheats
             // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
             [new CheatParam("units", "可切換的單位", DefaultUnitList,
                             options: UnitOptions, multi: true, hidden: true, englishLabel: "Switchable Units")],
-            experimental: true, defaultKey: "F5", numpadKey: "Add"),
+            experimental: true, defaultKey: "", numpadKey: "Add"),
 
         new Cheat(SpawnItemId, "在滑鼠位置生成物品",
             "在滑鼠游標所指的地面上生成裝有指定物品的皮袋（DefItemHolder）。"
@@ -631,7 +727,7 @@ public static class Cheats
             [new CheatParam("items", "可切換的物品", DefaultItemList,
                             options: ItemOptions, multi: true, englishLabel: "Switchable Items"),
              new CheatParam("count", "數量", 1, 1, 20, englishLabel: "Spawn Count")],
-            experimental: true, defaultKey: "Ins", numpadKey: "Mul"),
+            experimental: true, defaultKey: "", numpadKey: "Mul"),
 
         new Cheat(CycleItemId, "切換生成物品",
             "在遊戲中按一下就換成清單裡的下一種物品，並把物品名稱印在畫面上。"
@@ -654,7 +750,7 @@ public static class Cheats
             // 組 scdebug.xml 時再把同一份值餵給這裡（見 BuildScDebug）。
             [new CheatParam("items", "可切換的物品", DefaultItemList,
                             options: ItemOptions, multi: true, hidden: true, englishLabel: "Switchable Items")],
-            experimental: true, defaultKey: "F6", numpadKey: "Del"),
+            experimental: true, defaultKey: "", numpadKey: "Sub"),
 
         new Cheat(SetSelectedLevelId, "修改選取單位等級",
             "將當前選取的單位（或英雄）等級直接設定為指定目標等級（1～1000 級），並自動補滿該等級之血量上限。"
@@ -691,7 +787,31 @@ public static class Cheats
                     """;
             },
             [new CheatParam("level", "目標等級", 100, 1, 1000, englishLabel: "Target Level")],
-            defaultEnabled: false, defaultKey: "F7", numpadKey: "Pause"),
+            defaultEnabled: false, defaultKey: "", numpadKey: "Pause"),
+
+        new Cheat(GameSpeedId, "循環切換遊戲速度",
+            "按一下就切到清單裡的下一個倍率，並把目前速度印在畫面上。"
+            + "用的是引擎自己的腳本函式 SetSpeed()——原生基準是 1000，所以 n 倍速就是 "
+            + "SetSpeed(n * 1000)；原版 scdebug.xml 的「極速切換」用的也是同一個函式（10 倍）。"
+            + "速度是全域的，不分玩家，敵方 AI 與生產也會一起加速。"
+            + "倍率開太高時模擬端可能跟不上（見 ISSUES.md ISSUE-005 的超線性卡頓），"
+            + "這不是修改器的錯，把速度切回 1 倍即可恢復。",
+            (player, p) =>
+            {
+                var speeds = ParseSpeedList(Str(p, "speeds"));
+                return $$"""
+                    int n; int s; str name;
+                    n = EnvReadInt({{player}}, "{{SpeedVar}}") + 1;
+                    if (n < 0 || n >= {{speeds.Count}}) n = 0;
+                    EnvWriteInt({{player}}, "{{SpeedVar}}", n);
+                    {{SpeedPick(speeds)}}
+                    SetSpeed(s);
+                    pr("[修改器] 遊戲速度：" + name + " 倍");
+                    """;
+            },
+            [new CheatParam("speeds", "循環的倍率", DefaultSpeedList,
+                            options: SpeedOptions, multi: true, englishLabel: "Speed Cycle")],
+            defaultEnabled: false, defaultKey: "Mul", numpadKey: "Tab"),
 
         new Cheat("diagnose", "診斷（確認修改器運作）",
             "在畫面上印出玩家編號與單位數量。裝好後先按這個鍵確認熱鍵有生效；"
@@ -729,38 +849,97 @@ public static class Cheats
         .Replace(">", "&gt;")
         .Replace("\"", "&quot;");
 
+    /// <summary>
+    /// 生成類作弊在腳本裡取滑鼠地圖座標所用的呼叫。執行期路徑會把它換成字面座標
+    /// （見 <see cref="BuildRuntimeScript"/>）。
+    /// </summary>
+    public const string MousePointCall = "MousePtm()";
+
+    /// <summary>
+    /// 「切換生成單位／物品」循環的是「在滑鼠位置生成單位／物品」勾的那份清單：清單只有一份，
+    /// 介面上也只編輯一份，所以組腳本時把 spawn 的參數借給 cycle 用。
+    /// spawn 沒啟用時 cycle 就吃自己的預設清單。
+    ///
+    /// 這條規則同時被 <see cref="BuildScDebug"/>（檔案路徑）與
+    /// <see cref="BuildRuntimeScript"/>（執行期路徑）使用，只能有一份實作——
+    /// 兩條路徑對同一個作弊必須產生逐字相同的腳本。
+    /// </summary>
+    public static IReadOnlyDictionary<string, object>? ResolveParameters(
+        string cheatId, IReadOnlyDictionary<string, object>? own,
+        IReadOnlyList<CheatSelection> allSelections)
+    {
+        string? lender = cheatId switch
+        {
+            CycleUnitId => SpawnUnitId,
+            CycleItemId => SpawnItemId,
+            _ => null,
+        };
+        if (lender is null) return own;
+
+        // 「有沒有那一筆 selection」才是判準，不是「那一筆有沒有參數」——出借方存在但
+        // 參數為空時，借用方就該跟著吃預設清單，兩個作弊的清單才不會分岔。
+        var source = allSelections.FirstOrDefault(s => s.Id == lender);
+        return source is not null ? source.Parameters : own;
+    }
+
+    /// <summary>
+    /// 組出一段可以直接交給引擎腳本編譯器的作弊腳本（ISSUE-068 的執行期通道用）。
+    ///
+    /// 內容與 <see cref="BuildScDebug"/> 寫進 <c>SCDEBUG.XML</c> 的那一段**逐字相同**，
+    /// 因為兩邊呼叫的是同一個 <see cref="Cheat.Script"/> builder；差別只有兩點：
+    /// 執行期不需要 XML 屬性跳脫（腳本原文直接進編譯器），而且可以帶入一個已經由引擎
+    /// 自己算好的滑鼠地圖座標。
+    ///
+    /// <para><b>為什麼要換掉 <c>MousePtm()</c></b></para>
+    ///
+    /// <c>MousePtm()</c> 讀的是一個由滑鼠移動訊息更新的快取。使用者把游標移到面板按鈕上
+    /// 的路上，那個快取早就被沿途的座標蓋掉了，單位會生成在面板邊緣。原本的解法是先讀下
+    /// 目標座標、按下按鈕時再寫回去（<see cref="Runtime.GameMemory"/>）；走執行期通道就
+    /// 不必寫回了——直接把讀到的值當字面量放進腳本即可。寫入的那一半因此消失，
+    /// AGENTS.md §2.9 的記憶體存取降級成純讀取。
+    ///
+    /// 座標仍然只用引擎自己算出來的值，不做任何螢幕像素到地圖座標的自行換算。
+    /// </summary>
+    /// <param name="cheat">要執行的作弊。</param>
+    /// <param name="playerExpression">見 <see cref="PlayerExpression"/>。</param>
+    /// <param name="parameters">已經過 <see cref="ResolveParameters"/> 解析的參數。</param>
+    /// <param name="cursorPoint">
+    /// 引擎算好的地圖座標。<c>null</c> 代表照原樣使用 <c>MousePtm()</c>。
+    /// </param>
+    public static string BuildRuntimeScript(Cheat cheat, string playerExpression,
+                                            IReadOnlyDictionary<string, object>? parameters,
+                                            (int X, int Y)? cursorPoint = null)
+    {
+        string script = FlattenScript(cheat.Script(playerExpression, parameters));
+
+        if (cursorPoint is null || !script.Contains(MousePointCall, StringComparison.Ordinal))
+        {
+            // 沒有取點呼叫就原樣送出。不去猜測哪裡「應該」有座標——對不上就不動
+            // （AGENTS.md §2）。
+            return script;
+        }
+
+        // Point(x, y) 是引擎自己的建構子，遊戲隨附的腳本就這樣用
+        // （data.pak SUBAI\BARRACK_TRAIN.VS：Place(cmdparam, Point(0,0), this.player)）。
+        string literal = string.Create(CultureInfo.InvariantCulture,
+            $"Point({cursorPoint.Value.X}, {cursorPoint.Value.Y})");
+        return script.Replace(MousePointCall, literal, StringComparison.Ordinal);
+    }
+
     /// <summary>依選取的作弊組出 scdebug.xml 內容。</summary>
     public static string BuildScDebug(IEnumerable<CheatSelection> selections,
-                                      string playerMode, int fixedPlayer, bool keepVanilla)
+                                      string playerMode, int fixedPlayer, bool keepVanilla,
+                                      bool numpadKeys)
     {
         string player = PlayerExpression(playerMode, fixedPlayer);
         var bindings = new List<(string Key, string Script, string Comment)>();
-        var used = new HashSet<string>(StringComparer.Ordinal);
 
-        // 「切換生成單位／物品」循環的是「在滑鼠位置生成單位／物品」勾的那份清單：清單只有一份，
-        // 介面上也只編輯一份，所以組腳本時把 spawn 的參數借給 cycle 用。
-        // spawn 沒啟用時 cycle 就吃自己的預設清單。
         var chosen = selections.ToList();
-        var spawnParameters = chosen.FirstOrDefault(s => s.Id == SpawnUnitId)?.Parameters;
-        var spawnItemParameters = chosen.FirstOrDefault(s => s.Id == SpawnItemId)?.Parameters;
+        var resolved = ResolveBindings(chosen, keepVanilla, numpadKeys);
 
-        foreach (var selection in chosen)
+        foreach (var (selection, cheat, key) in resolved)
         {
-            if (!ById.TryGetValue(selection.Id, out var cheat))
-                throw new InvalidOperationException($"未知的作弊代號：{selection.Id}");
-
-            string key = string.IsNullOrEmpty(selection.Key) ? cheat.DefaultKey : selection.Key;
-            if (string.IsNullOrEmpty(key) || !Keys.Contains(key, StringComparer.Ordinal))
-                throw new InvalidOperationException($"作弊 {cheat.Id} 未指定按鍵或按鍵代號無效：{key}");
-            if (!used.Add(key))
-                throw new InvalidOperationException($"按鍵 {key} 被指定給多個功能");
-
-            var parameters = cheat.Id switch
-            {
-                CycleUnitId when spawnParameters is not null => spawnParameters,
-                CycleItemId when spawnItemParameters is not null => spawnItemParameters,
-                _ => selection.Parameters
-            };
+            var parameters = ResolveParameters(cheat.Id, selection.Parameters, chosen);
 
             // 註解只放 ASCII 的 cheat id：pak 內的檔案一律以 latin-1 存放。
             bindings.Add((key, cheat.Script(player, parameters), cheat.Id));
@@ -769,7 +948,7 @@ public static class Cheats
         if (keepVanilla)
         {
             foreach (var (key, script) in VanillaBindings)
-                if (!used.Contains(key))
+                if (!resolved.Any(binding => binding.Key.Equals(key, StringComparison.OrdinalIgnoreCase)))
                     bindings.Add((key, script, "vanilla"));
         }
 
@@ -792,11 +971,58 @@ public static class Cheats
         }
         catch (XmlException ex)
         {
-            throw new InvalidOperationException($"產生的 scdebug.xml 不是合法 XML：{ex.Message}", ex);
+            throw new InvalidOperationException(Strings.Get("Error_ScDebugInvalidXml", ex.Message), ex);
         }
 
         return xml;
     }
+
+    /// <summary>
+    /// 回傳指定模式下實際生效的按鍵。空白設定會使用該模式的預設鍵；這是設定遷移、
+    /// GUI、CLI 與安裝器共同使用的唯一解析規則。
+    /// </summary>
+    public static string EffectiveKey(Cheat cheat, string? configuredKey, bool numpadKeys) =>
+        string.IsNullOrWhiteSpace(configuredKey)
+            ? cheat.DefaultKeyFor(numpadKeys)
+            : configuredKey;
+
+    /// <summary>
+    /// 驗證所有已啟用綁定：按鍵必須有效、一對一，且不得覆蓋遊戲或要求保留的原版功能。
+    /// </summary>
+    public static void ValidateBindings(IEnumerable<CheatSelection> selections,
+                                        bool keepVanilla, bool numpadKeys) =>
+        _ = ResolveBindings(selections, keepVanilla, numpadKeys);
+
+    private static List<ResolvedBinding> ResolveBindings(IEnumerable<CheatSelection> selections,
+                                                         bool keepVanilla, bool numpadKeys)
+    {
+        var resolved = new List<ResolvedBinding>();
+        var used = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var selection in selections)
+        {
+            if (!ById.TryGetValue(selection.Id, out var cheat))
+                throw new InvalidOperationException(Strings.Get("Error_TrainerUnknownCheat", selection.Id));
+
+            string key = EffectiveKey(cheat, selection.Key, numpadKeys);
+            if (string.IsNullOrEmpty(key) || !Keys.Contains(key, StringComparer.Ordinal))
+                throw new InvalidOperationException(Strings.Get("Error_TrainerInvalidKey", key));
+
+            if (DescribeConflict(key, keepVanilla, numpadKeys) is not null)
+                throw new InvalidOperationException(Strings.Get("Error_TrainerKeyConflict", cheat.Id, key));
+
+            if (used.TryGetValue(key, out string? existingCheatId))
+                throw new InvalidOperationException(
+                    Strings.Get("Error_TrainerDuplicateKey", key, existingCheatId, cheat.Id));
+
+            used[key] = cheat.Id;
+            resolved.Add(new ResolvedBinding(selection, cheat, key));
+        }
+
+        return resolved;
+    }
+
+    private sealed record ResolvedBinding(CheatSelection Selection, Cheat Cheat, string Key);
 }
 
 public sealed class CheatParamOption(string value, string label, string? category = null, string? englishLabel = null)
@@ -859,13 +1085,19 @@ public sealed class Cheat(
     /// <summary>
     /// 是否預設啟用。
     /// </summary>
-    public bool DefaultEnabled { get; } = defaultEnabled && !experimental && !string.IsNullOrEmpty(defaultKey);
+    public bool DefaultEnabled { get; } =
+        defaultEnabled &&
+        !experimental &&
+        !string.IsNullOrEmpty(defaultKey) &&
+        Cheats.DescribeConflict(defaultKey, keepVanilla: true, numpadKeys: false) is null;
 
     /// <summary>
     /// 小鍵盤模式下是否預設啟用。
     /// </summary>
     public bool NumpadDefaultEnabled =>
-        !Experimental && !string.IsNullOrEmpty(NumpadKey) && !Cheats.VanillaReservedKeys.ContainsKey(NumpadKey);
+        !Experimental &&
+        !string.IsNullOrEmpty(NumpadKey) &&
+        Cheats.DescribeConflict(NumpadKey, keepVanilla: true, numpadKeys: true) is null;
 
     public string DefaultKeyFor(bool numpadKeys) => numpadKeys ? NumpadKey : DefaultKey;
 

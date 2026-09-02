@@ -80,7 +80,8 @@ public static class TrainerInstaller
         if (selections.Count > 0)
         {
             string xml = Cheats.BuildScDebug(
-                selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla);
+                selections, config.PlayerMode, config.FixedPlayer, config.KeepVanilla,
+                config.NumpadKeys);
             pak.WriteText(Cheats.ScDebugPath, xml, ScDebugEncoding);
             marker.Cheats.AddRange(selections.Select(s => s.Id));
             log?.Invoke($"作弊：{selections.Count} 項已寫入 {Cheats.ScDebugPath}");
@@ -90,6 +91,15 @@ public static class TrainerInstaller
         foreach (var (id, value) in config.Tweaks)
         {
             if (!Tweaks.ById.TryGetValue(id, out var tweak))
+            {
+                continue;
+            }
+
+            // Do not also write the shared VXCONST/COMMANDS/CLASSES value when
+            // the completed subset is being represented by the owner-aware EXE
+            // helper. This keeps multiplayer fail-closed and avoids applying a
+            // second, global copy of the same legacy tweak.
+            if (ScopedTweakPatch.ShouldRouteToScopedPatch(config, id))
             {
                 continue;
             }

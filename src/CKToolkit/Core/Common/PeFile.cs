@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Text;
 
 namespace CKToolkit.Core.Common;
@@ -34,7 +35,10 @@ public sealed class PeSection
 public sealed class PeFile
 {
     public const ushort ImageFileLargeAddressAware = 0x0020;
+    public const uint ImageScnCntCode = 0x00000020;
+    public const uint ImageScnCntInitializedData = 0x00000040;
     public const uint ImageScnCntUninitializedData = 0x00000080;
+    public const uint ImageScnMemExecute = 0x20000000;
     public const uint ImageScnMemRead = 0x40000000;
     public const uint ImageScnMemWrite = 0x80000000;
 
@@ -80,15 +84,15 @@ public sealed class PeFile
     private void Parse()
     {
         if (_data.Length < 0x40)
-            throw new InvalidDataException("檔案過小，非有效 PE 格式");
+            throw new InvalidDataException(Strings.Get("Error_PeTooSmall"));
 
         // DOS Header 檢查
         if (_data[0] != (byte)'M' || _data[1] != (byte)'Z')
-            throw new InvalidDataException("DOS 檔頭標記錯誤 (缺少 MZ)");
+            throw new InvalidDataException(Strings.Get("Error_PeBadDosHeader"));
 
         uint lfanew = BitConverter.ToUInt32(_data, 0x3C);
         if (lfanew + 24 > _data.Length)
-            throw new InvalidDataException("NT 檔頭位移超出檔案長度");
+            throw new InvalidDataException(Strings.Get("Error_PeNtOffsetOutOfRange"));
 
         NtHeaderOffset = (int)lfanew;
 
@@ -98,7 +102,7 @@ public sealed class PeFile
             _data[NtHeaderOffset + 2] != 0 ||
             _data[NtHeaderOffset + 3] != 0)
         {
-            throw new InvalidDataException("PE 簽章錯誤 (缺少 PE\\0\\0)");
+            throw new InvalidDataException(Strings.Get("Error_PeBadSignature"));
         }
 
         FileHeaderOffset = NtHeaderOffset + 4;
@@ -132,13 +136,13 @@ public sealed class PeFile
         }
         else
         {
-            throw new InvalidDataException($"未知的 Optional Header Magic: 0x{optMagic:X4}");
+            throw new InvalidDataException(Strings.Get("Error_PeUnknownOptionalMagic", $"0x{optMagic:X4}"));
         }
 
         SectionTableOffset = OptionalHeaderOffset + sizeOfOptionalHeader;
 
         if (SectionAlignment == 0 || SectionTableOffset + NumberOfSections * 40 > _data.Length)
-            throw new InvalidDataException("PE 節區表格式不合法或超出檔案長度");
+            throw new InvalidDataException(Strings.Get("Error_PeBadSectionTable"));
 
         _sections.Clear();
         for (int i = 0; i < NumberOfSections; i++)
@@ -229,14 +233,14 @@ public sealed class PeFile
     public int VaToFileOffset(ulong va)
     {
         if (!TryVaToFileOffset(va, out int off))
-            throw new ArgumentOutOfRangeException(nameof(va), $"VA 0x{va:X} 無法對應至任何實體檔案節區");
+            throw new ArgumentOutOfRangeException(nameof(va), Strings.Get("Error_PeVaUnmapped", $"0x{va:X}"));
         return off;
     }
 
     public int RvaToFileOffset(uint rva)
     {
         if (!TryRvaToFileOffset(rva, out int off))
-            throw new ArgumentOutOfRangeException(nameof(rva), $"RVA 0x{rva:X} 無法對應至任何實體檔案節區");
+            throw new ArgumentOutOfRangeException(nameof(rva), Strings.Get("Error_PeRvaUnmapped", $"0x{rva:X}"));
         return off;
     }
 
@@ -279,13 +283,13 @@ public sealed class PeFile
     public PeSection AddSection(string name, uint virtualSize, uint characteristics, byte[]? rawData = null)
     {
         if (FindSection(name) >= 0)
-            throw new InvalidOperationException($"節區 {name} 已存在");
+            throw new InvalidOperationException(Strings.Get("Error_PeSectionExists", name));
 
         int newSectionIndex = _sections.Count;
         int newHeaderOffset = SectionTableOffset + newSectionIndex * 40;
 
         if (newHeaderOffset + 40 > SizeOfHeaders)
-            throw new InvalidOperationException("PE 檔頭空間不足，無法新增節區");
+            throw new InvalidOperationException(Strings.Get("Error_PeNoHeaderRoom"));
 
         uint alignedVirtualSize = AlignUp(virtualSize, SectionAlignment);
         uint alignedRawSize = rawData != null ? AlignUp((uint)rawData.Length, FileAlignment) : 0;
@@ -356,10 +360,36 @@ public sealed class PeFile
     /// <summary>
     /// 移除指定名稱之節區（供 HiRes .ckhr 節區還原使用）。
     /// </summary>
-    public bool RemoveSection(string name)
+    public bool RemoveSection(string name, int? truncateToLength = null)
     {
         int index = FindSection(name);
         if (index < 0) return false;
+
+        if (truncateToLength is int requestedLength)
+        {
+            if (requestedLength < 0 || requestedLength > _data.Length)
+                throw new ArgumentOutOfRangeException(nameof(truncateToLength));
+
+            // 截尾只能移除附加在原檔尾端的 raw payload／對齊 padding；不得切到任何仍保留
+            // 的節區。這是 .cktw 之類含機器碼 raw section 能精確反轉的必要保護。
+            foreach (PeSection section in _sections)
+            {
+                if (ReferenceEquals(section, _sections[index]) || section.SizeOfRawData == 0)
+                    continue;
+
+                ulong rawEnd = (ulong)section.PointerToRawData + section.SizeOfRawData;
+                if (rawEnd > (ulong)requestedLength)
+                    throw new InvalidOperationException(
+                        $"無法把 PE 截短至 {requestedLength} 位元組：仍保留的節區 {section.Name} raw data 結束於 {rawEnd}。"
+                    );
+            }
+
+            PeSection removed = _sections[index];
+            if (removed.SizeOfRawData > 0 && removed.PointerToRawData < (uint)requestedLength)
+                throw new InvalidOperationException(
+                    $"無法把 PE 截短至 {requestedLength} 位元組：節區 {removed.Name} 的 raw data 並非附加在原檔尾端。"
+                );
+        }
 
         // 將目標 Section Header (40 位元組) 清零
         int h = _sections[index].HeaderOffset;
@@ -392,6 +422,9 @@ public sealed class PeFile
             if (top > maxRvaTop) maxRvaTop = top;
         }
         BitConverter.TryWriteBytes(_data.AsSpan(SizeOfImageOffset, 4), maxRvaTop);
+
+        if (truncateToLength is int originalLength && originalLength != _data.Length)
+            Array.Resize(ref _data, originalLength);
 
         // 重新解析快取
         Parse();

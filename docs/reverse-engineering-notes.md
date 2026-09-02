@@ -1936,3 +1936,123 @@ This does not guess a loop bound and does not attempt to make all dead objects s
 uses an error/abort path already designed into the interpreter. Startup self-test checks the live
 `8B 08` instruction and the selected resume stub; live validation must still prove that frames and
 simulation resume after the bad script is aborted.
+
+## 引擎腳本執行鏈 — 按鍵不是機制，只是入口 (2026-09-02, ISSUE-068)
+
+**結論先講：`data/scdebug.xml` 的「按鍵 → 腳本」對照表只是把一段字串餵給引擎腳本
+編譯器的一種方式。編譯與執行本身完全不需要按鍵。在遊戲行程內直接呼叫這條鏈，
+效果與按下熱鍵逐指令等價，而引擎那 20 個硬編按鍵代號的上限隨之消失。**
+
+成因是實機症狀：20 個代號扣掉 9 個遊戲保留鍵（F1 說明、F2 存檔、F3 讀檔、F5 外交、
+F6 快速存檔、F7 選隊、F8 筆記、F9 快速讀檔、F10 主選單）與 5 個原版 scdebug 佔用
+（Add/Sub/Mul/Pause/Tab），只剩 4 個自由鍵；小鍵盤模式把 F1–F12 重導後有 13 個，
+但那 13 個對映到筆電沒有的實體小鍵盤。18 個作弊放不進去，放不進去的被靜默停用，
+遊戲中面板連按鈕都不會出現。
+
+### 入口：按鍵處理端的兩道門
+
+    0047D561  a1 cc c3 74 00     mov  eax, [0x0074C3CC]   ; "[system] DebugKeys"
+    0047D566  85 c0              test eax, eax
+    0047D568  0f 84 99 01 00 00  je   0x0047D707          ; 為 0 就整個不派送
+    0047D576  6a 10              push 0x10                ; VK_SHIFT
+    0047D578  ff 52 40           call [edx+0x40]          ; 按住就跳過
+    0047D58B  6a 12              push 0x12                ; VK_MENU  (Alt)
+    0047D5A0  6a 11              push 0x11                ; VK_CONTROL
+    0047D5AD  8b 44 24 58        mov  eax, [esp+0x58]     ; 虛擬鍵碼
+    0047D5B2  e8 99 a0 16 00     call 0x005E7650          ; <- 唯一呼叫者
+
+- `0x0074C3CC` 是設定變數 `DebugKeys`（註冊點 `0x006C030D`，名稱字串 `0x0074C79C`，
+  節區 `system`，磁碟上的初值是 **1**）。它是 scdebug 的總開關。
+- 這一段同時證實**修飾鍵是被「排除」而不是被「忽略」**：按住 Shift／Ctrl／Alt 時
+  整個派送被跳過。所以做不出 `Ctrl+F1` 這種組合鍵，不是因為派送不看修飾鍵，
+  而是因為按住任一修飾鍵就根本不會派送。（`Cheats.GameReservedKeys` 的註解原本說
+  「派送只比對虛擬鍵碼」，就結論而言一樣：組合鍵做不到。）
+
+### 派送：`0x005E7650  void __cdecl ScDebugDispatch(uint16_t vk)`
+
+在 `0x008AF108` 的 map 裡查 `vk`。節點佈局（由比對與取值兩處反推）：
+
+| 位移 | 內容 | 證據 |
+|---|---|---|
+| `+0x06` / `+0x0A` | 子節點指標 | `0x005E7671 mov eax,[eax+6]` / `0x005E7676 mov eax,[eax+0xa]` |
+| `+0x0E` | 鍵（short） | `0x005E7669 cmp word [eax+0xe], si` |
+| `+0x10` | **腳本原文 `char*`** | `0x005E773B mov edi,[eax+0x10]`，edi 隨即被當 `const char*` 推進編譯器 |
+
+載入端在 `0x00570805` 讀 `data/scdebug.xml`；id 屬性以一長串 strcmp 比對，
+`F1` 的立即數在 `0x005E685C`（`KeyMap` 改的就是這 12 個立即數）。
+
+### 尾段：編譯 → 執行 → 釋放（本工具重現的就是這一段）
+
+    005E773B  mov  edi,[eax+0x10]        ; 腳本原文
+    005E773E  lea  edx,[esp+0x10]        ; 第三個參數：呼叫端自己的 slot
+    005E7742  52                push edx
+    005E7743  68 b0 90 72 00    push 0x007290B0      ; 第二個參數 = 字面量 "void"
+    005E7748  57                push edi             ; 第一個參數 = 腳本原文
+    005E7749  c7 44 24 1c 00 00 00 00   mov dword [esp+0x1c], 0   ; 先把那個 slot 歸零
+    005E7751  e8 ea 8b ff ff    call 0x005E0340      ; 編譯，回傳物件或 0
+    005E7756  8b f0             mov  esi, eax
+    005E775D  75 20             jne  0x005E777F
+    ; --- 編譯失敗 ---
+    005E775F  a1 c8 a6 8a 00    mov  eax,[0x008AA6C8]
+    005E7764  8b 88 14 32 00 00 mov  ecx,[eax+0x3214]  ; 主控台物件
+    005E776B  68 6c ff 73 00    push 0x0073FF6C        ; "error in key-bound script: '%s'"
+    005E7771  e8 3a 98 e8 ff    call 0x00470FB0        ; printf(console, fmt, ...)
+    ; --- 編譯成功 ---
+    005E777F  8b 46 0e          mov  eax,[esi+0x0e]    ; latent?
+    005E7784  74 1e             je   0x005E77A4
+    005E7786  8b 15 40 5e 89 00 mov  edx,[0x00895E40]  ; 腳本 VM 排程器
+    005E778C  6a 64             push 0x64              ; 100
+    005E778E  6a 00             push 0
+    005E7790  6a 01             push 1
+    005E7792  56                push esi               ; 已編譯腳本
+    005E7793  6a 08             push 8
+    005E7795  52                push edx
+    005E7796  e8 d5 a5 ff ff    call 0x005E1D70        ; 排程執行（不在此處釋放）
+    ; --- 非 latent：同步執行後釋放 ---
+    005E77A4  56                push esi
+    005E77A5  e8 86 8c ff ff    call 0x005E0430        ; 執行
+    005E77AD  e8 ce 3c e3 ff    call 0x0041B480        ; 腳本擁有者單例
+    005E77B2  8b 10             mov  edx,[eax]
+    005E77B4  56                push esi
+    005E77B5  8b c8             mov  ecx, eax
+    005E77B7  ff 52 0c          call [edx+0x0c]        ; __thiscall Release(compiled)
+
+### 位址表（`src/CKPerf/script.cpp` 逐一驗證位元組簽章）
+
+| VA | 角色 | 原始位元組（前綴） |
+|---|---|---|
+| `0x005E0340` | `void* __cdecl Compile(const char* src, const char* signature, void* ctx)` | `81 EC A0 02 00 00 8D 44 24 40` |
+| `0x005E0430` | `void __cdecl Run(void* compiled)` | `56 8B 74 24 08 57 6A 52` |
+| `0x005E1D70` | `void __cdecl Schedule(sched, 8, compiled, 1, 0, 100)` | `8B 4C 24 18 8B 54 24 14 6A 00` |
+| `0x0041B480` | `void* __cdecl ScriptOwner()`，vtable`+0x0C` 是 Release | `A1 04 A5 76 00 33 C9 3B C1` |
+| `0x00470FB0` | `void __cdecl ConsolePrintf(void* console, const char* fmt, ...)` | `8B 4C 24 08 83 EC 14 56` |
+| `0x005E773E` | 派送 call site（釘住呼叫慣例） | `8D 54 24 10 52 68 B0 90 72 00 57` |
+| `0x007290B0` | 腳本簽章字面量 `"void"` | `76 6F 69 64 00` |
+| `0x008AA6C8` | → 物件，`+0x3214` 是主控台 | — |
+| `0x008AAB80` | → 遊戲主物件（`MousePtm` 也讀它） | — |
+| `0x00895E40` | → 腳本 VM 排程器 | — |
+| `0x0074C3CC` | `[system] DebugKeys`，初值 1 | — |
+| `0x0073FF6C` | `"error in key-bound script: '%s'"` | — |
+
+`0x005E0340` 共有 12 個呼叫點（`0x00552055`／`0x00552255`／`0x0055245C`／`0x00552666`／
+`0x005641F9`／`0x005650AC`／`0x00565357`／`0x00572EFA`／`0x005C2BF4`／`0x005E2E3B`／
+`0x005E757F`／`0x005E7751`），各自傳不同的簽章字串——例如 `0x005E757F` 傳
+`0x0073DDE0 = "str OUT, Obj this"`。這證明第二個參數就是「這段腳本的簽章宣告」，
+而 scdebug 用的 `"void"` 代表無參數、無回傳。
+
+### 順帶確認的兩件事
+
+- **`Place()` 有回傳值**。遊戲自己的 `data.pak\SUBAI\BARRACK_TRAIN.VS` 寫的是
+  `newunit = Place(cmdparam, Point(0,0), this.player);`，`ARENA_BEHAVIOR.VS` 同款。
+  所以修改器腳本裡的 `o = Place(cls, pt, CurPlayer())` 不是 ISSUE-017 那種
+  「拿 void 回傳值去指派」的殘留左值寫穿，寫法與原廠腳本一致。
+- **`Point(x, y)` 是引擎自己的建構子**，同樣有原廠腳本佐證。執行期路徑因此可以把
+  引擎算好的滑鼠地圖座標直接當字面值放進腳本，不必再寫回 `[[0x008AAB80]+0x20]`。
+
+### 這條路為什麼比「改寫 map 節點再呼叫 `0x005E7650`」好
+
+改寫節點的 `+0x10` 再呼叫派送，只需要一次 4-byte 寫入且完全復用引擎程式碼，
+看起來更省。但它要求 `SCDEBUG.XML` 內必須先存在一個保留的 channel 按鍵，
+等於把「作弊完全不碰 `data.pak`」讓掉。直接呼叫編譯鏈之後，作弊不再需要
+`SCDEBUG.XML`，`data.pak` 的作弊部分可以維持原版狀態，§2.1／§2.3 的可逆性負擔歸零。
+節點路線留在此處當備援方案記錄。

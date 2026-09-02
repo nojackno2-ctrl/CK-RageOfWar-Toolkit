@@ -1,3 +1,4 @@
+using CKToolkit.I18n;
 using System.Text;
 
 namespace CKToolkit.Core.Lang;
@@ -79,7 +80,7 @@ public sealed class ApfFont
         if (data.Length < 0x24 || data[0] != (byte)'A' || data[1] != (byte)'B'
             || data[2] != (byte)'C' || data[3] != (byte)'F')
         {
-            throw new InvalidDataException("不是 APF 字型：Magic 不符");
+            throw new InvalidDataException(Strings.Get("Error_ApfBadMagic"));
         }
 
         var font = new ApfFont();
@@ -94,7 +95,7 @@ public sealed class ApfFont
         font.Family = ReadCString(data, ref p);
         if (p != metricsOffset)
         {
-            throw new InvalidDataException("metrics 位移不符");
+            throw new InvalidDataException(Strings.Get("Error_ApfBadMetricsOffset"));
         }
 
         for (int i = 0; i < 20; i++)

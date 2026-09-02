@@ -1,4 +1,5 @@
-﻿using CKToolkit.Core.Common;
+using CKToolkit.I18n;
+using CKToolkit.Core.Common;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -66,10 +67,11 @@ public static class Tweaks
     /// 流失間隔調大，就能在地圖寫死的上限之上長期維持高人口；而收入是
     /// 「人口 × 生產率 ÷ 100」（0x502740），完全不看上限，人口越高收入越高。
     /// </summary>
-    private const string MapPlacedSettlementNote =
-        "注意：劇本與戰役地圖會把每座聚落的容量／人口上限直接存在地圖檔裡，"
-        + "開局就存在的聚落一律以地圖的值為準，這裡改的只會套用到遊戲中新建立的聚落。"
-        + "想在現有聚落衝人口，請改用「人口暴增」熱鍵＋「經濟」分頁的人口流失設定。";
+    private const string ScopedSettlementNote =
+        "單人模式下，非原版值或明確分流值會走 .cktw，每個收入週期套用至已存在與新建聚落；多人連線退回原版值。";
+
+    private const string StartGoldNote =
+        "此項仍只影響新建聚落：單人模式 .cktw hook 只在建構子收到 current-gold override -1 時執行；地圖或存檔傳入明確值時會繞過。多人連線退回原版值。";
 
     public static readonly IReadOnlyList<Tweak> All =
     [
@@ -95,31 +97,28 @@ public static class Tweaks
             "ExpFromArmyDivider", 10, 1, 1000),
 
         // --- 聚落 ---
-        // 這一組除了「每棟房屋人口加成」以外，全部都只是**地圖沒寫時才用的預設值**，
-        // 詳見下方 MapPlacedSettlementNote。想在戰役／劇本地圖上真的提高人口上限，
-        // 唯一有效的是 house_pop_bonus。
-        new AttrTweak("townhall_maxgold", GroupTown, "城鎮金錢容量（僅限新建聚落）",
+        new AttrTweak("townhall_maxgold", GroupTown, "城鎮金錢容量",
             "羅馬城鎮中心的金錢儲存上限，原版 100000。"
             + "熱鍵「金錢補滿」補到的是聚落當下的實際上限。"
-            + MapPlacedSettlementNote,
+            + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_maxgold", 100000, 0, 100000000),
-        new AttrTweak("townhall_maxfood", GroupTown, "城鎮食物容量（僅限新建聚落）",
-            "羅馬城鎮中心的食物儲存上限，原版 100000。" + MapPlacedSettlementNote,
+        new AttrTweak("townhall_maxfood", GroupTown, "城鎮食物容量",
+            "羅馬城鎮中心的食物儲存上限，原版 100000。" + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_maxfood", 100000, 0, 100000000),
         new AttrTweak("townhall_start_gold", GroupTown, "城鎮初始金錢（僅限新建聚落）",
-            "城鎮中心建立時的初始金錢，原版 2500。" + MapPlacedSettlementNote,
+            "城鎮中心建立時的初始金錢，原版 2500。" + StartGoldNote,
             Classes + "BASETOWNHALL.SC.XML", "settlement_gold", 2500, 0, 100000000),
-        new AttrTweak("townhall_max_population", GroupTown, "城鎮人口上限（僅限新建聚落）",
-            "單一城鎮的人口上限，原版 100。" + MapPlacedSettlementNote,
+        new AttrTweak("townhall_max_population", GroupTown, "城鎮人口上限",
+            "單一城鎮的人口上限，原版 100。" + ScopedSettlementNote,
             Classes + "BASETOWNHALL.SC.XML", "max_population", 100, 1, 100000),
-        new AttrTweak("village_max_population", GroupTown, "村莊人口上限（僅限新建聚落）",
-            "單一村莊的人口上限，原版 20。" + MapPlacedSettlementNote,
+        new AttrTweak("village_max_population", GroupTown, "村莊人口上限",
+            "單一村莊的人口上限，原版 20。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "max_population", 20, 1, 100000),
-        new AttrTweak("village_maxgold", GroupTown, "高盧村莊金錢容量（僅限新建聚落）",
-            "高盧村莊的金錢儲存上限，原版 5000。" + MapPlacedSettlementNote,
+        new AttrTweak("village_maxgold", GroupTown, "高盧村莊金錢容量",
+            "高盧村莊的金錢儲存上限，原版 5000。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "settlement_maxgold", 5000, 0, 100000000),
-        new AttrTweak("village_maxfood", GroupTown, "高盧村莊食物容量（僅限新建聚落）",
-            "高盧村莊的食物儲存上限，原版 5000。" + MapPlacedSettlementNote,
+        new AttrTweak("village_maxfood", GroupTown, "高盧村莊食物容量",
+            "高盧村莊的食物儲存上限，原版 5000。" + ScopedSettlementNote,
             Classes + "BASEVILLAGE.SC.XML", "settlement_maxfood", 5000, 0, 100000000),
         // 註：basehouse.sc.xml 的 house_pop_bonus（房屋替聚落加人口上限）看起來很誘人，
         // 但這款遊戲根本不能蓋房子——commands.xml 裡的建造指令只有 build_catapult 與
@@ -149,9 +148,6 @@ public static class Tweaks
             + "注意引擎每次至少削 1 點（0x50270C 寫死的下限），所以設 0 也停不下來，"
             + "要真的留住人口得靠上面的流失間隔。",
             "PopulationDecreasePercent", 10, 0, 100),
-        new IniTweak("wagon_build_time", GroupEconomy, "運輸車建造時間（毫秒）",
-            "原版 7000。",
-            "WagonBuildTime", 7000, 1, 10000000),
 
         // --- 生產與研究 ---
         new CommandDelayTweak("train_speed", GroupProduction, "單位生產速度倍率",
@@ -199,6 +195,16 @@ public static class Tweaks
 
     public static readonly IReadOnlyDictionary<string, Tweak> ById =
         All.ToDictionary(t => t.Id, StringComparer.Ordinal);
+
+    /// <summary>
+    /// 歷代版本曾支援但經逆向工程證實無效或已廢棄的 Tweak ID 清單。
+    /// 這些 ID 在舊設定檔中仍可能存在，必須被靜默忽略以維持向後相容性，
+    /// 避免升級後使用者每次 apply 都失敗。
+    /// wagon_build_time：VXCONST 的 WagonBuildTime 在 EXE 與 VS 腳本中皆無讀取；
+    /// create-mule 指令為 immediate 立即生成，且聚落建置路徑亦無 timer（ISSUE-050）。
+    /// </summary>
+    public static readonly IReadOnlySet<string> Retired =
+        new HashSet<string>(StringComparer.Ordinal) { "wagon_build_time" };
 
     /// <summary>依定義順序分組。</summary>
     public static IReadOnlyList<(string Group, IReadOnlyList<Tweak> Items)> Groups()
@@ -274,7 +280,7 @@ public sealed class AttrTweak : Tweak
         }, 1);
 
         if (hits != 1)
-            throw new InvalidOperationException($"在 {_path} 找不到屬性 {_attribute}");
+            throw new InvalidOperationException(Strings.Get("Error_TweakAttributeNotFound", _path, _attribute));
 
         pak.WriteText(_path, updated);
         return 1;
@@ -307,7 +313,7 @@ public sealed class IniTweak : Tweak
         }, 1);
 
         if (hits != 1)
-            throw new InvalidOperationException($"在 vxConst.ini 找不到常數 {_key}");
+            throw new InvalidOperationException(Strings.Get("Error_TweakConstNotFound", _key));
 
         pak.WriteText(Tweaks.VxConst, updated);
         return 1;

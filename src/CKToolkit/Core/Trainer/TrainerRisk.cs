@@ -24,12 +24,28 @@ public static class TrainerRisk
         decimal Tweak(string id, decimal fallback) =>
             config.Tweaks.TryGetValue(id, out decimal value) ? value : fallback;
 
+        decimal[] ScopedValues(string id, decimal fallback)
+        {
+            decimal legacy = Tweak(id, fallback);
+            IReadOnlyList<string> scopes = ScopedTweakPatch.GetSupportedScopes(id);
+            if (scopes.Count == 0) return [legacy];
+
+            config.ScopedTweaks.TryGetValue(id, out Dictionary<string, decimal>? explicitValues);
+            return scopes.Select(scope =>
+                    explicitValues is not null && explicitValues.TryGetValue(scope, out decimal value)
+                        ? value
+                        : legacy)
+                .ToArray();
+        }
+
         decimal army = Tweak("hero_max_army", 50);
-        decimal growthRate = Tweak("pop_growth_rate", 1);
-        decimal growthInterval = Math.Max(100, Tweak("pop_growth_interval", 20000));
-        decimal growthPressure = growthRate * 20000m / growthInterval;
-        decimal trainSpeed = Tweak("train_speed", 1);
-        decimal decreaseInterval = Tweak("pop_decrease_interval", 4000);
+        decimal[] growthRates = ScopedValues("pop_growth_rate", 1);
+        decimal[] growthIntervals = ScopedValues("pop_growth_interval", 20000);
+        decimal growthPressure = growthRates
+            .Zip(growthIntervals, (rate, interval) => rate * 20000m / Math.Max(100, interval))
+            .Max();
+        decimal trainSpeed = ScopedValues("train_speed", 1).Max();
+        decimal decreaseInterval = ScopedValues("pop_decrease_interval", 4000).Max();
 
         long populationBoost = CheatNumber(config, "population_boost", "amount");
         long spawnCount = CheatNumber(config, Cheats.SpawnUnitId, "count");
