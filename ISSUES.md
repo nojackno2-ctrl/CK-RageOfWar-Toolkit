@@ -29,6 +29,7 @@
 
 | Issue 編號 | 問題標題 | 狀態 | 觸發／實機測試方式 | 預期結果 / 驗收標準 |
 |---|---|:---:|---|---|
+| [ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) | **修改器改用執行期腳本通道，徹底繞開引擎 20 個硬編按鍵的上限** | ⏳ 待實測 | ①修改器頁「啟動遊戲」，看最新的 `ckperf-*.log`（`%LocalAppData%\CKToolkit\stability`）是否出現 `script channel: entry points verified and self-test passed` 與 `listening on \\.\pipe\ckperf-script-<pid>`。②進入單人戰役後開「遊戲中面板」，逐一點擊每一顆按鈕。③把地圖捲到目標位於畫面中央，游標停在目標上再點「在滑鼠位置生成單位」。④退到主選單再點任一按鈕。⑤改從 Steam 開遊戲，再開面板。 | ①兩行都出現；簽章不符時要有明確的停用原因而不是靜默。②面板列出全部 18 顆按鈕，狀態列顯示「已連線（腳本通道，全部作弊可用）」，每顆都出現 `[修改器] …` 回饋且數值確實改變。③單位生成在畫面中央而非面板邊緣，面板顯示「已生成於 (x, y)」。④回報「尚未進入對局」且遊戲不當機。⑤面板自動掛載並同樣可用。⑥全程結束後 `data.pak` 的 `SCDEBUG.XML` 與 `verify` 結果不因為使用面板而改變。 |
 | [ISSUE-004](#issue-004-第三方自製語言包匯出與匯入上手機制) | **第三方自製語言包匯出與匯入上手機制** | ⏳ 待實測 | 於語言分頁點擊「匯出翻譯範本」，修改一筆字串後透過「匯入語言包」匯入。 | 正確識別新語言包、安裝至 `local.pak` 並在遊戲中顯示。 |
 | [ISSUE-017](#issue-017-腳本-vm-指派運算子用殘留左值寫穿記憶體本場致命) | **腳本 VM 指派運算子用殘留左值寫穿記憶體（本場致命）** | ⏳ 待實測 | 再次把物件數推到約 3.5 萬，觀察腳本指派運算子處置。 | 8-site 與 return-code-2 自測通過；有 REPAIRED、沒有 `0x005D98BF RUNAWAY`，遊戲繼續正常操作。 |
 | [ISSUE-020](#issue-020-cli-run-的執行配置清單沒有寫在設定的輸出路徑) | **CLI `run` 的執行配置清單沒有寫在設定的輸出路徑** | ⏳ 待實測 | 用 CLI `run` 指定自訂輸出資料夾啟動遊戲。 | `ckrun-config.txt` 與 `ckperf-*.log`、`ckcrash-*.txt` 完整落在同一個資料夾。 |
@@ -175,6 +176,62 @@
 
 ---
 
+### ISSUE-068: 引擎只有 20 個硬編按鍵，18 個作弊塞不下而被靜默停用，修改器實際上改不到遊戲
+
+- **問題編號**: `ISSUE-068`
+- **發現日期**: 2026-09-02
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - 使用者實測回報：「根本沒鍵可按／遊戲中面板上沒有那些按鈕」。修改器等於改不到遊戲。
+  - 直接讀取使用者的 Steam 安裝驗證，**檔案修補這一段完全正常**：`data.pak\SCDEBUG.XML`（8131 bytes）確實含 18 個作弊、`CKTRAINER.TXT` 標記完整、`Celtic kings.exe` 確實帶有 `.cktw`（`0x004CB000`）與 `.ckhr`（`0x004CD000`）節區、`update.pak` 與 `PATCH1.PAK` 都不含 `SCDEBUG.XML`（無覆蓋問題）、腳本用到的每一個引擎函式（`Place`、`Settlement::SetGold`、`Unit::AddBonus`、`Obj::AddItem`、`Wagon::LoadFood`、`Settlement::AddToPopulation`…）都確實註冊在 EXE 內。壞的是「觸發」。
+  - 根因是引擎只認 20 個硬編 scdebug 按鍵代號：9 個被遊戲用掉（F1/F2/F3/F5/F6/F7/F8/F9/F10）、5 個被原版 scdebug 綁走（Add/Sub/Mul/Pause/Tab），只剩 4 個自由鍵；小鍵盤模式雖有 13 個，但對映到的是筆電沒有的實體小鍵盤。使用者設定檔（`numpadKeys: true`、`keepVanilla: true`）中因此有 5 個作弊是 `enabled: false`，而 `InGamePanelForm` 只替「已啟用且綁得到鍵」的作弊建按鈕 —— 按鈕就這樣消失了。
+  - ISSUE-054／ISSUE-059／ISSUE-062 都是在這個 20 鍵預算裡搬東西，搬不出更多空間；ISSUE-054 當時列出的第三條出路（直接呼叫腳本編譯器）才是真正的解，本 issue 把它做完。
+- **逆向證據**（完整位址表與反組譯見 `docs/reverse-engineering-notes.md`「引擎腳本執行鏈」）:
+  - 按鍵入口 `0x0047D560` 先檢查 `[0x0074C3CC]`（設定變數 `[system] DebugKeys`，註冊於 `0x006C030D`，初值 1），再檢查 Shift(`0x10`)／Alt(`0x12`)／Ctrl(`0x11`)，任一按住就整個不派送，最後 `0x0047D5B2` 呼叫派送函式 —— 這是 `0x005E7650` 的唯一呼叫者。
+  - 派送函式在 `0x008AF108` 的 map 查鍵；節點 `+0x0E` 是鍵（short）、`+0x10` 是腳本原文 `char*`（`0x005E773B mov edi,[eax+0x10]` 之後直接當 `const char*` 用）。
+  - 尾段才是真正做事的部分：`0x005E0340` 編譯（`__cdecl (src, signature, ctx)`，signature 是字面量 `"void"` @ `0x007290B0`，ctx 是呼叫端在 `0x005E7749` 先歸零的 slot），失敗回 0 並經 `0x00470FB0` 印 `error in key-bound script: '%s'`；成功則依 `compiled+0x0E` 決定走 `0x005E1D70` 排程或 `0x005E0430` 同步執行＋`0x0041B480` vtable`+0x0C` 釋放。
+  - 也就是說：**按鍵只是把字串餵進 `0x005E0340` 的其中一種方式**，編譯與執行本身不需要按鍵。
+  - 順帶確認 `Place()` 確有回傳值（原廠 `SUBAI\BARRACK_TRAIN.VS`：`newunit = Place(cmdparam, Point(0,0), this.player);`），修改器腳本的 `o = Place(...)` 不是 ISSUE-017 那種殘留左值寫穿；`Point(x, y)` 亦為引擎自有建構子。
+- **修復方案與實作細節**:
+  - **`src/CKPerf/script.cpp`（新增）**：在遊戲行程內重現派送尾段。逐一比對七個進入點的原始位元組簽章（含派送 call site 與 `"void"` 字面量），任一不符就永久停用整條通道並寫進 `ckperf.log`；啟用前先跑 `ScriptChannelSelfTest()`（編譯 `int i; i = 1;` 後**不執行**直接釋放）；派送前確認遊戲主物件、主控台與腳本 VM 排程器都解得出合理指標，否則 fail-closed 回「不在對局中」；編譯與執行都包在 SEH 內，引擎故障回報成訊息而不是讓遊戲消失。
+  - **`src/CKPerf/frames.cpp`**：`SetDIBitsToDevice` 的 IAT hook 是行程內唯一保證在引擎主執行緒的呼叫點，抽取點掛在那裡（blit 之後，不延遲已經送出的那一幀）。安裝條件放寬為 `frameTiming || scriptChannel`，另加 `g_timingEnabled` 確保「只為通道安裝 hook」不會憑空產生 frame 統計記錄。
+  - **`src/CKPerf/common.cpp` / `dllmain.cpp` / `ckperf.h`**：新增 `scriptchannel` 與 `scripttoken` 兩個選項（權杖長度不對就連通道都不開）、`ScriptStatus` 跨行程狀態碼、安裝／卸載順序。權杖只記錄「有沒有收到」，永不寫進記錄檔。
+  - **`Core/Runtime/ScriptChannel.cs`（新增）**：具名管線客戶端 `\\.\pipe\ckperf-script-<pid>`，逐次連線、預期內失敗一律回 `Result`、訊息全走 I18n。
+  - **`Core/Runtime/ScriptChannelSession.cs`（新增）**：注入端產生權杖、面板端使用，只活在記憶體；行程編號對不上就拒絕，絕不拿舊權杖試新行程。
+  - **`Core/Trainer/Cheats.cs`**：新增 `BuildRuntimeScript` 與 `ResolveParameters`。**兩條路徑共用同一個 `Cheat.Script` builder**，不新增任何腳本邏輯；`BuildScDebug` 改為呼叫同一個 `ResolveParameters`，「cycle 借用 spawn 的清單」這條規則從此只有一份實作。游標類作弊在執行期路徑改為把引擎算好的座標當**字面值**寫進腳本（`Point(x, y)`），因此不再需要把座標寫回記憶體。
+  - **`Gui/InGamePanelForm.cs`**：面板現在列出**全部 18 個作弊**，不再以「已啟用」或「綁得到鍵」過濾。點擊優先走腳本通道，通道不可用才退回代送按鍵；狀態列改為三態（未連線／已連線僅送鍵／已連線腳本通道）。探測與送出一律在執行緒集區上等，不阻塞訊息幫浦（ISSUE-059 的教訓）。
+  - **`Gui/MainForm.cs`**：修改器開著時啟動遊戲一定注入；效能頁保護關閉時走 `CreateScriptChannelOnlyOptions()`（只開通道，不替使用者打開任何他關掉的保護）。開啟面板時若遊戲已在跑但沒有通道（典型：直接從 Steam 開），就地掛載補上，失敗只記錄不擋面板。
+  - **`Cli/CliHost.Trainer.cs`**：新增 `trainer exec --cheat <id> [--param k=v]… | --script <VS>`，支援 `--json`，供 AI 代理程式直接改「正在跑的這一場」。遊戲沒在跑或這一場沒有通道一律 fail-closed。
+  - **`AGENTS.md` §2.9** 改寫為兩項明列例外，並把簽章驗證、上線自證、必須在對局中、主執行緒、零磁碟、權杖六條紀律逐條寫入；`docs/reverse-engineering-notes.md` 新增完整位址表。
+- **驗證狀態與實測指引**:
+  - SelfTest 新增第 46 組 `RuntimeScriptChannel`：18 個作弊的執行期腳本與 `SCDEBUG.XML` 內容**逐字相同**、腳本為單行且無行註解、游標座標代入只換掉取點呼叫、權杖與工作階段 fail-closed、注入選項字串、面板在零啟用作弊時仍列出全部 18 顆按鈕、以及與 `ckperf.h` 共用的協定常數。
+  - `ckperf.dll` 以 MSVC Win32 Release 重建成功；`dotnet build CKToolkit.sln -c Release` 0 warning／0 error；完整 SelfTest 全綠、0 NG。
+  - **以上全部是本機／合成證據。** 通道是否真的在引擎裡跑起來、18 顆按鈕是否真的都生效，必須依第 2 節的實測步驟在真實遊戲確認後才能改為 ✅。
+
+---
+
+### ISSUE-067: Core 與 Cli 有 92 處硬編繁體中文錯誤訊息，英文與簡中使用者會看到繁中
+
+- **問題編號**: `ISSUE-067`
+- **發現日期**: 2026-09-01
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **問題現象**:
+  - `Core/` 與 `Cli/` 共 92 處 `Result.Fail(...)` 與 `throw new ...Exception(...)` 直接寫死繁體中文，完全繞過 I18n，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
+  - 這些訊息會經由 `PatchPipeline` 轉成 `Result.Fail` 或由 CLI 的最外層例外邊界直達使用者。英文與简体中文使用者遇到損毀的 pak／PE、格式錯誤的語言包、遊戲未啟動、等待逾時等情況時，一律看到繁體中文。
+  - 分布：`ScopedTweakPatch.cs` 25、`LanguagePack.cs` 19、`PeFile.cs` 10、`HmmPak.cs` 9、`GameRunner.cs` 9、`PackLoader.cs` 4，其餘 16 處散在 11 個檔案。另有 `Gui/ProfilerPage.cs` 一處同類問題（輸出資料夾建立失敗的記錄訊息）。
+- **修復與證據**:
+  - 分五批處理，每批完成後皆執行建置與完整 SelfTest 才進入下一批。
+  - 依可觸發性分流：使用者正常操作可觸發者（檔案被第三方改過、語言包格式錯、pak／PE 損毀、遊戲未啟動、逾時，以及 §2「對不上就拒絕」整類拒絕訊息）一律走 I18n；僅在本工具自身邏輯出錯時才觸發的內部不變式改為帶 `Internal:` 前綴的英文，不佔用翻譯資源。
+  - 改為英文的四處：`.cktw helper 超出保留空間`、`重複的 x86 label`、`找不到 x86 label`（皆為 `.cktw` 內建 x86 組譯器的不變式）、以及 `PatchPipeline` 的模組重複註冊。
+  - 92 個呼叫點收斂為 76 個字串鍵：12 個「缺少必要欄位」合併為單一參數化鍵 `Error_LangPackMissingField`，4 個「X 原始指令不符，拒絕建立 .cktw」合併為 `Error_CktwOriginalMismatch`，其餘重複句型一併收斂。
+  - 十六進位參數（如 `0x{pos:X}`）改為在 C# 端先格式化再傳入，字串鍵維持單純的 `{0} != {1}`，避免把 C# 格式規格洩進翻譯檔。
+  - 三語字串 740 → 817 鍵（含 `Gui_Profiler_OutputDirFallback`），鍵集 100% 一致、佔位符數量與索引三語一致。
+  - 全庫掃描確認原始 92 處已歸零。Debug／Release 建置 0 warning / 0 error，SelfTest 1014 個斷言全綠，CLI `status` / `lang list` 煙霧測試 `ok:true`。
+- **驗證邊界**:
+  - SelfTest 既有的 I18n 一致性群組會持續守住三語鍵集與佔位符一致性，但**沒有**針對這 76 個新鍵的實際觸發路徑做斷言——多數需要刻意損毀遊戲檔案或語言包才會觸發。因此實機驗收時應至少在非繁中語系下觸發一到兩條錯誤路徑，確認顯示語言正確。
+
+---
+
 ### ISSUE-066: 修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值
 
 - **問題編號**: `ISSUE-066`
@@ -268,6 +325,9 @@
   - SelfTest 新增測試群組永久鎖定：預設鍵合法性、零遊戲保留鍵、模式內唯一性、`FreeKeys` 為 4/13、13 個小鍵盤預設啟用彼此不撞、`CursorPositionCheats` 的鍵必為自由鍵、以及 18 個作弊全開時 `BuildScDebug` 在 keepVanilla 關閉下不丟例外、開啟下必丟例外。
   - 既有設定檔不會只被停用：`ToolkitConfig` 的遷移改名為 `ResolveConflictingTrainerBindings`，採兩遍處理——第一遍記下沒有衝突的已啟用綁定佔走的鍵，第二遍對衝突綁定先嘗試改綁回該作弊「目前」的預設鍵，預設鍵同樣不可用或已被別人佔走時才停用。絕不搶走其他綁定已佔用的鍵，也絕不指派使用者從未選過的任意鍵。
   - 實機設定檔驗證：使用者原設定（numpadKeys=true、keepVanilla=true）載入後 `spawn_unit` 由 `Sub` 自動改綁為 `Backspace` 並維持啟用，遊戲中面板因此重新取得游標生成按鈕（AGENTS.md §2.9）；其餘 5 項（cycle_unit/Add、spawn_item/Mul、cycle_item/Del、set_selected_level/Pause、game_speed/Ins）在保留原版下確實無鍵可用而停用，這是引擎 13 鍵上限的必然結果，不是缺陷。
+- **後續（2026-09-02，ISSUE-068 已取代本項的實用價值）**:
+  - 本 issue 的結論「13 鍵是引擎硬上限，塞不下是必然」在**按鍵路徑上仍然成立**，但按鍵已經不再是修改器唯一的觸發方式。[ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) 讓遊戲中面板直接把腳本送進引擎的編譯器，18 個作弊全部可用且沒有任何按鍵預算。
+  - 因此**不要再回頭重排預設按鍵表來「擠出」更多作弊**。按鍵表現在的職責只剩「想用鍵盤的人可以綁」，本 issue 建立的不變式（不得落在 `GameReservedKeys`、模式內唯一、沒有合法鍵就留空）繼續有效，但綁不到鍵不再等於作弊不可用。
   - 三語新增 `Migration_TrainerReboundConflictingKeys` 與 `Migration_TrainerKeepVanillaHint`（735→737 鍵，parity 0/0）。停用提示只在「保留原版功能」確實擋掉鍵時才附加，keepVanilla 已關閉時不會給出錯誤建議。
   - 連帶修復本次重排引進的回歸：`SetKeyCell` 對空預設鍵寫入的是空字串而非 null，而 `TrainerPage.SaveConfig` 的判斷是 `if (key is null)`，導致原版按鍵模式下任何儲存／套用都會在第一個空鍵列丟出 `Gui_Trainer_InvalidKey`，即使該列已停用。已改為 `string.IsNullOrEmpty(key)`。此回歸是在跑完整 SelfTest 時才暴露出來的。
   - SelfTest 第 44 組（18 個斷言）鎖定按鍵表不變式，另於 ToolkitConfig 遷移測試新增 8 個斷言涵蓋改綁、預設鍵被佔用時讓位、關閉保留原版後可改綁，以及提示訊息的出現與不出現條件。Debug／Release 建置 0 warning / 0 error，SelfTest 983 個斷言全綠。
@@ -531,6 +591,7 @@
     - 整合於 `TrainerPage.cs`（「遊戲中面板」按鈕）與 `MainForm.cs`（開關控制與非模態顯示）。
     - 新增 SelfTest Group 42 `InGamePanelAndKeyPosting` 測試鍵碼映射、lParam 編碼與 Panel 表單建構。
   - 待實機測試：在遊戲執行中開啟面板，點擊作弊按鈕驗收作弊觸發與焦點狀態。
+- **後續（2026-09-02）**: 本節列出的**路線 3（直接呼叫腳本編譯器 `0x005E0340`，完全繞開 scdebug.xml 與 20 鍵上限）已於 [ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) 實作完成**。路線 1（代送按鍵）保留為通道不可用時的備援，本節的實機驗證結論（不需要搶焦點、目標視窗類別 `OSWndClass`）仍然有效且仍在使用。
 
 ---
 

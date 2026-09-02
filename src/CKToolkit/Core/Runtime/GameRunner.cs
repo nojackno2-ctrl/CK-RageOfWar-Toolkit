@@ -37,6 +37,20 @@ public sealed class DiagnosticsOptions
     public int TelemetryMs { get; set; } = 1000;
 
     /// <summary>
+    /// 執行期腳本通道（ISSUE-068）。開啟後 <c>ckperf.dll</c> 會驗證引擎的腳本編譯鏈、
+    /// 通過自測後開一條具名管線，讓遊戲中面板不必再依賴引擎那 20 個硬編按鍵。
+    /// 預設關閉：只有修改器頁真的要用面板時才開。
+    /// </summary>
+    public bool ScriptChannel { get; set; }
+
+    /// <summary>
+    /// 通道的共用權杖。原生端只在「有要求通道」且「權杖長度正確」時才啟用，
+    /// 所以留空等同於通道關閉——不會出現一條誰都能連的管線。
+    /// 由 <see cref="Runtime.ScriptChannel.NewToken"/> 每次注入現產。
+    /// </summary>
+    public string? ScriptToken { get; set; }
+
+    /// <summary>
     /// 診斷輸出資料夾。<c>null</c> 代表沿用 <see cref="GameRunner.DiagnosticsDirectory"/>。
     ///
     /// 存在的理由是整合：注入層以前一律寫 LocalAppData 底下的 diag 資料夾，
@@ -45,12 +59,23 @@ public sealed class DiagnosticsOptions
     /// </summary>
     public string? OutputDirectory { get; set; }
 
-    internal string ToOptionString() =>
-        $"crash={(CrashReports ? 1 : 0)},dump={(MiniDumps ? 1 : 0)}," +
-        $"telemetry={(Telemetry ? 1 : 0)},frames={(FrameTiming ? 1 : 0)}," +
-        $"guard={(NullGuard ? 1 : 0)},repair={(NullStoreRepair ? 1 : 0)}," +
-        $"arrayguard={(ArrayGuard ? 1 : 0)}," +
-        $"maxreports={MaxReports},telemetryms={TelemetryMs}";
+    internal string ToOptionString()
+    {
+        // 權杖長度不對就連 scriptchannel 都不寫出去，讓「開了通道卻沒有共用祕密」
+        // 這種狀態在來源端就不可能發生（原生端另有一道同樣的檢查）。
+        bool channel = ScriptChannel && Runtime.ScriptChannel.IsValidToken(ScriptToken);
+
+        string options =
+            $"crash={(CrashReports ? 1 : 0)},dump={(MiniDumps ? 1 : 0)}," +
+            $"telemetry={(Telemetry ? 1 : 0)},frames={(FrameTiming ? 1 : 0)}," +
+            $"guard={(NullGuard ? 1 : 0)},repair={(NullStoreRepair ? 1 : 0)}," +
+            $"arrayguard={(ArrayGuard ? 1 : 0)}," +
+            $"maxreports={MaxReports},telemetryms={TelemetryMs}";
+
+        return channel
+            ? options + $",scriptchannel=1,scripttoken={ScriptToken}"
+            : options;
+    }
 }
 
 public sealed record RunOutcome(uint ProcessId, string OutputDirectory, string Detail, bool InjectedBeforeEntryPoint);
@@ -83,7 +108,7 @@ public static class GameRunner
     /// 把產品頁面的兩層選擇轉成 ckperf 的底層開關。日常模式不做效能取樣、不寫 dump；
     /// 只有實驗性層才需要 VEH crash handler，因為通用修復是由它承接例外。
     /// </summary>
-    public static DiagnosticsOptions CreateStabilityOptions(PerfConfig perf)
+    public static DiagnosticsOptions CreateStabilityOptions(PerfConfig perf, bool scriptChannel = false)
     {
         bool enabled = perf.StabilityProtection;
         bool experimental = enabled && perf.ExperimentalStability;
@@ -99,8 +124,34 @@ public static class GameRunner
             MaxReports = 5,
             TelemetryMs = 5000,
             OutputDirectory = StabilityDirectory,
+            ScriptChannel = scriptChannel,
+            ScriptToken = scriptChannel ? ScriptChannelSession.Begin() : null,
         };
     }
+
+    /// <summary>
+    /// 只為了執行期腳本通道而注入：所有 guard、取樣、故障報告全部關閉。
+    ///
+    /// 使用者可以把效能頁的執行期保護整個關掉，但修改器的遊戲中面板仍然需要
+    /// <c>ckperf.dll</c> 在行程裡才有通道可用（ISSUE-068）。這條路徑讓「不要保護、
+    /// 但要能改遊戲」成立，而且不偷偷替使用者打開任何他關掉的東西。
+    /// </summary>
+    public static DiagnosticsOptions CreateScriptChannelOnlyOptions() =>
+        new()
+        {
+            CrashReports = false,
+            MiniDumps = false,
+            Telemetry = false,
+            FrameTiming = false,
+            NullGuard = false,
+            ArrayGuard = false,
+            NullStoreRepair = false,
+            MaxReports = 0,
+            TelemetryMs = 5000,
+            OutputDirectory = StabilityDirectory,
+            ScriptChannel = true,
+            ScriptToken = ScriptChannelSession.Begin(),
+        };
 
     /// <summary>完全不注入的普通啟動，供使用者明確關閉所有執行期保護時使用。</summary>
     public static Result<RunOutcome> LaunchPlain(string gameDir)
@@ -168,6 +219,8 @@ public static class GameRunner
         var r = ProcessInjector.LaunchAndInject(exe, gameDir, dll.Value!, env, log);
         if (r.ProcessId == 0)
             return Result<RunOutcome>.Fail(r.Detail);
+
+        if (options.ScriptChannel) ScriptChannelSession.Attached(r.ProcessId);
 
         var warnings = new List<string>();
         if (!r.InjectedBeforeEntryPoint)
@@ -337,6 +390,8 @@ public static class GameRunner
         var r = ProcessInjector.AttachAndInject(pid, dll.Value!, log);
         if (r.ProcessId == 0)
             return Result<RunOutcome>.Fail(r.Detail);
+
+        if (options.ScriptChannel) ScriptChannelSession.Attached(r.ProcessId);
 
         return Result<RunOutcome>.Ok(
             new RunOutcome(r.ProcessId, outDir, r.Detail, InjectedBeforeEntryPoint: false),

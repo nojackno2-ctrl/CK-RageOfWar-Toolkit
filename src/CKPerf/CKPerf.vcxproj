@@ -94,6 +94,7 @@
     <ClCompile Include="guard.cpp" />
     <ClCompile Include="hires.cpp" />
     <ClCompile Include="nullstore.cpp" />
+    <ClCompile Include="script.cpp" />
     <ClCompile Include="telemetry.cpp" />
     <ClCompile Include="vmlvalue.cpp" />
     <ClCompile Include="dllmain.cpp" />

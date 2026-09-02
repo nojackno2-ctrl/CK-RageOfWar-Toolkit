@@ -13,9 +13,23 @@ namespace CKToolkit.Gui;
 /// <summary>
 /// 遊戲中修改器面板（置頂輔助視窗，AGENTS.md §1 輔助視窗例外）。
 ///
-/// 引擎只認 20 個硬編按鍵 id 且不看修飾鍵，筆電無小鍵盤時難以操作。
-/// 本面板作為遙控器，點按鈕以 Win32 訊息（PostMessage）把按鍵代送給遊戲視窗；
-/// 不改任何設定、不寫任何檔案、由主視窗開關、關掉後不留任何常駐。
+/// <para><b>兩條觸發路徑</b></para>
+///
+/// <list type="number">
+///   <item>
+///     <b>執行期腳本通道（主要，ISSUE-068）</b>：點按鈕就把該作弊的 VS 腳本原文直接送進
+///     遊戲，由引擎自己的編譯器編譯並在主執行緒執行（見 <c>src/CKPerf/script.cpp</c>）。
+///     這條路完全不經過按鍵，所以引擎那 20 個硬編按鍵代號的上限、遊戲保留鍵、原版
+///     scdebug 佔用鍵通通不再是限制——18 個作弊全部都能列在面板上並且都能按。
+///   </item>
+///   <item>
+///     <b>代送按鍵（備援）</b>：通道不可用時（沒注入 <c>ckperf.dll</c>、或簽章對不上而
+///     被停用），退回原本的 <c>PostMessage</c> 送鍵。這條路只服務「真的有綁到鍵」的作弊，
+///     也就是回到 ISSUE-068 之前的能力範圍。
+///   </item>
+/// </list>
+///
+/// 兩條路都不改任何設定、不寫任何檔案，由主視窗開關、關掉後不留任何常駐。
 /// </summary>
 public sealed class InGamePanelForm : Form
 {
@@ -50,6 +64,24 @@ public sealed class InGamePanelForm : Form
     private string? _memProblem;
     private IntPtr _hwnd = IntPtr.Zero;
 
+    /// <summary>作弊參數解析所需的原始選單，與 <c>BuildScDebug</c> 用的是同一份規則。</summary>
+    private readonly List<CheatSelection> _selections;
+
+    /// <summary>見 <see cref="Cheats.PlayerExpression"/>；建構時固定，執行期不變。</summary>
+    private readonly string _playerExpression;
+
+    /// <summary>目前這一場的腳本通道客戶端；通道不可用時為 null。</summary>
+    private ScriptChannel? _channel;
+
+    /// <summary>最後一次探測的結果，決定按鈕走通道還是走送鍵。</summary>
+    private bool _channelReady;
+
+    /// <summary><see cref="_channel"/> 是為哪個行程建立的；行程換了就要重建。</summary>
+    private uint _channelPid;
+
+    /// <summary>目前有沒有一個探測在飛（避免每秒疊一個）。</summary>
+    private bool _probing;
+
     // 測試專用內部接縫（避免測試時操作真實滑鼠或行程記憶體）
     internal Func<Point>? GetCursorPositionSeam;
     internal Action<Point>? SetCursorPositionSeam;
@@ -58,7 +90,9 @@ public sealed class InGamePanelForm : Form
     internal Func<IntPtr, uint, bool>? PostKeySeam;
     internal Func<IntPtr, IntPtr, (bool success, GameMemory.MapPoint point)>? ReadMousePointSeam;
     internal Func<IntPtr, IntPtr, GameMemory.MapPoint, bool>? WriteMousePointSeam;
+    internal Func<string, ScriptRunOutcome>? RunScriptSeam;
     internal bool IsSpawningActive => _isSpawning;
+    internal bool IsScriptChannelReady => _channelReady;
 
     protected override CreateParams CreateParams
     {
@@ -101,30 +135,52 @@ public sealed class InGamePanelForm : Form
         _buttons.Padding = new Padding(0);
         _buttons.Margin = new Padding(0);
 
-        _hasCursorCheats = config.Cheats.Any(
-            c => c.Enabled && Cheats.CursorPositionCheats.Contains(c.Id));
+        _playerExpression = Cheats.PlayerExpression(config.PlayerMode, config.FixedPlayer);
+
+        // 執行期通道不看「有沒有勾選啟用」——那個勾選的意思是「要不要把它寫進
+        // SCDEBUG.XML 佔一個按鍵」，跟「能不能從面板按一下」是兩回事。面板列出全部
+        // 作弊，這正是 ISSUE-068 要解決的「面板上沒有那些按鈕」。
+        _selections = config.Cheats
+            .Where(c => Cheats.ById.ContainsKey(c.Id))
+            .Select(c => new CheatSelection
+            {
+                Id = c.Id,
+                Key = c.Key,
+                Parameters = c.Parameters.ToDictionary(
+                    p => p.Key, p => (object)p.Value, StringComparer.Ordinal),
+            })
+            .ToList();
+
+        // 設定檔沒列到的作弊（新版新增、或使用者從未動過）也要能按，一律吃預設參數。
+        foreach (var known in Cheats.All)
+        {
+            if (_selections.All(s => s.Id != known.Id))
+                _selections.Add(new CheatSelection { Id = known.Id });
+        }
+
+        _hasCursorCheats = _selections.Any(s => Cheats.CursorPositionCheats.Contains(s.Id));
 
         int buttonCount = 0;
-        foreach (var c in config.Cheats)
+        foreach (var selection in _selections)
         {
-            if (!c.Enabled) continue;
-            if (!Cheats.ById.TryGetValue(c.Id, out var cheatDef)) continue;
+            if (!Cheats.ById.TryGetValue(selection.Id, out var cheatDef)) continue;
 
-            string id = string.IsNullOrWhiteSpace(c.Key)
+            string id = string.IsNullOrWhiteSpace(selection.Key)
                 ? cheatDef.DefaultKeyFor(config.NumpadKeys)
-                : c.Key;
+                : selection.Key;
 
+            // 綁不到鍵不再是「不列出來」的理由；只是備援路徑不可用而已。
             uint? vk = KeyMap.VirtualKeyFor(id, config.NumpadKeys);
-            if (vk is null) continue;
 
             string cheatName = TrainerStrings.GetCheatName(cheatDef.Id, cheatDef.Name);
-            string label = $"{cheatName}（{KeyMap.Display(id, config.NumpadKeys)}）";
+            string label = vk is null
+                ? cheatName
+                : $"{cheatName}（{KeyMap.Display(id, config.NumpadKeys)}）";
 
-            uint virtualKey = vk.Value;
             var btn = new Button
             {
                 Text = label,
-                Tag = virtualKey,
+                Tag = vk,
                 Dock = DockStyle.Fill,
                 AutoSize = false,
                 Height = 30,
@@ -135,16 +191,12 @@ public sealed class InGamePanelForm : Form
                 Cursor = Cursors.Hand
             };
             btn.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
-            // 座標取自 MousePtm() 的作弊不能立刻送鍵：游標此刻正停在這顆按鈕上。
-            // 見 Cheats.CursorPositionCheats 的說明。
-            bool needsCursor = Cheats.CursorPositionCheats.Contains(c.Id);
-            btn.Click += async (_, _) =>
-            {
-                if (needsCursor)
-                    await SpawnAtViewCentreAsync(virtualKey);
-                else
-                    SendKey(virtualKey);
-            };
+
+            // 座標取自 MousePtm() 的作弊不能立刻觸發：游標此刻正停在這顆按鈕上。
+            // 見 Cheats.CursorPositionCheats 與 Cheats.BuildRuntimeScript 的說明。
+            bool needsCursor = Cheats.CursorPositionCheats.Contains(selection.Id);
+            var captured = selection;
+            btn.Click += async (_, _) => await TriggerCheatAsync(captured, cheatDef, vk, needsCursor);
 
             _buttons.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             _cheatButtons.Add(btn);
@@ -340,6 +392,146 @@ public sealed class InGamePanelForm : Form
             : Color.FromArgb(190, 18, 60);
     }
 
+    // ------------------------------------------------------------------ 觸發路徑
+
+    /// <summary>
+    /// 按下一顆作弊按鈕。通道可用就走通道，否則退回送鍵；兩條都不可用就明說原因，
+    /// 不做任何靜默失敗（ISSUE-068 之前正是靜默失敗讓使用者以為修改器壞了）。
+    /// </summary>
+    private async Task TriggerCheatAsync(CheatSelection selection, Cheat cheatDef,
+                                         uint? virtualKey, bool needsCursor)
+    {
+        if (_channelReady)
+        {
+            await RunCheatViaChannelAsync(selection, cheatDef, needsCursor);
+            return;
+        }
+
+        if (virtualKey is { } vk)
+        {
+            if (needsCursor) await SpawnAtViewCentreAsync(vk);
+            else SendKey(vk);
+            return;
+        }
+
+        SetStatus(Strings.Get("Gui_Panel_NoChannelNoKey"), ok: false);
+    }
+
+    /// <summary>
+    /// 把作弊腳本原文送進遊戲執行。
+    ///
+    /// 生成類作弊需要一個地圖座標：先把游標移到畫面中央，讓引擎自己算出該點的座標，
+    /// 讀回來之後游標立刻歸位，最後把那組座標當**字面值**寫進腳本
+    /// （<see cref="Cheats.BuildRuntimeScript"/>）。走這條路就不必再把座標寫回遊戲記憶體，
+    /// 修改器對執行中遊戲的記憶體存取因此只剩讀取。
+    /// </summary>
+    private async Task RunCheatViaChannelAsync(CheatSelection selection, Cheat cheatDef, bool needsCursor)
+    {
+        if (_isSpawning) return;
+
+        (int X, int Y)? point = null;
+        if (needsCursor)
+        {
+            var sampled = await SampleViewCentrePointAsync();
+            if (sampled is { } p)
+            {
+                point = (p.X, p.Y);
+                _spawnPoint.Text = Strings.Get("Gui_Panel_SpawnPointAt", p.X, p.Y);
+            }
+            // 取樣失敗就照原樣送出 MousePtm()：引擎快取裡可能還是使用者剛才停留的點，
+            // 猜一個座標寫進去反而更糟（AGENTS.md §2「對不上就拒絕，絕不猜測」）。
+        }
+
+        var parameters = Cheats.ResolveParameters(selection.Id, selection.Parameters, _selections);
+        string script = Cheats.BuildRuntimeScript(cheatDef, _playerExpression, parameters, point);
+
+        ScriptRunOutcome outcome = await RunScriptAsync(script);
+        if (IsDisposed) return;
+
+        SetStatus(ScriptChannel.Describe(outcome), outcome.Ran);
+
+        if (outcome.Status is ScriptStatus.ChannelDisabled or ScriptStatus.Rejected)
+        {
+            // 通道對面已經不在了；下一次 tick 會重新探測並在必要時退回送鍵。
+            _channelReady = false;
+        }
+    }
+
+    /// <summary>
+    /// 送出一段腳本。管線往返最壞情況是好幾秒，所以一律在執行緒集區上等，
+    /// 不讓 WinForms 的訊息幫浦停下來（同 <see cref="RefreshChannel"/> 的理由）。
+    /// </summary>
+    private Task<ScriptRunOutcome> RunScriptAsync(string script)
+    {
+        if (RunScriptSeam is not null) return Task.FromResult(RunScriptSeam(script));
+
+        ScriptChannel? channel = _channel;
+        if (channel is null)
+        {
+            return Task.FromResult(new ScriptRunOutcome(ScriptStatus.ChannelDisabled, "no client"));
+        }
+
+        return Task.Run(() =>
+        {
+            var result = channel.Run(script);
+            return result.IsOk
+                ? result.Value
+                : new ScriptRunOutcome(ScriptStatus.ChannelDisabled, result.ErrorMessage ?? string.Empty);
+        });
+    }
+
+    /// <summary>
+    /// 把游標暫時移到遊戲畫面中央、讓引擎算出該點的地圖座標、讀回來後立刻歸位。
+    /// 這是 <see cref="SpawnAtViewCentreAsync"/> 取樣段落的通道版本：只讀不寫。
+    /// </summary>
+    private async Task<GameMemory.MapPoint?> SampleViewCentrePointAsync()
+    {
+        if (IsDisposed || _hwnd == IntPtr.Zero) { RefreshConnection(); return null; }
+        if (!TryGetWindowRect(_hwnd, out Rectangle rect) || rect.Width <= 0) return null;
+
+        _isSpawning = true;
+        CancellationTokenSource? operationCts = null;
+        try
+        {
+            EnsureMemory();
+            if (_memHandle == IntPtr.Zero) return null;
+
+            operationCts = new CancellationTokenSource();
+            _spawnCts = operationCts;
+
+            var centre = new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2);
+            _savedCursor = GetCursorPosition();
+            SetCursorPosition(centre);
+            _cursorMoved = true;
+
+            var sampled = await SampleMapPointAsync(operationCts.Token);
+            operationCts.Token.ThrowIfCancellationRequested();
+            return sampled;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch
+        {
+            try { operationCts?.Cancel(); } catch (ObjectDisposedException) { }
+            return null;
+        }
+        finally
+        {
+            RestoreCursorIfNeeded();
+            if (ReferenceEquals(_spawnCts, operationCts)) _spawnCts = null;
+            operationCts?.Dispose();
+            _isSpawning = false;
+        }
+    }
+
+    private void SetStatus(string text, bool ok)
+    {
+        _status.Text = text;
+        _status.ForeColor = ok ? Color.FromArgb(22, 163, 74) : Color.FromArgb(190, 18, 60);
+    }
+
     /// <summary>
     /// 在遊戲畫面中央生成（非阻塞非同步版本，ISSUE-059）。
     ///
@@ -498,8 +690,85 @@ public sealed class InGamePanelForm : Form
 
         if (_hasCursorCheats) { EnsureMemory(); UpdateSpawnPointLabel(); }
 
-        _status.Text = Strings.Get(ok ? "Gui_Panel_GameConnected" : "Gui_Panel_GameNotFound");
-        _status.ForeColor = ok ? Color.FromArgb(22, 163, 74) : Color.FromArgb(100, 116, 139);
+        RefreshChannel(currentPid);
+
+        if (!ok)
+        {
+            _status.Text = Strings.Get("Gui_Panel_GameNotFound");
+            _status.ForeColor = Color.FromArgb(100, 116, 139);
+            return;
+        }
+
+        // 三態：找到遊戲但沒有通道（只能送鍵）／找到遊戲且通道就緒（全部作弊可用）。
+        _status.Text = Strings.Get(_channelReady
+            ? "Gui_Panel_GameConnectedScript"
+            : "Gui_Panel_GameConnectedKeys");
+        _status.ForeColor = _channelReady
+            ? Color.FromArgb(22, 163, 74)
+            : Color.FromArgb(217, 119, 6);
+    }
+
+    /// <summary>
+    /// 依目前的遊戲行程建立／維持腳本通道。
+    ///
+    /// <para><b>絕對不能在這裡同步等具名管線。</b></para>
+    ///
+    /// 這個方法由每秒一次的 UI 計時器呼叫。管線往返最壞情況要好幾秒，同步等下去就是
+    /// 凍住整個訊息幫浦——ISSUE-059 已經因為同樣的錯誤修過一次。探測一律丟到執行緒集區，
+    /// 結果再 marshal 回 UI 執行緒。
+    /// </summary>
+    private void RefreshChannel(uint currentPid)
+    {
+        if (RunScriptSeam is not null) { _channelReady = true; return; }
+
+        if (currentPid == 0)
+        {
+            _channel = null;
+            _channelPid = 0;
+            _channelReady = false;
+            return;
+        }
+
+        if (_channel is null || currentPid != _channelPid)
+        {
+            _channelReady = false;
+            _channel = null;
+            _channelPid = currentPid;
+
+            var opened = ScriptChannelSession.TryOpen(currentPid);
+            if (opened.IsError) return;
+            _channel = opened.Value;
+        }
+
+        // 已經就緒就不必再探；沒就緒才每秒重試一次，而且同時間只允許一個探測在飛。
+        if (_channelReady || _probing || _channel is null) return;
+        BeginProbe(_channel, currentPid);
+    }
+
+    private void BeginProbe(ScriptChannel channel, uint pid)
+    {
+        _probing = true;
+        // Probe 只確認「連得上、驗證過、抽取點會動」，不在乎有沒有對局——
+        // 主選單時通道是好的，只是還沒有東西可以改。
+        _ = Task.Run(() => channel.Probe()).ContinueWith(t =>
+        {
+            bool ready = t.Status == TaskStatus.RanToCompletion && t.Result;
+            void Apply()
+            {
+                _probing = false;
+                // 探測期間使用者可能已經換了一場遊戲；結果就過期了，直接丟掉。
+                if (pid == _channelPid) _channelReady = ready;
+            }
+
+            if (IsDisposed || !IsHandleCreated) { _probing = false; return; }
+            try
+            {
+                if (InvokeRequired) BeginInvoke(Apply);
+                else Apply();
+            }
+            catch (ObjectDisposedException) { _probing = false; }
+            catch (InvalidOperationException) { _probing = false; }
+        }, TaskScheduler.Default);
     }
 
     private void SendKey(uint virtualKey)

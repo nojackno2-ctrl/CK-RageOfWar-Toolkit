@@ -87,6 +87,11 @@ struct BlitLogState {
     BlitGeometry geos[kMaxTrackedGeometries];
 };
 
+// True only when the user actually asked for frame statistics. The hook itself may be
+// installed purely to give the runtime script channel a main-thread call site, and in
+// that case the log must stay silent about frames.
+static bool         g_timingEnabled = false;
+
 static BlitLogState g_prevLogState = {};
 static bool         g_blitReported = false;
 
@@ -109,6 +114,13 @@ static int WINAPI HookedSetDIBitsToDevice(HDC hdc, int xDest, int yDest, DWORD w
     }
     g_lastFrameQpc = t1.QuadPart;
     InterlockedIncrement(&g_frameCount);
+
+    // The runtime script channel piggybacks on this hook because it is the one place in
+    // the process that is guaranteed to be the engine's main thread, which is where the
+    // engine itself runs key-bound scripts (script.cpp). Draining after the blit means a
+    // script never delays the frame that is already on its way to the screen. The pump
+    // returns immediately when nothing is queued, which is the overwhelmingly common case.
+    ScriptChannelPump();
 
     // Record blit geometry. Read the BITMAPINFO header safely without assuming readable memory.
     int32_t  biWidth = 0;
@@ -224,7 +236,12 @@ static void** FindIatSlot(HMODULE mod, const char* dllName, const char* funcName
 }
 
 void FrameTimingInstall() {
-    if (!g_cfg.frameTiming) return;
+    // The script channel needs this hook even when the user has timing switched off: it
+    // is the only main-thread call site available to it. Installing the hook for the
+    // channel does not switch timing on -- g_timingEnabled still gates the log lines, so
+    // "frames=0" keeps meaning "no frame statistics in the log".
+    if (!g_cfg.frameTiming && !g_cfg.scriptChannel) return;
+    g_timingEnabled = g_cfg.frameTiming;
 
     QueryPerformanceFrequency(&g_qpf);
 
@@ -257,6 +274,7 @@ void FrameTimingUninstall() {
         VirtualProtect(g_iatSlot, sizeof(void*), old, &old);
     }
     g_iatSlot = nullptr;
+    g_timingEnabled = false;
 }
 
 void BlitGeometryLog() {
@@ -349,6 +367,7 @@ void BlitGeometryLog() {
 
 bool FrameTimingDrainAndLog(double periodSeconds) {
     if (!g_iatSlot) return false;
+    if (!g_timingEnabled) return false;
 
     LONG   frames = InterlockedExchange(&g_frameCount, 0);
     LONG64 blit   = InterlockedExchange64(&g_blitTicks, 0);

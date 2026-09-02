@@ -244,6 +244,8 @@ public static partial class CliHost
                     return HandleTrainerSet(commands.Skip(2).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
                 if (trainerSubCmd == "apply")
                     return HandleApply(gameDirOverride, configPathOverride, isJson, stdout, stderr, "trainer apply");
+                if (trainerSubCmd == "exec")
+                    return HandleTrainerExec(commands.Skip(2).ToList(), configPathOverride, isJson, stdout, stderr);
                 return OutputError("trainer", Strings.Get("Error_InvalidArgs", $"未知的 trainer 子指令 '{commands[1]}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
 
             case "save":

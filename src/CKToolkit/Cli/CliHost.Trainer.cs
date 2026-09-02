@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using CKToolkit.Core.Common;
+using CKToolkit.Core.Runtime;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
 
@@ -8,6 +9,201 @@ namespace CKToolkit.Cli;
 
 public static partial class CliHost
 {
+    /// <summary>
+    /// <c>trainer exec</c>：把一個作弊（或一段任意 VS 腳本）送進執行中的遊戲立刻執行。
+    ///
+    /// 這是 ISSUE-068 的執行期通道對 AI 代理程式開的門。<c>trainer apply</c> 改的是磁碟上的
+    /// 檔案、下一次開遊戲才生效；<c>trainer exec</c> 改的是**現在正在跑的這一場**。
+    ///
+    /// 用法：
+    /// <code>
+    ///   CKToolkit.exe trainer exec --cheat gold_fill [--param count=100]... [--json]
+    ///   CKToolkit.exe trainer exec --script "ExploreAll();" [--json]
+    /// </code>
+    ///
+    /// 遊戲沒在跑、或這一場沒有腳本通道（例如工具重開過、或遊戲不是由本工具啟動的），
+    /// 一律 fail-closed 回錯誤，不做任何猜測性的注入——注入是使用者的決定，不是 CLI 的。
+    /// </summary>
+    private static int HandleTrainerExec(
+        List<string> options,
+        string? configOverride,
+        bool isJson,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        string? cheatId = null;
+        string? rawScript = null;
+        var parameters = new Dictionary<string, object>(StringComparer.Ordinal);
+
+        for (int i = 0; i < options.Count; i++)
+        {
+            string token = options[i];
+            if (!token.StartsWith("--", StringComparison.Ordinal))
+            {
+                return OutputError("trainer exec",
+                    Strings.Get("Error_InvalidArgs", $"無效的語法 '{token}'"),
+                    ExitCodes.InvalidArgs, isJson, stdout, stderr);
+            }
+
+            string flag;
+            string val;
+            int eqIdx = token.IndexOf('=');
+            if (eqIdx > 0)
+            {
+                flag = token[..eqIdx].ToLowerInvariant();
+                val = token[(eqIdx + 1)..];
+            }
+            else if (i + 1 < options.Count)
+            {
+                flag = token.ToLowerInvariant();
+                val = options[++i];
+            }
+            else
+            {
+                return OutputError("trainer exec",
+                    Strings.Get("Error_InvalidArgs", $"缺少選項值 '{token}'"),
+                    ExitCodes.InvalidArgs, isJson, stdout, stderr);
+            }
+
+            switch (flag)
+            {
+                case "--cheat":
+                    cheatId = val.Trim();
+                    break;
+                case "--script":
+                    rawScript = val;
+                    break;
+                case "--param":
+                {
+                    int eq = val.IndexOf('=');
+                    if (eq <= 0)
+                    {
+                        return OutputError("trainer exec",
+                            Strings.Get("Error_InvalidArgs", $"--param 格式必須為 <name>=<value>，實際為 '{val}'"),
+                            ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                    }
+                    parameters[val[..eq].Trim()] = val[(eq + 1)..];
+                    break;
+                }
+                default:
+                    return OutputError("trainer exec",
+                        Strings.Get("Error_UnknownOption", flag),
+                        ExitCodes.InvalidArgs, isJson, stdout, stderr);
+            }
+        }
+
+        if ((cheatId is null) == (rawScript is null))
+        {
+            return OutputError("trainer exec",
+                Strings.Get("Error_InvalidArgs", "trainer exec 必須指定 --cheat <id> 或 --script <VS>，且兩者只能擇一"),
+                ExitCodes.InvalidArgs, isJson, stdout, stderr);
+        }
+
+        string script;
+        if (cheatId is not null)
+        {
+            if (!Cheats.ById.TryGetValue(cheatId, out var cheat))
+            {
+                return OutputError("trainer exec",
+                    Strings.Get("Error_TrainerUnknownCheat", cheatId),
+                    ExitCodes.InvalidArgs, isJson, stdout, stderr);
+            }
+
+            var config = ToolkitConfig.Load(configOverride);
+            if (config.LoadError is not null)
+                return RejectCorruptConfig("trainer exec", config, isJson, stdout, stderr);
+
+            // 參數解析與 apply 走同一條規則，CLI 與 GUI 才不會對同一個作弊產生不同的腳本。
+            var selections = config.Trainer.Cheats
+                .Where(c => Cheats.ById.ContainsKey(c.Id))
+                .Select(c => new CheatSelection
+                {
+                    Id = c.Id,
+                    Key = c.Key,
+                    Parameters = c.Parameters.ToDictionary(
+                        p => p.Key, p => (object)p.Value, StringComparer.Ordinal),
+                })
+                .ToList();
+
+            var own = selections.FirstOrDefault(s => s.Id == cheat.Id)?.Parameters;
+            var resolved = Cheats.ResolveParameters(cheat.Id, own, selections);
+
+            // 命令列上明確給的 --param 蓋過設定檔。
+            if (parameters.Count > 0)
+            {
+                var merged = new Dictionary<string, object>(StringComparer.Ordinal);
+                if (resolved is not null)
+                    foreach (var (k, v) in resolved) merged[k] = v;
+                foreach (var (k, v) in parameters) merged[k] = v;
+                resolved = merged;
+            }
+
+            script = Cheats.BuildRuntimeScript(
+                cheat,
+                Cheats.PlayerExpression(config.Trainer.PlayerMode, config.Trainer.FixedPlayer),
+                resolved);
+        }
+        else
+        {
+            script = Cheats.FlattenScript(rawScript!);
+        }
+
+        int pid = GameRunner.FindGameProcessId();
+        if (pid == 0)
+        {
+            // 用本功能自己帶進來的鍵，不借用其他 issue 的字串，這條路徑才不會相依於
+            // 別的分支是否已經合併。
+            return OutputError("trainer exec", Strings.Get("Error_ScriptChannelNoProcess"),
+                ExitCodes.GeneralFailure, isJson, stdout, stderr);
+        }
+
+        var opened = ScriptChannelSession.TryOpen((uint)pid);
+        if (opened.IsError || opened.Value is null)
+        {
+            return OutputError("trainer exec", opened.ErrorMessage ?? Strings.Get("Error_ScriptChannelNoSession"),
+                ExitCodes.GeneralFailure, isJson, stdout, stderr);
+        }
+
+        using var channel = opened.Value;
+        var run = channel.Run(script);
+        if (run.IsError)
+        {
+            return OutputError("trainer exec", run.ErrorMessage ?? Strings.Get("Error_ScriptChannelUnreachable"),
+                ExitCodes.GeneralFailure, isJson, stdout, stderr);
+        }
+        ScriptRunOutcome outcome = run.Value;
+
+        var data = new
+        {
+            processId = pid,
+            cheat = cheatId,
+            status = outcome.Status.ToString(),
+            statusCode = (int)outcome.Status,
+            ran = outcome.Ran,
+            message = ScriptChannel.Describe(outcome),
+            engineDetail = outcome.Detail,
+            script,
+        };
+
+        if (isJson)
+        {
+            var envelope = new JsonEnvelope
+            {
+                Ok = outcome.Ran,
+                Command = "trainer exec",
+                Data = data,
+            };
+            stdout.WriteLine(JsonSerializer.Serialize(envelope, JsonEnvelopeOptions));
+        }
+        else
+        {
+            stdout.WriteLine($"pid {pid}: {ScriptChannel.Describe(outcome)} ({outcome.Status})");
+        }
+
+        // 引擎明確拒絕（腳本錯誤、不在對局中）也要有非零退出碼，AI 代理程式才判得出來。
+        return outcome.Ran ? ExitCodes.Success : ExitCodes.GeneralFailure;
+    }
+
     private static int HandleTrainerListCheats(bool isJson, TextWriter stdout)
     {
         var cheatList = Cheats.All.Select(c => new

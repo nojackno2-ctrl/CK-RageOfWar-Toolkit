@@ -145,6 +145,7 @@ internal static class Program
         RunGroup("43. TrainerLocalization", TestTrainerNameLocalization);
         RunGroup("44. TrainerDefaultKeyTableInvariants", TestTrainerDefaultKeyTableInvariants);
         RunGroup("45. CliOptionStrictness", TestCliOptionStrictness);
+        RunGroup("46. RuntimeScriptChannel", TestRuntimeScriptChannel);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -5591,6 +5592,212 @@ internal static class Program
     }
 
     /// <summary>把對話框實際長出來的 NumericUpDown 上限，跟作弊定義的上限比對。</summary>
+    /// <summary>
+    /// 第 46 組：執行期腳本通道（ISSUE-068）。
+    ///
+    /// 這一組守住的核心不變式是「兩條路徑不會分岔」——寫進 SCDEBUG.XML 的腳本與送進
+    /// 執行期通道的腳本，對同一個作弊必須逐字相同。一旦有人替執行期路徑另外寫一份
+    /// 腳本產生器，作弊就會開始出現「檔案模式會但面板不會」這種只有實機才抓得到的差異。
+    ///
+    /// 通道本身需要遊戲在跑才驗得完，所以這裡只鎖住可離線驗證的部分：腳本產生、
+    /// 座標代入、權杖與工作階段的 fail-closed 行為、選項字串，以及與原生端共用的
+    /// 協定常數。真正的端到端仍然靠實機驗收。
+    /// </summary>
+    private static void TestRuntimeScriptChannel()
+    {
+        // 1. 兩條路徑逐字相同 ------------------------------------------------
+        //
+        // 用「全部作弊、全部預設參數」組一次 scdebug.xml，再逐一比對執行期腳本。
+        // keepVanilla 關閉才塞得下 18 個作弊（開啟時只有 13 個自由鍵，引擎硬上限）。
+        var selections = Cheats.All
+            .Select(c => new CheatSelection { Id = c.Id, Key = c.NumpadKey })
+            .ToList();
+
+        string player = Cheats.PlayerExpression("auto", 1);
+        string xml = Cheats.BuildScDebug(selections, "auto", 1, keepVanilla: false, numpadKeys: true);
+
+        int compared = 0;
+        foreach (var cheat in Cheats.All)
+        {
+            var own = selections.First(s => s.Id == cheat.Id).Parameters;
+            var resolved = Cheats.ResolveParameters(cheat.Id, own, selections);
+
+            string runtime = Cheats.BuildRuntimeScript(cheat, player, resolved);
+            string escaped = Cheats.EscapeAttribute(runtime);
+
+            Check($"{cheat.Id}: 執行期腳本與 SCDEBUG.XML 內容逐字相同",
+                xml.Contains($"script=\"{escaped}\"", StringComparison.Ordinal));
+            compared++;
+        }
+        Check("18 個作弊全部比對過", compared == Cheats.All.Count && compared >= 18);
+
+        // 2. 腳本形狀 -------------------------------------------------------
+        foreach (var cheat in Cheats.All)
+        {
+            string runtime = Cheats.BuildRuntimeScript(cheat, player, null);
+            Check($"{cheat.Id}: 執行期腳本非空且為單行",
+                runtime.Length > 0 && !runtime.Contains('\n') && !runtime.Contains('\r'));
+            // VS 的 // 行註解在單行腳本裡會把後面整段吃掉，產生器一律不得輸出。
+            Check($"{cheat.Id}: 執行期腳本不含行註解", !runtime.Contains("//", StringComparison.Ordinal));
+        }
+
+        // 3. 游標座標代入 ---------------------------------------------------
+        foreach (string cursorCheatId in Cheats.CursorPositionCheats)
+        {
+            var cheat = Cheats.ById[cursorCheatId];
+            string plain = Cheats.BuildRuntimeScript(cheat, player, null);
+            Check($"{cursorCheatId}: 預設腳本用 {Cheats.MousePointCall} 取點",
+                plain.Contains(Cheats.MousePointCall, StringComparison.Ordinal));
+
+            string placed = Cheats.BuildRuntimeScript(cheat, player, null, (1234, -56));
+            Check($"{cursorCheatId}: 帶入座標後改用字面 Point()",
+                placed.Contains("Point(1234, -56)", StringComparison.Ordinal)
+                && !placed.Contains(Cheats.MousePointCall, StringComparison.Ordinal));
+            Check($"{cursorCheatId}: 除了取點以外一個字都沒變",
+                placed.Replace("Point(1234, -56)", Cheats.MousePointCall, StringComparison.Ordinal) == plain);
+        }
+
+        // 非游標類作弊即使被帶入座標也不該有任何改變。
+        foreach (var cheat in Cheats.All.Where(c => !Cheats.CursorPositionCheats.Contains(c.Id)))
+        {
+            Check($"{cheat.Id}: 非游標類作弊不受帶入座標影響",
+                Cheats.BuildRuntimeScript(cheat, player, null, (7, 8))
+                == Cheats.BuildRuntimeScript(cheat, player, null));
+        }
+
+        // 4. 權杖 -----------------------------------------------------------
+        string token = ScriptChannel.NewToken();
+        Check("NewToken 長度符合原生端的 kScriptTokenChars", token.Length == 32);
+        Check("NewToken 只用可列印 ASCII", ScriptChannel.IsValidToken(token));
+        Check("NewToken 每次都不一樣", ScriptChannel.NewToken() != token);
+        Check("IsValidToken 拒絕 null", !ScriptChannel.IsValidToken(null));
+        Check("IsValidToken 拒絕過短", !ScriptChannel.IsValidToken("abc"));
+        Check("IsValidToken 拒絕含空白", !ScriptChannel.IsValidToken(new string(' ', 32)));
+
+        // 5. 客戶端 fail-closed ---------------------------------------------
+        Check("ScriptChannel.Create 拒絕 pid 0", ScriptChannel.Create(0, token).IsError);
+        Check("ScriptChannel.Create 拒絕壞權杖", ScriptChannel.Create(1234, "nope").IsError);
+
+        var created = ScriptChannel.Create(1234, token);
+        Check("ScriptChannel.Create 接受合法輸入", created.IsOk && created.Value is not null);
+        using (var channel = created.Value!)
+        {
+            Check("空腳本被拒絕", channel.Run("   ").IsError);
+            Check("超長腳本被拒絕", channel.Run(new string('x', 17 * 1024)).IsError);
+            // 這個 pid 沒有通道在聽，連不上必須是「回傳失敗」而不是丟例外。
+            Check("連不上時回傳失敗而非例外", channel.Run("int i; i = 1;", TimeSpan.FromMilliseconds(200)).IsError);
+        }
+
+        // 6. 工作階段 -------------------------------------------------------
+        ScriptChannelSession.End();
+        Check("沒有工作階段時 TryOpen 拒絕", ScriptChannelSession.TryOpen(1234).IsError);
+
+        string sessionToken = ScriptChannelSession.Begin();
+        Check("Begin 產生合法權杖", ScriptChannel.IsValidToken(sessionToken));
+        Check("Begin 之後尚未 Attached，TryOpen 仍拒絕", ScriptChannelSession.TryOpen(1234).IsError);
+
+        ScriptChannelSession.Attached(1234);
+        Check("Attached 之後 TryOpen 成功", ScriptChannelSession.TryOpen(1234).IsOk);
+        Check("行程編號對不上時 TryOpen 拒絕", ScriptChannelSession.TryOpen(5678).IsError);
+        ScriptChannelSession.End();
+        Check("End 之後 TryOpen 再次拒絕", ScriptChannelSession.TryOpen(1234).IsError);
+
+        // 7. 注入選項字串 ----------------------------------------------------
+        var noChannel = new DiagnosticsOptions();
+        Check("預設不帶 scriptchannel",
+            !noChannel.ToOptionString().Contains("scriptchannel", StringComparison.Ordinal));
+
+        var badToken = new DiagnosticsOptions { ScriptChannel = true, ScriptToken = "short" };
+        Check("權杖無效時不寫出 scriptchannel（原生端另有同樣的檢查）",
+            !badToken.ToOptionString().Contains("scriptchannel", StringComparison.Ordinal));
+
+        string good = new DiagnosticsOptions { ScriptChannel = true, ScriptToken = token }
+            .ToOptionString();
+        Check("權杖有效時寫出 scriptchannel=1",
+            good.Contains("scriptchannel=1", StringComparison.Ordinal));
+        Check("權杖原樣寫出", good.Contains($"scripttoken={token}", StringComparison.Ordinal));
+        Check("選項以逗號分隔，權杖是最後一段（原生端 OptAscii 讀到逗號就停）",
+            good.EndsWith($"scripttoken={token}", StringComparison.Ordinal));
+
+        var channelOnly = GameRunner.CreateScriptChannelOnlyOptions();
+        Check("channel-only 選項不替使用者打開任何保護",
+            !channelOnly.CrashReports && !channelOnly.MiniDumps && !channelOnly.Telemetry
+            && !channelOnly.FrameTiming && !channelOnly.NullGuard && !channelOnly.ArrayGuard
+            && !channelOnly.NullStoreRepair);
+        Check("channel-only 選項確實開了通道",
+            channelOnly.ScriptChannel && ScriptChannel.IsValidToken(channelOnly.ScriptToken));
+        ScriptChannelSession.End();
+
+        // 8. 面板列出全部作弊 -------------------------------------------------
+        //
+        // ISSUE-068 的實機症狀就是「面板上沒有那些按鈕」。設定檔一個作弊都沒啟用時，
+        // 面板仍然必須把 18 個都列出來——啟用與否決定的是要不要佔一個 scdebug 按鍵，
+        // 不是能不能從面板按。
+        var emptyConfig = new TrainerConfig { Enabled = true };
+        using (var panel = new InGamePanelForm(emptyConfig))
+        {
+            _ = panel.Handle;
+            Check("沒有任何已啟用作弊時面板仍列出全部作弊",
+                CountPanelCheatButtons(panel) == Cheats.All.Count);
+        }
+
+        // 9. 與原生端共用的協定常數 -------------------------------------------
+        //
+        // 這些數字跨行程，改一邊沒改另一邊就會變成沉默的協定錯配。直接讀 ckperf.h
+        // 比對，讓「只改了一邊」在建置階段就爆掉而不是在遊戲裡。
+        string headerPath = FindRepoFile(Path.Combine("src", "CKPerf", "ckperf.h"));
+        if (headerPath.Length > 0)
+        {
+            string header = File.ReadAllText(headerPath);
+            Check("ckperf.h 的 kScriptTokenChars 與受管端一致",
+                header.Contains("kScriptTokenChars = 32", StringComparison.Ordinal));
+
+            (string Name, int Value)[] statuses =
+            [
+                ("kScriptOk", 0), ("kScriptScheduled", 1), ("kScriptCompileError", 2),
+                ("kScriptNotInGame", 3), ("kScriptChannelDisabled", 4), ("kScriptBusy", 5),
+                ("kScriptTimedOut", 6), ("kScriptRejected", 7), ("kScriptFaulted", 8),
+            ];
+            foreach (var (name, value) in statuses)
+            {
+                Check($"ckperf.h {name} = {value}",
+                    header.Contains($"{name}", StringComparison.Ordinal)
+                    && header.Contains($"= {value},", StringComparison.Ordinal));
+            }
+
+            foreach (ScriptStatus status in Enum.GetValues<ScriptStatus>())
+            {
+                Check($"ScriptStatus.{status} 有對應的原生常數",
+                    statuses.Any(s => s.Value == (int)status));
+            }
+        }
+        else
+        {
+            Check("找得到 src/CKPerf/ckperf.h 以比對協定常數", false);
+        }
+    }
+
+    /// <summary>數面板上有幾顆作弊按鈕。面板的按鈕都放在唯一那個 TableLayoutPanel 裡。</summary>
+    private static int CountPanelCheatButtons(InGamePanelForm panel) =>
+        panel.Controls.OfType<TableLayoutPanel>()
+             .SelectMany(t => t.Controls.OfType<Button>())
+             .Count();
+
+    /// <summary>
+    /// 從目前執行目錄往上找出儲存庫內的檔案。SelfTest 是從 bin 底下跑的，
+    /// 相對路徑不能直接用。找不到回傳空字串，由呼叫端判定為測試失敗。
+    /// </summary>
+    private static string FindRepoFile(string relativePath)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int depth = 0; dir is not null && depth < 12; depth++, dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, relativePath);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return string.Empty;
+    }
+
     private static void CheckSpawnDialogRange(string cheatId, string paramName, decimal expectedMax)
     {
         var cheat = Cheats.ById[cheatId];

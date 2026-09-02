@@ -33,6 +33,11 @@ namespace ckperf {
 
 // ---------------------------------------------------------------- configuration
 
+// Length of the script-channel authentication token, in characters. CKToolkit generates
+// a fresh one per injection and passes it through the same options channel as every
+// other setting; script.cpp compares it on every request.
+enum { kScriptTokenChars = 32 };
+
 struct Config {
     wchar_t outDir[MAX_PATH];   // where reports land; never the game directory (Program Files is read-only)
     bool    crashReports;       // vectored exception handler + text report
@@ -42,6 +47,8 @@ struct Config {
     bool    nullGuard;          // site-specific code cave on the first crash found
     bool    nullStoreRepair;    // generic: skip engine stores that target the null page
     bool    arrayGuard;         // site-specific code cave for the 0x004AA5C9 grid-slot read
+    bool    scriptChannel;      // runtime VS script execution channel (see script.cpp)
+    char    scriptToken[kScriptTokenChars + 1];   // shared secret for that channel
     int     maxReports;         // stop writing after this many, so a repeating fault cannot fill the disk
     int     telemetryMs;        // telemetry sample period
 };
@@ -154,6 +161,40 @@ bool VmLvalueTryRepair(EXCEPTION_POINTERS* ep, bool& firstTimeAtThisSite, unsign
 long VmLvalueRepairCount();
 void VmLvalueLogSites();
 int  VmLvalueDescribeSites(char* buf, int cap, int pos);
+
+// ------------------------------------------------------- runtime script channel
+//
+// See script.cpp for the full rationale and the reverse-engineering table. In short:
+// the engine's 20 hard-coded scdebug keys are not enough to reach 18 cheats, so the
+// trainer stops going through keys and hands script text straight to the engine's own
+// compiler on the engine's own thread.
+//
+// These status codes cross the process boundary; CKToolkit's ScriptChannel.cs mirrors
+// them exactly, so the numbers are part of the contract and must not be renumbered.
+enum ScriptStatus {
+    kScriptOk              = 0,   // compiled and ran synchronously
+    kScriptScheduled       = 1,   // latent script handed to the VM scheduler
+    kScriptCompileError    = 2,   // the engine's compiler rejected the source
+    kScriptNotInGame       = 3,   // no live session; nothing was executed
+    kScriptChannelDisabled = 4,   // signature mismatch, self-test failure, or not requested
+    kScriptBusy            = 5,   // a previous script is still in flight
+    kScriptTimedOut        = 6,   // no frame was drawn, so the pump never ran
+    kScriptRejected        = 7,   // malformed or unauthenticated request
+    kScriptFaulted         = 8,   // the engine faulted; the exception was contained
+};
+
+// Verifies every engine entry point, proves the compiler works, then starts the pipe
+// listener. Any mismatch disables the channel permanently and logs why.
+void ScriptChannelInstall();
+void ScriptChannelUninstall();
+// Compiles a harmless probe script and releases it without running it.
+bool ScriptChannelSelfTest();
+// Drains the single pending request. MUST be called on the engine's main thread; the
+// frame hook in frames.cpp is the call site.
+void ScriptChannelPump();
+bool ScriptChannelEnabled();
+long ScriptChannelExecutedCount();
+long ScriptChannelRejectedCount();
 
 void FrameTimingInstall();
 void FrameTimingUninstall();

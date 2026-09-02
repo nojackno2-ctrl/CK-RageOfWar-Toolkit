@@ -386,8 +386,16 @@ public sealed class MainForm : Form
         SetBusy(true);
         try
         {
-            Result<RunOutcome> launched = await Task.Run(() => perf.StabilityProtection
-                ? GameRunner.LaunchWithDiagnostics(gameDir, GameRunner.CreateStabilityOptions(perf), AppendLog)
+            // 修改器開著就必須注入 ckperf.dll，否則遊戲中面板沒有腳本通道可用，
+            // 使用者又會回到「沒鍵可按」的狀態（ISSUE-068）。效能頁的保護關掉時
+            // 走 channel-only 選項：只開通道，不替使用者打開任何他關掉的保護。
+            bool wantsChannel = _config.Trainer.Enabled;
+            DiagnosticsOptions? options = perf.StabilityProtection
+                ? GameRunner.CreateStabilityOptions(perf, wantsChannel)
+                : wantsChannel ? GameRunner.CreateScriptChannelOnlyOptions() : null;
+
+            Result<RunOutcome> launched = await Task.Run(() => options is not null
+                ? GameRunner.LaunchWithDiagnostics(gameDir, options, AppendLog)
                 : GameRunner.LaunchPlain(gameDir));
 
             if (!launched.Success || launched.Value is null)
@@ -401,7 +409,10 @@ public sealed class MainForm : Form
                 ? Strings.Get(perf.ExperimentalStability
                     ? "Gui_Log_LaunchStabilityExperimental"
                     : "Gui_Log_LaunchStabilityVerified", launched.Value.ProcessId)
-                : Strings.Get("Gui_Log_LaunchPlain", launched.Value.ProcessId));
+                : options is not null
+                    ? Strings.Get("Gui_Log_LaunchScriptChannelOnly", launched.Value.ProcessId)
+                    : Strings.Get("Gui_Log_LaunchPlain", launched.Value.ProcessId));
+            if (wantsChannel) AppendLog(Strings.Get("Gui_Log_ScriptChannelReady"));
             ShowOperationSuccess(Strings.Get("Gui_LaunchSuccess"));
         }
         catch (Exception ex)
@@ -445,7 +456,7 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// 開啟置頂的遊戲中面板（AGENTS.md §1 輔助視窗例外）。面板只送按鍵、不改任何設定，
+    /// 開啟置頂的遊戲中面板（AGENTS.md §1 輔助視窗例外）。面板不改任何設定、不寫任何檔案，
     /// 由主視窗開關，關掉之後不留常駐。
     /// </summary>
     private void OpenInGamePanel()
@@ -459,6 +470,10 @@ public sealed class MainForm : Form
 
         try
         {
+            // 遊戲已經在跑、但這一場沒有腳本通道（典型情況：使用者直接從 Steam 開遊戲）
+            // 就當場掛上去。不掛的話面板只能退回送鍵，18 個作弊又會有一半按不動。
+            EnsureScriptChannelForRunningGame();
+
             // 面板要用目前畫面上的設定，所以先把 TrainerPage 的內容存回設定物件再建。
             _trainerPage.SaveConfig(_config.Trainer);
             _panel = new InGamePanelForm(_config.Trainer);
@@ -470,6 +485,29 @@ public sealed class MainForm : Form
         {
             ShowOperationError(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// 遊戲已在執行但這一場還沒有腳本通道時，就地掛載 <c>ckperf.dll</c> 把通道補上
+    /// （ISSUE-068）。這條路服務的是「我照常從 Steam 開遊戲」的使用者。
+    ///
+    /// 失敗一律只寫進記錄區、不擋住面板：面板還有代送按鍵那條備援路徑，
+    /// 掛不上去不代表面板不能開。
+    /// </summary>
+    private void EnsureScriptChannelForRunningGame()
+    {
+        if (!_config.Trainer.Enabled) return;
+
+        int pid = GameRunner.FindGameProcessId();
+        if (pid == 0) return;                                   // 遊戲還沒開，等啟動時注入
+        if (ScriptChannelSession.ProcessId == (uint)pid) return; // 這一場已經有通道了
+
+        var attached = GameRunner.AttachToProcess(
+            (uint)pid, GameRunner.CreateScriptChannelOnlyOptions(), AppendLog);
+
+        AppendLog(attached.Success
+            ? Strings.Get("Gui_Log_ScriptChannelAttached", pid)
+            : Strings.Get("Gui_Log_ScriptChannelAttachFailed", attached.ErrorMessage ?? string.Empty));
     }
 
     private void SetBusy(bool busy, bool profilerOwnsBusy = false)

@@ -849,6 +849,83 @@ public static class Cheats
         .Replace(">", "&gt;")
         .Replace("\"", "&quot;");
 
+    /// <summary>
+    /// 生成類作弊在腳本裡取滑鼠地圖座標所用的呼叫。執行期路徑會把它換成字面座標
+    /// （見 <see cref="BuildRuntimeScript"/>）。
+    /// </summary>
+    public const string MousePointCall = "MousePtm()";
+
+    /// <summary>
+    /// 「切換生成單位／物品」循環的是「在滑鼠位置生成單位／物品」勾的那份清單：清單只有一份，
+    /// 介面上也只編輯一份，所以組腳本時把 spawn 的參數借給 cycle 用。
+    /// spawn 沒啟用時 cycle 就吃自己的預設清單。
+    ///
+    /// 這條規則同時被 <see cref="BuildScDebug"/>（檔案路徑）與
+    /// <see cref="BuildRuntimeScript"/>（執行期路徑）使用，只能有一份實作——
+    /// 兩條路徑對同一個作弊必須產生逐字相同的腳本。
+    /// </summary>
+    public static IReadOnlyDictionary<string, object>? ResolveParameters(
+        string cheatId, IReadOnlyDictionary<string, object>? own,
+        IReadOnlyList<CheatSelection> allSelections)
+    {
+        string? lender = cheatId switch
+        {
+            CycleUnitId => SpawnUnitId,
+            CycleItemId => SpawnItemId,
+            _ => null,
+        };
+        if (lender is null) return own;
+
+        // 「有沒有那一筆 selection」才是判準，不是「那一筆有沒有參數」——出借方存在但
+        // 參數為空時，借用方就該跟著吃預設清單，兩個作弊的清單才不會分岔。
+        var source = allSelections.FirstOrDefault(s => s.Id == lender);
+        return source is not null ? source.Parameters : own;
+    }
+
+    /// <summary>
+    /// 組出一段可以直接交給引擎腳本編譯器的作弊腳本（ISSUE-068 的執行期通道用）。
+    ///
+    /// 內容與 <see cref="BuildScDebug"/> 寫進 <c>SCDEBUG.XML</c> 的那一段**逐字相同**，
+    /// 因為兩邊呼叫的是同一個 <see cref="Cheat.Script"/> builder；差別只有兩點：
+    /// 執行期不需要 XML 屬性跳脫（腳本原文直接進編譯器），而且可以帶入一個已經由引擎
+    /// 自己算好的滑鼠地圖座標。
+    ///
+    /// <para><b>為什麼要換掉 <c>MousePtm()</c></b></para>
+    ///
+    /// <c>MousePtm()</c> 讀的是一個由滑鼠移動訊息更新的快取。使用者把游標移到面板按鈕上
+    /// 的路上，那個快取早就被沿途的座標蓋掉了，單位會生成在面板邊緣。原本的解法是先讀下
+    /// 目標座標、按下按鈕時再寫回去（<see cref="Runtime.GameMemory"/>）；走執行期通道就
+    /// 不必寫回了——直接把讀到的值當字面量放進腳本即可。寫入的那一半因此消失，
+    /// AGENTS.md §2.9 的記憶體存取降級成純讀取。
+    ///
+    /// 座標仍然只用引擎自己算出來的值，不做任何螢幕像素到地圖座標的自行換算。
+    /// </summary>
+    /// <param name="cheat">要執行的作弊。</param>
+    /// <param name="playerExpression">見 <see cref="PlayerExpression"/>。</param>
+    /// <param name="parameters">已經過 <see cref="ResolveParameters"/> 解析的參數。</param>
+    /// <param name="cursorPoint">
+    /// 引擎算好的地圖座標。<c>null</c> 代表照原樣使用 <c>MousePtm()</c>。
+    /// </param>
+    public static string BuildRuntimeScript(Cheat cheat, string playerExpression,
+                                            IReadOnlyDictionary<string, object>? parameters,
+                                            (int X, int Y)? cursorPoint = null)
+    {
+        string script = FlattenScript(cheat.Script(playerExpression, parameters));
+
+        if (cursorPoint is null || !script.Contains(MousePointCall, StringComparison.Ordinal))
+        {
+            // 沒有取點呼叫就原樣送出。不去猜測哪裡「應該」有座標——對不上就不動
+            // （AGENTS.md §2）。
+            return script;
+        }
+
+        // Point(x, y) 是引擎自己的建構子，遊戲隨附的腳本就這樣用
+        // （data.pak SUBAI\BARRACK_TRAIN.VS：Place(cmdparam, Point(0,0), this.player)）。
+        string literal = string.Create(CultureInfo.InvariantCulture,
+            $"Point({cursorPoint.Value.X}, {cursorPoint.Value.Y})");
+        return script.Replace(MousePointCall, literal, StringComparison.Ordinal);
+    }
+
     /// <summary>依選取的作弊組出 scdebug.xml 內容。</summary>
     public static string BuildScDebug(IEnumerable<CheatSelection> selections,
                                       string playerMode, int fixedPlayer, bool keepVanilla,
@@ -857,22 +934,12 @@ public static class Cheats
         string player = PlayerExpression(playerMode, fixedPlayer);
         var bindings = new List<(string Key, string Script, string Comment)>();
 
-        // 「切換生成單位／物品」循環的是「在滑鼠位置生成單位／物品」勾的那份清單：清單只有一份，
-        // 介面上也只編輯一份，所以組腳本時把 spawn 的參數借給 cycle 用。
-        // spawn 沒啟用時 cycle 就吃自己的預設清單。
         var chosen = selections.ToList();
         var resolved = ResolveBindings(chosen, keepVanilla, numpadKeys);
-        var spawnParameters = chosen.FirstOrDefault(s => s.Id == SpawnUnitId)?.Parameters;
-        var spawnItemParameters = chosen.FirstOrDefault(s => s.Id == SpawnItemId)?.Parameters;
 
         foreach (var (selection, cheat, key) in resolved)
         {
-            var parameters = cheat.Id switch
-            {
-                CycleUnitId when spawnParameters is not null => spawnParameters,
-                CycleItemId when spawnItemParameters is not null => spawnItemParameters,
-                _ => selection.Parameters
-            };
+            var parameters = ResolveParameters(cheat.Id, selection.Parameters, chosen);
 
             // 註解只放 ASCII 的 cheat id：pak 內的檔案一律以 latin-1 存放。
             bindings.Add((key, cheat.Script(player, parameters), cheat.Id));
