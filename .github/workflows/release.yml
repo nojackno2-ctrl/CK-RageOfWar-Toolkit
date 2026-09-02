@@ -185,7 +185,7 @@ jobs:
             $hero = @($flat | Where-Object id -eq 'hero_max_army')
             $sight = @($flat | Where-Object id -eq 'hero_sight')
             if (-not $tweaks.ok -or $tweaks.command -ne 'trainer list-tweaks' -or
-                $tweaks.data.totalTweaks -ne 29 -or $train.Count -ne 1 -or
+                $tweaks.data.totalTweaks -ne 28 -or $train.Count -ne 1 -or
                 -not $train[0].scopedSupported -or
                 (@($train[0].scopes) -join ',') -ne 'self,enemy' -or
                 $hero.Count -ne 1 -or -not $hero[0].scopedSupported -or
