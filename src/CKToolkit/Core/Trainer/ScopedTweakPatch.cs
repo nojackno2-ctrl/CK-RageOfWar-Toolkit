@@ -4,18 +4,32 @@ using CKToolkit.Core.Common;
 namespace CKToolkit.Core.Trainer;
 
 /// <summary>
-/// 永久 scoped Tweak 的 Steam EXE 專屬靜態補丁容器（ISSUE-049）。
+/// 永久 scoped Tweak 的 Steam EXE 專屬靜態補丁容器（ISSUE-049 / ISSUE-069）。
 ///
-/// 第一個 helper 將訓練／研究的 execdelay 依發令物件 owner 分流；多人遊戲、
-/// 缺少必要引擎指標或非目標 command 時一律傳回原版值。這仍未接入
-/// TrainerModule，也不會出現在 GUI 或寫進真實遊戲。
+/// 每個 helper 依「發令／擁有物件的 owner 是不是本機玩家」把設定分成 self / enemy
+/// 兩路；解析不出本機玩家指標（尚未進入對局、引擎全域為 NULL）或不是目標
+/// command／聚落型別時，一律退回原版值。
+///
+/// **不再區分單人與多人**（ISSUE-069，使用者決定）：helper 只看
+/// <see cref="EngineBaseGlobalVa"/>+<see cref="LocalPlayerOffset"/> 這一條鏈。
+/// 多人連線時每一端會依各自的本機玩家套用不同數值，模擬必然 desync——
+/// 這是使用者明示接受的取捨，不要再把多人偵測加回來。
 /// </summary>
 public static class ScopedTweakPatch
 {
     public const string SectionName = ".cktw";
     public const uint FormatVersion = 1;
     public const uint HeaderSize = 64;
+
+    /// <summary>
+    /// header flags 的第 0 位元，歷史上代表「本補丁只在單人模式生效」。
+    /// ISSUE-069 之後 helper 不再做多人偵測，因此新產生的 payload 一律不設此位元；
+    /// 常數保留是為了讓 <see cref="ReadInfo(byte[])"/> 讀舊 EXE 時語意仍然可辨識。
+    /// </summary>
     public const uint FlagSinglePlayerOnly = 1;
+
+    /// <summary>ISSUE-069 之後 payload 寫入的 flags 值。</summary>
+    public const uint FlagsAllModes = 0;
 
     // CVX command scheduler:
     //   EDX = command definition
@@ -26,13 +40,196 @@ public static class ScopedTweakPatch
     public const uint CommandDelaySiteVa = 0x004FB6AB;
     public static readonly byte[] CommandDelayOriginal = [0x8B, 0x82, 0xF4, 0x00, 0x00, 0x00];
 
+    // ---------------------------------------------------------------------
+    // Obj::cmddelay — 原版兵營訓練真正走的那條路（ISSUE-072）
+    //
+    // 0x004FB6AB 只在「零參數的 Obj::Progress()」內，原版腳本只有英雄訓練、
+    // 建築修復、研究與造船走那一條。單位訓練（COMMANDS.XML 的 method="train"）
+    // 走的是 data.pak 內的 barrack 訓練腳本：
+    //
+    //     perc = 100 - EnvReadInt(.settlement, "BarrackTrainTimeDecrease");
+    //     .Progress((.cmddelay * perc) / 100);
+    //
+    // 也就是先用 Obj::cmddelay（註冊於 0x004FF99A，本體 0x004FB790）把
+    // definition+0xF4 的 execdelay 交還腳本，腳本自己算完再呼叫「一參數的
+    // Obj::Progress(int)」（0x004FB4F0）。兩個讀取點都不是 0x004FB6AB，
+    // 所以舊版的 train_speed 結構性無效。
+    //
+    // Obj::cmddelay 內 execdelay 的讀取點沒有同時持有發令物件：
+    //
+    //   004FB7E8 add eax,7C          ; eax = &obj->commands（此時 eax 還是物件）
+    //   ...      deque 索引運算，過程中 eax 被覆寫
+    //   004FB834 mov edx,[eax]       ; command instance
+    //   004FB836 mov eax,[edx+1C]    ; definition
+    //   004FB83E mov eax,[eax+F4]    ; execdelay ← 這裡 EAX 已經不是物件
+    //
+    // **不可以**像 2026-09-04 的 15 站點測試世代那樣，在 0x004FB7E8 把物件指標寫進
+    // section 裡的 scratch slot：`.cktw` 是以 CNT_CODE|MEM_EXECUTE|MEM_READ 建立的
+    // **唯讀**節區，執行期寫入必然觸發 Access Violation——那才是使用者回報「進入
+    // 單人遊戲閃退」的真正原因（ISSUE-072）。
+    //
+    // 正確且完全唯讀的取得方式：發令物件的 handle 仍原封不動地留在腳本 VM 的堆疊
+    // 頂端。0x004FB794 取得的 ESI 是 VM 堆疊指標的存放位置，0x004FB79D 把它退到
+    // handle 的起點，0x004FB79F 讀出的就是 handle dword；引擎自己在 0x00481A20 以
+    // `objects[handle & 0xFFFF]`（表位於 0x00798CB8）解出物件指標。helper 只要重做
+    // 同一次查表即可，全程零寫入、零堆疊猜測。
+    public const uint CommandDelayGetterSiteVa = 0x004FB83E;
+    public static readonly byte[] CommandDelayGetterOriginal = [0x8B, 0x80, 0xF4, 0x00, 0x00, 0x00];
+
+    /// <summary>已退役的 15 站點世代才會接管的站點（唯讀節區寫入，會閃退）。</summary>
+    public const uint CommandObjectSiteVa = 0x004FB7E8;
+    public static readonly byte[] CommandObjectOriginal = [0x83, 0xC0, 0x7C, 0x8B, 0xC8];
+    public const uint ObjectCommandDequeOffset = 0x7C;
+
+    /// <summary>
+    /// <c>0x00481A20</c> 的物件表基底：<c>objects[handle &amp; 0xFFFF]</c>
+    /// （<c>mov eax,[eax*4 + 0x798CB8]</c>）。
+    /// </summary>
+    public const uint ObjectHandleTableVa = 0x00798CB8;
+
+    // ---------------------------------------------------------------------
+    // 部隊進食：Settlement::TakeResource(amount, type) 的兩個「上繳伙食」呼叫點
+    // （ISSUE-071）
+    //
+    // 0x00516F00 是 TakeResource：資源存在 holder+type*4+0x14，type 1 = 食物，
+    // 回傳實際扣到的量。全 EXE 只有七個呼叫者，其中兩個是單位吃飯：
+    //
+    //   0050FCB1 — 隸屬聚落的單位（0x0050FC30，ESI = CVXUnit*、EDI = Settlement*）：
+    //              edx = class+0xEC（食量）− unit+0x120（存糧），扣完
+    //              unit+0x120 += 回傳值。**這條路徑完全沒有 feeds 旗標檢查**，
+    //              舊版掛在 CVXUnit::ProcessFood（0x0050B3DA）的 hook 管不到它，
+    //              這就是「我方設 0 仍然消耗食物」的真正原因。
+    //   0050B9AF — 在野外自行找補給的單位（CVXUnit::ProcessFood 內，
+    //              this 存放在 [esp+0x20]；本站點被呼叫時 esp 再低 0x0C）。
+    //
+    // 其餘五個呼叫者不是進食：0x004D5C6E/0x004D5C81 是生產單位的金錢與食物成本、
+    // 0x00516599/0x005166E8 是運輸車裝載、0x005A1D36 是巨石陣飢餓儀式。
+    // 因此只接管這兩個站點，不會影響建造成本或儀式。
+    public const uint FoodUpkeepSettlementSiteVa = 0x0050FCB1;
+    public static readonly byte[] FoodUpkeepSettlementOriginal = [0xE8, 0x4A, 0x72, 0x00, 0x00];
+    public const uint TakeResourceVa = 0x00516F00;
+
+    // ---------------------------------------------------------------------
+    // 部隊伙食的**主要**扣糧點：飢餓管理器的每回合輪詢（ISSUE-071 第二輪）
+    //
+    // 引擎另外維護一份「會進食的單位」名單，成員資格由 **class `+0x29C`（feeds）**
+    // 決定，不是由 instance `+0x138` 的位元決定：
+    //   0x005A1B40  加入（`mov eax,[class+0x29C]; test eax,eax; je skip`）
+    //   0x005A1BE0  移除（同樣的條件）
+    // 這也解釋了為什麼翻 instance 的位元完全沒有用——名單根本不看它。
+    // instance `+0x138` bit 17 只被 `0x005A21A9` 的回血常式讀（`0x0050B080`
+    // `CVXUnit::GetFeeds`，全 EXE 唯一呼叫者），與扣糧無關。
+    //
+    // 管理器的 tick 在 `0x005A1C60`，每次處理名單中的一段（round-robin）：
+    //   005A1CED mov eax,[cursor+8]        ; 單位
+    //   005A1CF6 mov cx,word [eax+0x10A]   ; 單位所屬聚落 handle
+    //   005A1D0E mov dx,word [esi+0x0A]    ; 聚落 -> 中央建築 handle
+    //   005A1D23 mov ax,word [edi+0x4A]    ; 中央建築 -> 資源持有物件
+    //   005A1D30 push 1 / push 1
+    //   005A1D36 call 0x00516F00           ; TakeResource(1, FOOD)  ← 這裡
+    //   005A1D3B test eax,eax / je 0x005A1D71
+    // 取得到就記一筆統計；取不到（聚落沒糧）才走 `0x005A1D71`，改扣單位自己的
+    // 存糧 `+0x120`，歸零就開始餓死。
+    //
+    // helper 用 `EDI`（中央建築，`0x005A1D1D` 已 null-check）的 `+0x90` owner 分流——
+    // 引擎自己在 `0x005A1D3F mov ecx,[edi+0x90]; mov eax,[ecx+8]` 用的就是同一個欄位。
+    // 全程不碰堆疊位移。
+    public const uint ArmyFoodUpkeepSiteVa = 0x005A1D36;
+    public static readonly byte[] ArmyFoodUpkeepOriginal = [0xE8, 0xC5, 0x51, 0xF7, 0xFF];
+
+    /// <summary>飢餓管理器 tick 內中央建築的 owner 欄位（與聚落同為 <c>+0x90</c>）。</summary>
+    public const uint CentralBuildingOwnerOffset = 0x90;
+
+    // ---------------------------------------------------------------------
+    // 「這個單位需不需要吃飯」的**正規開關**：class `+0x29C`（class XML 的
+    // `<properties feeds="0"/>`，地圖編輯器改的就是它）。
+    //
+    // 飢餓管理器的名單成員資格完全由它決定：
+    //   005A1B40 HungerManager::Add(Obj*)
+    //     005A1B41 mov eax,[esp+8]        ; eax = Obj*
+    //     005A1B46 mov esi,ecx            ; esi = manager
+    //     005A1B48 mov ecx,[eax+0x3A]     ; ecx = class
+    //     005A1B4B mov eax,[ecx+0x29C]    ; ← feeds
+    //     005A1B51 test eax,eax
+    //     005A1B53 je 0x005A1BD9          ; 不進食就根本不加入名單
+    //
+    // 在這裡分流，等於「對我方的單位把 class 的 feeds 當成 0」——與地圖編輯器
+    // 設定 `feeds="0"` 逐指令等價：單位從不進入名單，於是既不扣聚落的糧、也不會
+    // 扣自己背的糧（`0x005A1DA7 dec [unit+0x120]` 只在名單迴圈裡），更不會餓死。
+    // 原版的 `feeds` 值只是被替換，class 本身分毫未動，所以不會影響敵方或存檔。
+    public const uint HungerListAddSiteVa = 0x005A1B4B;
+    public static readonly byte[] HungerListAddOriginal = [0x8B, 0x81, 0x9C, 0x02, 0x00, 0x00];
+
+    /// <summary>class 的 <c>feeds</c> 欄位（class XML <c>&lt;properties feeds="..."/&gt;</c>）。</summary>
+    public const uint ClassFeedsOffset = 0x29C;
+
+    // ---------------------------------------------------------------------
+    // 部隊「自己背的糧」唯一的扣除點（ISSUE-071 第四輪）
+    //
+    // 飢餓名單的迴圈在拿不到聚落的糧時——單位沒有所屬聚落（`unit+0x10A` 解不到）、
+    // 聚落沒有中央建築，或 `TakeResource` 回 0——會走 `0x005A1D71` 這條分支，
+    // 改扣單位自己背的存糧：
+    //
+    //   005A1D71 mov eax,[esp+0x10]       ; 單位（迴圈開頭就存進去的）
+    //   005A1D75 mov ecx,[eax+0x120]      ; 自己背的糧
+    //   005A1D7D je  0x005A1E65           ; 已經是 0 -> 開始餓死
+    //   005A1D83 mov edx,[eax+0x6E]       ; owner（引擎自己在這裡直接解參考，
+    //   005A1D86 mov eax,[edx+8]          ;   證明這個位置的 owner 一定非 NULL）
+    //   005A1DA7 dec dword [eax+0x120]    ; ← 這裡，EAX 於 0x005A1DA3 重新載入
+    //   005A1DAD mov eax,[esp+0x10]       ; 之後才重新 test，所以旗標是死的
+    //
+    // 這條分支**不經過** `TakeResource`，因此 <see cref="ArmyFoodUpkeepSiteVa"/>
+    // 的 hook 攔不到它。野戰部隊（跟著英雄在外面、沒有所屬聚落）幾乎每回合都走
+    // 這裡，這就是使用者實測「部隊攜帶的食物還是會被消耗」的唯一成因。
+    //
+    // ⚠️ <see cref="HungerListAddSiteVa"/> 那一關**攔不到這件事**：
+    // `HungerManager::Add` 是在 CVXUnit 建構子尾端（`0x0050AA8C`）呼叫的，而基底
+    // 建構子才剛在 `0x004F115E mov dword [esi+0x6E],ebx` 把 owner 寫成 0；owner 要
+    // 等到之後的 `Object::SetPlayer`（<see cref="OwnerScalarSiteVa"/>）才會填上。
+    // 名單成員資格因此永遠拿不到 owner，helper 只能回退成原版 feeds 值——
+    // 第三輪的 hook 在實機上是完全惰性的（使用者實測證實）。
+    public const uint ArmyCarriedFoodSiteVa = 0x005A1DA7;
+    public static readonly byte[] ArmyCarriedFoodOriginal = [0xFF, 0x88, 0x20, 0x01, 0x00, 0x00];
+
+    /// <summary>單位自己背的存糧（instance <c>+0x120</c>，建構子以 class <c>+0xEC</c> 初始化）。</summary>
+    public const uint UnitCarriedFoodOffset = 0x120;
+
+    /// <summary>
+    /// 已退役：<c>0x0050B9AF</c>（CVXUnit::ProcessFood 內的野外補給呼叫）。
+    /// 15 站點世代假設 <c>[esp+0x2C]</c> 是 <c>this</c>，但 <c>0x0050B876</c> 起的
+    /// 網格迴圈早就把該槽位覆寫成整數，helper 於是把整數當指標解構而閃退。
+    /// **這個站點根本不需要**：野外自行覓食的單位一定先流經
+    /// <see cref="FeedsSiteVa"/> 的 feeds 閘門，helper 回 0 時
+    /// <c>0x0050B3EA</c> 直接跳到 <c>0x0050BAEC</c> 收尾，永遠到不了 0x0050B9AF。
+    /// </summary>
+    public const uint FoodUpkeepRoamingSiteVa = 0x0050B9AF;
+    public static readonly byte[] FoodUpkeepRoamingOriginal = [0xE8, 0x4C, 0xB5, 0x00, 0x00];
+
     // Steam 2004-02-19 engine globals / layouts used by the command helper.
+    //
+    // GameGlobalVa / SessionOffset / MultiplayerMaskOffset 是原廠 IsMultiplayer
+    // (0x005983D0) 的三段判斷，helper 自 ISSUE-069 起不再使用它們——實機量測證實
+    // [0x008C1C8C] 在單人對局中恆為 0（它是網路對戰的 game 物件），舊的
+    // fail-closed 守衛因此讓 11 個 hook 在單人模式永遠不會生效。常數保留供
+    // 逆向工程文件與未來診斷參考，不要重新接回守衛。
     public const uint GameGlobalVa = 0x008C1C8C;
     public const uint EngineBaseGlobalVa = 0x008AA6C8;
     public const uint SessionOffset = 0x50;
     public const uint MultiplayerMaskOffset = 0x108;
     public const uint LocalPlayerOffset = 0xCD0;
     public const uint ObjectOwnerOffset = 0x6E;
+
+    /// <summary>
+    /// player 結構內的玩家索引（<c>Obj::GetPlayer</c> 於 <c>0x004F868D</c>
+    /// 讀 <c>[player+8]</c> 後 +1 回傳）。
+    ///
+    /// **敵我分流一律比較這個索引，不比較 player 指標**：引擎自己在
+    /// <c>0x0050BA9B..0x0050BAAF</c>（「army starving」通知）就是
+    /// <c>[[obj+0x6E]+8] == [[engine+0xCD0]+8]</c> 這樣比的。指標相等一定索引相等，
+    /// 反之不然，所以索引比較是嚴格較寬鬆且與引擎語意一致的判定；舊版用指標比較，
+    /// 實機量測顯示我方單位一次都沒有被判成 self（ISSUE-071 的計數器 self=0）。
+    /// </summary>
+    public const uint PlayerIndexOffset = 0x08;
     public const uint CommandTrainFlagOffset = 0xCF;
     public const uint CommandResearchFlagOffset = 0xD0;
 
@@ -130,9 +327,85 @@ public static class ScopedTweakPatch
     private const uint OwnerScalarHelperOffset = 2176;
     private const uint SpeedHelperOffset = 2688;
     private const uint FeedsHelperOffset = 3072;
+    private const uint CommandObjectHelperOffset = 3200;
+    private const uint CommandDelayGetterHelperOffset = 3328;
+    private const uint FoodUpkeepSettlementHelperOffset = 3584;
+    private const uint FoodUpkeepRoamingHelperOffset = 3712;
+
+    /// <summary>
+    /// 已退役的 15 站點世代在此存放發令物件指標。`.cktw` 是唯讀節區，執行期寫入
+    /// 會直接 Access Violation，因此**目前世代完全不使用這個槽位**（ISSUE-072）。
+    /// 常數保留只為了辨識並還原舊世代的 EXE。
+    /// </summary>
+    private const uint CommandObjectSlotOffset = 3840;
+
+    /// <summary>
+    /// ISSUE-071 第三輪：飢餓名單成員資格 helper（3712..3903，192 bytes）。
+    /// 這段是已退役 15 站點世代的 roaming helper 與物件 scratch slot 留下的空間。
+    /// </summary>
+    private const uint HungerListAddHelperOffset = 3712;
+
+    /// <summary>ISSUE-071 第二輪：飢餓管理器 tick 的扣糧 helper（3904..4095）。</summary>
+    private const uint ArmyFoodUpkeepHelperOffset = 3904;
     private const uint ConfigOffset = 4096;
     private const uint ConfigCount = 67;
-    private const uint HookCount = 11;
+
+    /// <summary>
+    /// ISSUE-071 第四輪：單位自己背的糧扣除點 helper（4608..4799，192 bytes）。
+    ///
+    /// 刻意放在**設定表之後**，是為了不動任何一個既有 helper 的位移：
+    /// <see cref="ConfigOffset"/> 與前面 14 個 helper 的位置一個位元組都沒變，
+    /// 舊世代的 <c>ReadInfo</c> 判定因此完全不受影響。`.cktw` 的每一個世代都是
+    /// 8192 bytes（<c>VirtualSize</c>／<c>SizeOfRawData</c> 都對齊到 0x1000），
+    /// 所以就地升級舊世代時這一段一定落在已對映、可執行的範圍內。
+    /// </summary>
+    private const uint ArmyCarriedFoodHelperOffset = 4608;
+
+    /// <summary>`.cktw` payload 長度：設定表之後還有第四輪新增的 helper。</summary>
+    private const uint PayloadSize = ArmyCarriedFoodHelperOffset + 192;
+
+    /// <summary>
+    /// 目前世代的 hook 站點數：11 個長期穩定站點，加上 ISSUE-071／072 重新設計的
+    /// 五個站點（<see cref="CommandDelayGetterSiteVa"/>、
+    /// <see cref="FoodUpkeepSettlementSiteVa"/>、<see cref="ArmyFoodUpkeepSiteVa"/>、
+    /// <see cref="HungerListAddSiteVa"/> 與 <see cref="ArmyCarriedFoodSiteVa"/>）。
+    /// </summary>
+    private const uint HookCount = 16;
+
+    /// <summary>
+    /// 第一版 13 站點世代：進食只掛了 <see cref="FoodUpkeepSettlementSiteVa"/>，
+    /// 漏掉真正的主要扣糧點 <see cref="ArmyFoodUpkeepSiteVa"/>（使用者實測仍然消耗食物）。
+    /// </summary>
+    private const uint LegacyThirteenHookCount = 13;
+
+    /// <summary>
+    /// 第二版 14 站點世代：加上了扣糧點，但還沒有從名單成員資格
+    /// （<see cref="HungerListAddSiteVa"/>）下手。
+    /// </summary>
+    private const uint LegacyFourteenHookCount = 14;
+
+    /// <summary>
+    /// 第三版 15 站點世代：接管了飢餓名單成員資格（<see cref="HungerListAddSiteVa"/>），
+    /// 但那一關在實機上是惰性的——`HungerManager::Add` 由建構子呼叫，此時
+    /// <c>[obj+0x6E]</c> 還是 0，敵我分流永遠回退成原版值。同時漏掉了單位
+    /// 自己背的糧的扣除點 <see cref="ArmyCarriedFoodSiteVa"/>。
+    ///
+    /// ⚠️ 數值與已退役的 <see cref="Obsolete15HookCount"/> 相同，因此世代判定**不能**
+    /// 只看 header 的數字：<see cref="HasGenerationTwoLayout"/> 先看
+    /// <see cref="ObsoleteFifteenOnlySites"/> 是不是跳板，那兩個站點只有已退役世代會動。
+    /// </summary>
+    private const uint LegacyFifteenHookCount = 15;
+
+    /// <summary>
+    /// ISSUE-069 世代（11 個站點）：四個選配站點全部維持原版位元組。
+    /// </summary>
+    private const uint LegacyElevenHookCount = 11;
+
+    /// <summary>
+    /// 已廢棄的 15 站點測試世代（ISSUE-071／072 的第一次嘗試，會閃退）。
+    /// <see cref="ReadInfo(PeFile)"/> 必須繼續接受，才能自動就地安全還原回原版。
+    /// </summary>
+    private const uint Obsolete15HookCount = 15;
 
     /// <summary>
     /// Command 相關設定。<see cref="SelfWagonBuildMilliseconds"/> 與 <see cref="EnemyWagonBuildMilliseconds"/>
@@ -376,7 +649,8 @@ public static class ScopedTweakPatch
 
     /// <summary>
     /// 建立有效 scoped 設定。明確 scope 優先，其次是舊版單值，最後是原廠值。
-    /// 未列出的項目（hero、種族、speed、feeds、wagon）刻意保持原版路徑。
+    /// <see cref="SupportedScopes"/> 以外的項目（英雄專屬數值、成長常數、種族倍率）
+    /// 刻意保持 data.pak 路徑。
     /// </summary>
     public static bool TryBuildSettings(TrainerConfig trainer, out LegacySettings settings)
     {
@@ -588,7 +862,12 @@ public static class ScopedTweakPatch
 
         try
         {
-            PatchInfo info = ReadInfo(PeFile.Parse(exeBytes));
+            var pe = PeFile.Parse(exeBytes);
+            PatchInfo info = ReadInfo(pe);
+            // 舊世代的 helper 帶著正確的設定表也不算通過：verify 必須要求使用者
+            // 重新套用，否則會對著「守衛還在、永遠不生效」的 EXE 回報 OK（ISSUE-069）。
+            if (!HasCurrentHelpers(pe, info))
+                return false;
             return info.Settings == settings.Command &&
                    info.Production == settings.Production &&
                    info.Population == settings.Population &&
@@ -634,7 +913,48 @@ public static class ScopedTweakPatch
         PopulationSettings Population,
         CapacitySettings Capacity,
         InitialGoldSettings InitialGold,
-        UnitScalarSettings UnitScalars);
+        UnitScalarSettings UnitScalars)
+    {
+        /// <summary>ISSUE-072：<c>Obj::cmddelay</c> 的發令物件暫存 helper。</summary>
+        public uint CommandObjectHelperVa => SectionVa + CommandObjectHelperOffset;
+
+        /// <summary>ISSUE-072：<c>Obj::cmddelay</c> 的 execdelay 縮放 helper。</summary>
+        public uint CommandDelayGetterHelperVa => SectionVa + CommandDelayGetterHelperOffset;
+
+        /// <summary>ISSUE-071：隸屬聚落的單位進食扣糧 helper。</summary>
+        public uint FoodUpkeepSettlementHelperVa => SectionVa + FoodUpkeepSettlementHelperOffset;
+
+        /// <summary>ISSUE-071：飢餓管理器 tick 的扣糧 helper。</summary>
+        public uint ArmyFoodUpkeepHelperVa => SectionVa + ArmyFoodUpkeepHelperOffset;
+
+        /// <summary>ISSUE-071：飢餓名單成員資格（class feeds）helper。</summary>
+        public uint HungerListAddHelperVa => SectionVa + HungerListAddHelperOffset;
+
+        /// <summary>ISSUE-071 第四輪：單位自己背的糧扣除點 helper。</summary>
+        public uint ArmyCarriedFoodHelperVa => SectionVa + ArmyCarriedFoodHelperOffset;
+
+        /// <summary>已退役的野外補給 helper（15 站點世代）。</summary>
+        public uint FoodUpkeepRoamingHelperVa => SectionVa + FoodUpkeepRoamingHelperOffset;
+
+        /// <summary>已退役的發令物件暫存槽（15 站點世代，寫入唯讀節區）。</summary>
+        public uint CommandObjectSlotVa => SectionVa + CommandObjectSlotOffset;
+
+        /// <summary>是否為 ISSUE-069 世代（11 個站點）的舊 section。</summary>
+        public bool IsLegacyGeneration => Hooks == LegacyElevenHookCount;
+
+        /// <summary>是否為第一版 13 站點世代（進食漏掉主要扣糧點）。</summary>
+        public bool IsLegacyThirteenGeneration => Hooks == LegacyThirteenHookCount;
+
+        /// <summary>是否為第二版 14 站點世代（尚未接管飢餓名單成員資格）。</summary>
+        public bool IsLegacyFourteenGeneration => Hooks == LegacyFourteenHookCount;
+
+        /// <summary>
+        /// 是否為第三版 15 站點世代（飢餓名單成員資格那一關惰性，且尚未接管
+        /// 單位自己背的糧）。與已退役的 15 站點測試世代同號，因此只有在
+        /// <see cref="HasGenerationTwoLayout"/> 已排除後者時才有意義。
+        /// </summary>
+        public bool IsLegacyFifteenGeneration => Hooks == LegacyFifteenHookCount;
+    }
 
     public static bool IsOriginal(byte[] exeBytes)
     {
@@ -663,7 +983,8 @@ public static class ScopedTweakPatch
                    pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length)
                      .AsSpan().SequenceEqual(SpeedOriginal) &&
                    pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length)
-                     .AsSpan().SequenceEqual(FeedsOriginal);
+                     .AsSpan().SequenceEqual(FeedsOriginal) &&
+                   GenerationTwoSitesAreOriginal(pe);
         }
         catch { return false; }
     }
@@ -674,7 +995,9 @@ public static class ScopedTweakPatch
         {
             var pe = PeFile.Parse(exeBytes);
             PatchInfo info = ReadInfo(pe);
-            return HasKnownCommandHook(pe, info);
+            // 用 layout 而不是 helper 位元組：舊世代的 .cktw 仍然是「我們埋的」，
+            // 必須被辨識成 patched 才能被 PatchState 正常還原（ISSUE-069）。
+            return HasOurHookLayout(pe, info);
         }
         catch { return false; }
     }
@@ -694,8 +1017,29 @@ public static class ScopedTweakPatch
         if (sectionIndex >= 0)
         {
             PatchInfo existing = ReadInfo(pe);
-            if (!HasKnownCommandHook(pe, existing))
+            if (!HasOurHookLayout(pe, existing))
                 throw new InvalidOperationException(Strings.Get("Error_CktwUnknownHookState"));
+
+            // 舊世代的 section：11 個站點的跳板還是我們的，但 helper 本體是上一版
+            // 產生的。就地重建 helper 與 header 長度欄位，使用者不必先手動還原
+            // 再重套（ISSUE-069）。重建後一律重寫設定表，避免「值相同就跳過」
+            // 讓升級只做了一半。
+            // 注意：目前世代的 header hook 數與已退役的 15 站點測試世代相同，
+            // 所以「要不要就地重建」不能只比數字——還要確認那兩個危險站點確實
+            // 已經是原版位元組，否則舊世代的跳板會被原封留下來。
+            bool helpersRebuilt = false;
+            if (existing.Hooks != HookCount ||
+                !SitesAreOriginal(pe, ObsoleteFifteenOnlySites) ||
+                !HasCurrentHelpers(pe, existing))
+            {
+                // 先把已退役的 15 站點世代那兩個危險站點還原成原版 Steam 位元組，
+                // 再寫入目前世代的跳板；順序反過來會把新跳板蓋掉。
+                foreach ((uint siteVa, byte[] original, string _) in ObsoleteFifteenOnlySites)
+                    pe.WriteBytesAtVa(siteVa, original);
+                WriteHelperBodies(pe, existing.SectionVa);
+                WriteHookTrampolines(pe, existing.SectionVa);
+                helpersRebuilt = true;
+            }
 
             CommandSettings effectiveCommand = settings is null ? existing.Settings : ValidateSettings(settings);
             ProductionSettings updatedProduction = production ?? existing.Production;
@@ -711,7 +1055,8 @@ public static class ScopedTweakPatch
             UnitScalarSettings updatedUnitScalars = unitScalars is null
                 ? existing.UnitScalars
                 : ValidateUnitScalarSettings(unitScalars);
-            if (effectiveCommand != existing.Settings || updatedProduction != existing.Production ||
+            if (helpersRebuilt ||
+                effectiveCommand != existing.Settings || updatedProduction != existing.Production ||
                 updatedPopulation != existing.Population || updatedCapacity != existing.Capacity ||
                 updatedInitialGold != existing.InitialGold || updatedUnitScalars != existing.UnitScalars)
                 WriteSettings(pe, existing.SectionVa, effectiveCommand, updatedProduction,
@@ -737,6 +1082,8 @@ public static class ScopedTweakPatch
         ValidateOriginalSite(pe, OwnerScalarSiteVa, OwnerScalarOriginal, "owner-scalars");
         ValidateOriginalSite(pe, SpeedSiteVa, SpeedOriginal, "all-unit-speed");
         ValidateOriginalSite(pe, FeedsSiteVa, FeedsOriginal, "unit-feeds");
+        foreach ((uint siteVa, byte[] original, string name) in OptionalSites)
+            ValidateOriginalSite(pe, siteVa, original, name);
 
         CommandSettings effective = ValidateSettings(settings ?? CommandSettings.Vanilla);
         ProductionSettings effectiveProduction = production ?? ProductionSettings.Vanilla;
@@ -756,6 +1103,18 @@ public static class ScopedTweakPatch
             payload);
 
         uint sectionVa = checked((uint)pe.ImageBase + section.VirtualAddress);
+        WriteHelperBodies(pe, sectionVa);
+        WriteHookTrampolines(pe, sectionVa);
+        return pe.ToBytes();
+    }
+
+    /// <summary>
+    /// 把目前這一版的 15 個 helper 本體與 header 內的長度／站點數欄位寫進 <c>.cktw</c>。
+    /// 新建 section 與「就地升級舊世代 section」共用同一份程式碼，兩條路徑因此
+    /// 不可能長出不一樣的 helper（ISSUE-069）。
+    /// </summary>
+    private static void WriteHelperBodies(PeFile pe, uint sectionVa)
+    {
         uint helperVa = sectionVa + CommandHelperOffset;
         byte[] helper = BuildCommandHelper(sectionVa + ConfigOffset);
         byte[] goldHelper = BuildGoldProductionHelper(sectionVa + ConfigOffset);
@@ -771,6 +1130,19 @@ public static class ScopedTweakPatch
         byte[] ownerScalarHelper = BuildOwnerScalarHelper(sectionVa + ConfigOffset);
         byte[] speedHelper = BuildSpeedHelper(sectionVa + ConfigOffset);
         byte[] feedsHelper = BuildFeedsHelper(sectionVa + ConfigOffset);
+        byte[] commandDelayGetterHelper = BuildCommandDelayGetterHelper(sectionVa + ConfigOffset);
+        byte[] foodUpkeepSettlementHelper = BuildFoodUpkeepHelper(
+            sectionVa + ConfigOffset, sectionVa + FoodUpkeepSettlementHelperOffset);
+        byte[] armyFoodUpkeepHelper = BuildArmyFoodUpkeepHelper(
+            sectionVa + ConfigOffset, sectionVa + ArmyFoodUpkeepHelperOffset);
+        byte[] hungerListAddHelper = BuildHungerListAddHelper(sectionVa + ConfigOffset);
+        byte[] armyCarriedFoodHelper = BuildArmyCarriedFoodHelper(sectionVa + ConfigOffset);
+        if (commandDelayGetterHelper.Length > FoodUpkeepSettlementHelperOffset - CommandDelayGetterHelperOffset ||
+            foodUpkeepSettlementHelper.Length > HungerListAddHelperOffset - FoodUpkeepSettlementHelperOffset ||
+            hungerListAddHelper.Length > ArmyFoodUpkeepHelperOffset - HungerListAddHelperOffset ||
+            armyFoodUpkeepHelper.Length > ConfigOffset - ArmyFoodUpkeepHelperOffset ||
+            armyCarriedFoodHelper.Length > PayloadSize - ArmyCarriedFoodHelperOffset)
+            throw new InvalidOperationException("Internal: .cktw helper exceeds the reserved space.");
         if (helper.Length > GoldHelperOffset - CommandHelperOffset ||
             goldHelper.Length > FoodHelperOffset - GoldHelperOffset ||
             foodHelper.Length > PopulationGrowthAmountHelperOffset - FoodHelperOffset ||
@@ -781,9 +1153,15 @@ public static class ScopedTweakPatch
             initialGoldHelper.Length > OwnerScalarHelperOffset - InitialGoldHelperOffset ||
             ownerScalarHelper.Length > SpeedHelperOffset - OwnerScalarHelperOffset ||
             speedHelper.Length > FeedsHelperOffset - SpeedHelperOffset ||
-            feedsHelper.Length > ConfigOffset - FeedsHelperOffset)
+            feedsHelper.Length > CommandDelayGetterHelperOffset - FeedsHelperOffset)
             throw new InvalidOperationException("Internal: .cktw helper exceeds the reserved space.");
 
+        // 這一版的 hook 數寫回 header：舊世代 section 就地升級時同樣要更新，
+        // 否則 ReadInfo 會把升級過的 section 當成舊世代（ISSUE-071／072）。
+        pe.WriteUInt32AtVa(sectionVa + 32, HookCount);
+        // 就地升級舊世代時 payload 長度也要跟著更新：第四輪的 helper 落在設定表
+        // 之後，舊 header 記載的 4364 會讓 ReadInfo 的長度欄位與實際內容不一致。
+        pe.WriteUInt32AtVa(sectionVa + 16, PayloadSize);
         pe.WriteUInt32AtVa(sectionVa + 40, checked((uint)helper.Length));
         pe.WriteUInt32AtVa(sectionVa + 44, GoldHelperOffset);
         pe.WriteUInt32AtVa(sectionVa + 48, checked((uint)goldHelper.Length));
@@ -800,7 +1178,19 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(sectionVa + OwnerScalarHelperOffset, ownerScalarHelper);
         pe.WriteBytesAtVa(sectionVa + SpeedHelperOffset, speedHelper);
         pe.WriteBytesAtVa(sectionVa + FeedsHelperOffset, feedsHelper);
-        pe.WriteBytesAtVa(CommandDelaySiteVa, BuildCommandHook(helperVa));
+        pe.WriteBytesAtVa(sectionVa + CommandDelayGetterHelperOffset, commandDelayGetterHelper);
+        pe.WriteBytesAtVa(sectionVa + FoodUpkeepSettlementHelperOffset, foodUpkeepSettlementHelper);
+        pe.WriteBytesAtVa(sectionVa + ArmyFoodUpkeepHelperOffset, armyFoodUpkeepHelper);
+        pe.WriteBytesAtVa(sectionVa + HungerListAddHelperOffset, hungerListAddHelper);
+        pe.WriteBytesAtVa(sectionVa + ArmyCarriedFoodHelperOffset, armyCarriedFoodHelper);
+    }
+
+    /// <summary>
+    /// 把目前世代的 13 個站點跳板寫進 <c>.text</c>。
+    /// </summary>
+    private static void WriteHookTrampolines(PeFile pe, uint sectionVa)
+    {
+        pe.WriteBytesAtVa(CommandDelaySiteVa, BuildCommandHook(sectionVa + CommandHelperOffset));
         pe.WriteBytesAtVa(GoldProductionSiteVa,
             BuildRelativeCall(GoldProductionSiteVa, sectionVa + GoldHelperOffset, GoldProductionOriginal.Length));
         pe.WriteBytesAtVa(FoodProductionSiteVa,
@@ -825,8 +1215,50 @@ public static class ScopedTweakPatch
             BuildRelativeCall(SpeedSiteVa, sectionVa + SpeedHelperOffset, SpeedOriginal.Length));
         pe.WriteBytesAtVa(FeedsSiteVa,
             BuildRelativeCall(FeedsSiteVa, sectionVa + FeedsHelperOffset, FeedsOriginal.Length));
-        return pe.ToBytes();
+        pe.WriteBytesAtVa(CommandDelayGetterSiteVa,
+            BuildRelativeCall(CommandDelayGetterSiteVa,
+                sectionVa + CommandDelayGetterHelperOffset, CommandDelayGetterOriginal.Length));
+        pe.WriteBytesAtVa(FoodUpkeepSettlementSiteVa,
+            BuildRelativeCall(FoodUpkeepSettlementSiteVa,
+                sectionVa + FoodUpkeepSettlementHelperOffset, FoodUpkeepSettlementOriginal.Length));
+        pe.WriteBytesAtVa(ArmyFoodUpkeepSiteVa,
+            BuildRelativeCall(ArmyFoodUpkeepSiteVa,
+                sectionVa + ArmyFoodUpkeepHelperOffset, ArmyFoodUpkeepOriginal.Length));
+        pe.WriteBytesAtVa(HungerListAddSiteVa,
+            BuildRelativeCall(HungerListAddSiteVa,
+                sectionVa + HungerListAddHelperOffset, HungerListAddOriginal.Length));
+        pe.WriteBytesAtVa(ArmyCarriedFoodSiteVa,
+            BuildRelativeCall(ArmyCarriedFoodSiteVa,
+                sectionVa + ArmyCarriedFoodHelperOffset, ArmyCarriedFoodOriginal.Length));
     }
+
+    /// <summary>目前世代（16 站點）在 11 個穩定站點之外多接管的五個站點。</summary>
+    private static readonly (uint SiteVa, byte[] Original, string Name)[] GenerationTwoSites =
+    [
+        (CommandDelayGetterSiteVa, CommandDelayGetterOriginal, "command-delay-getter"),
+        (FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal, "food-upkeep-settlement"),
+        (ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal, "army-food-upkeep"),
+        (HungerListAddSiteVa, HungerListAddOriginal, "hunger-list-add"),
+        (ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal, "army-carried-food"),
+    ];
+
+    /// <summary>只有已退役的 15 站點世代才會接管、目前世代必須維持原版的兩個站點。</summary>
+    private static readonly (uint SiteVa, byte[] Original, string Name)[] ObsoleteFifteenOnlySites =
+    [
+        (CommandObjectSiteVa, CommandObjectOriginal, "command-object"),
+        (FoodUpkeepRoamingSiteVa, FoodUpkeepRoamingOriginal, "food-upkeep-roaming"),
+    ];
+
+    /// <summary>本工具曾經或現在會接管的全部選配站點（原版判定與還原用）。</summary>
+    private static readonly (uint SiteVa, byte[] Original, string Name)[] OptionalSites =
+        [.. GenerationTwoSites, .. ObsoleteFifteenOnlySites];
+
+    private static bool SitesAreOriginal(
+        PeFile pe, (uint SiteVa, byte[] Original, string Name)[] sites) =>
+        sites.All(site =>
+            pe.ReadBytesAtVa(site.SiteVa, site.Original.Length).AsSpan().SequenceEqual(site.Original));
+
+    private static bool GenerationTwoSitesAreOriginal(PeFile pe) => SitesAreOriginal(pe, OptionalSites);
 
     public static byte[] Reverse(byte[] exeBytes)
     {
@@ -854,13 +1286,14 @@ public static class ScopedTweakPatch
                 !pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length)
                    .AsSpan().SequenceEqual(SpeedOriginal) ||
                 !pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length)
-                   .AsSpan().SequenceEqual(FeedsOriginal))
+                   .AsSpan().SequenceEqual(FeedsOriginal) ||
+                !GenerationTwoSitesAreOriginal(pe))
                 throw new InvalidOperationException(Strings.Get("Error_CktwMissingButPatched"));
             return pe.ToBytes();
         }
 
         PatchInfo info = ReadInfo(pe);
-        if (!HasKnownCommandHook(pe, info))
+        if (!HasOurHookLayout(pe, info))
             throw new InvalidOperationException(Strings.Get("Error_CktwHookModified"));
 
         pe.WriteBytesAtVa(CommandDelaySiteVa, CommandDelayOriginal);
@@ -874,6 +1307,10 @@ public static class ScopedTweakPatch
         pe.WriteBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal);
         pe.WriteBytesAtVa(SpeedSiteVa, SpeedOriginal);
         pe.WriteBytesAtVa(FeedsSiteVa, FeedsOriginal);
+        // HasOurHookLayout 已確保這些選配站點要嘛是本工具某一個世代的跳板、要嘛
+        // 還是原版位元組，因此無條件寫回原版對三種世代都正確。
+        foreach ((uint siteVa, byte[] original, string _) in OptionalSites)
+            pe.WriteBytesAtVa(siteVa, original);
         pe.RemoveSection(SectionName, info.OriginalFileLength);
         return pe.ToBytes();
     }
@@ -895,7 +1332,10 @@ public static class ScopedTweakPatch
             throw new InvalidOperationException(Strings.Get("Error_CktwBadHeaderLayout"));
         if (pe.ReadUInt32(raw + 24) != ConfigOffset || pe.ReadUInt32(raw + 28) != ConfigCount)
             throw new InvalidOperationException(Strings.Get("Error_CktwBadCommandTableLayout"));
-        if (pe.ReadUInt32(raw + 32) != HookCount)
+        uint hooks = pe.ReadUInt32(raw + 32);
+        if (hooks != HookCount && hooks != LegacyElevenHookCount &&
+            hooks != LegacyThirteenHookCount && hooks != LegacyFourteenHookCount &&
+            hooks != LegacyFifteenHookCount)
             throw new InvalidOperationException(Strings.Get("Error_CktwHookManifestCountMismatch"));
 
         uint helperSize = pe.ReadUInt32(raw + 40);
@@ -986,7 +1426,7 @@ public static class ScopedTweakPatch
             sectionVa + OwnerScalarHelperOffset, ownerScalarSize,
             sectionVa + SpeedHelperOffset, speedHelperSize,
             sectionVa + FeedsHelperOffset, feedsHelperSize,
-            flags, HookCount, settings, production, population, capacity, initialGold, unitScalars);
+            flags, hooks, settings, production, population, capacity, initialGold, unitScalars);
     }
 
     private static byte[] BuildPayload(
@@ -998,8 +1438,7 @@ public static class ScopedTweakPatch
         InitialGoldSettings initialGold,
         UnitScalarSettings unitScalars)
     {
-        int payloadSize = checked((int)(ConfigOffset + ConfigCount * 4));
-        byte[] payload = new byte[payloadSize];
+        byte[] payload = new byte[checked((int)PayloadSize)];
 
         Write(payload, 0, Magic);
         Write(payload, 4, FormatVersion);
@@ -1010,7 +1449,7 @@ public static class ScopedTweakPatch
         Write(payload, 24, ConfigOffset);
         Write(payload, 28, ConfigCount);
         Write(payload, 32, HookCount);
-        Write(payload, 36, FlagSinglePlayerOnly);
+        Write(payload, 36, FlagsAllModes);
 
         int cfg = (int)ConfigOffset;
         Write(payload, cfg, settings.SelfTrainSpeedQ16);
@@ -1083,12 +1522,149 @@ public static class ScopedTweakPatch
         return payload;
     }
 
-    private static bool HasKnownCommandHook(PeFile pe, PatchInfo info)
+    /// <summary>
+    /// 這個 <c>.cktw</c> 是不是本工具埋的：只比對各站點寫入的跳板位元組。
+    ///
+    /// 這些位元組只由「站點位址」與「section 內固定的 helper 位移」決定，完全不含
+    /// helper 本體，所以**任何世代**的 .cktw 都能被正確辨識並移除。辨識與移除必須
+    /// 用這一條，不能用 <see cref="HasCurrentHelpers"/>——否則升級工具版本之後，
+    /// 使用者上一版修補過的 EXE 會被判成第三方修改而拒絕還原（ISSUE-069）。
+    /// </summary>
+    private static bool HasOurHookLayout(PeFile pe, PatchInfo info)
     {
         byte[] expectedHook = BuildCommandHook(info.HelperVa);
-        if (!pe.ReadBytesAtVa(CommandDelaySiteVa, expectedHook.Length).AsSpan().SequenceEqual(expectedHook))
-            return false;
+        return pe.ReadBytesAtVa(CommandDelaySiteVa, expectedHook.Length).AsSpan().SequenceEqual(expectedHook) &&
+               pe.ReadBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(GoldProductionSiteVa, info.GoldHelperVa, GoldProductionOriginal.Length)) &&
+               pe.ReadBytesAtVa(FoodProductionSiteVa, FoodProductionOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(FoodProductionSiteVa, info.FoodHelperVa, FoodProductionOriginal.Length)) &&
+               pe.ReadBytesAtVa(PopulationGrowthAmountSiteVa, PopulationGrowthAmountOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(PopulationGrowthAmountSiteVa,
+                     info.PopulationGrowthAmountHelperVa, PopulationGrowthAmountOriginal.Length)) &&
+               pe.ReadBytesAtVa(PopulationGrowthIntervalSiteVa, PopulationGrowthIntervalOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(PopulationGrowthIntervalSiteVa,
+                     info.PopulationGrowthIntervalHelperVa, PopulationGrowthIntervalOriginal.Length)) &&
+               pe.ReadBytesAtVa(PopulationLossPercentSiteVa, PopulationLossPercentOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(PopulationLossPercentSiteVa,
+                     info.PopulationLossPercentHelperVa, PopulationLossPercentOriginal.Length)) &&
+               pe.ReadBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(PopulationLossIntervalSiteVa,
+                     info.PopulationLossIntervalHelperVa, PopulationLossIntervalOriginal.Length)) &&
+               pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(InitialGoldSiteVa,
+                     info.InitialGoldHelperVa, InitialGoldOriginal.Length)) &&
+               pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(OwnerScalarSiteVa,
+                     info.OwnerScalarHelperVa, OwnerScalarOriginal.Length)) &&
+               pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(SpeedSiteVa,
+                     info.SpeedHelperVa, SpeedOriginal.Length)) &&
+               pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length).AsSpan()
+                 .SequenceEqual(BuildRelativeCall(FeedsSiteVa,
+                     info.FeedsHelperVa, FeedsOriginal.Length)) &&
+               HasGenerationTwoLayout(pe, info);
+    }
 
+    /// <summary>
+    /// 選配站點的世代判定。header 記載的站點數決定每個站點應該長什麼樣：
+    ///
+    /// <list type="bullet">
+    /// <item>16（目前世代）：<see cref="GenerationTwoSites"/> 五個站點都是我們的跳板，
+    ///   <see cref="ObsoleteFifteenOnlySites"/> 仍是原版位元組。</item>
+    /// <item>15（第三版進食修復）：少了 <see cref="ArmyCarriedFoodSiteVa"/>。</item>
+    /// <item>14（第二版進食修復）：再少了 <see cref="HungerListAddSiteVa"/>。</item>
+    /// <item>13（第一版進食修復）：再少了 <see cref="ArmyFoodUpkeepSiteVa"/>。</item>
+    /// <item>11（ISSUE-069 世代）：全部選配站點都是原版位元組。</item>
+    /// <item>15（已退役的測試世代）：四個舊站點是跳板——**數字與目前世代相同**，
+    ///   靠 <see cref="ObsoleteFifteenOnlySites"/> 是不是跳板來區分。</item>
+    /// </list>
+    ///
+    /// 三種都算「本工具埋的、可以安全還原」；皆非代表第三方也動過同一段程式碼，
+    /// 必須拒絕。
+    /// </summary>
+    private static bool HasGenerationTwoLayout(PeFile pe, PatchInfo info)
+    {
+        bool IsTrampoline(uint siteVa, byte[] original, uint helperOffset) =>
+            pe.ReadBytesAtVa(siteVa, original.Length).AsSpan()
+              .SequenceEqual(BuildRelativeCall(siteVa, info.SectionVa + helperOffset, original.Length));
+
+        bool IsVanilla(uint siteVa, byte[] original) =>
+            pe.ReadBytesAtVa(siteVa, original.Length).AsSpan().SequenceEqual(original);
+
+        // 已退役的 15 站點測試世代是唯一會接管這兩個站點的世代，先把它分出來——
+        // 它的 header hook 數與目前世代同為 15，光看數字分不出來。
+        if (!SitesAreOriginal(pe, ObsoleteFifteenOnlySites))
+            return info.Hooks == Obsolete15HookCount &&
+                   IsTrampoline(CommandObjectSiteVa, CommandObjectOriginal,
+                       CommandObjectHelperOffset) &&
+                   IsTrampoline(CommandDelayGetterSiteVa, CommandDelayGetterOriginal,
+                       CommandDelayGetterHelperOffset) &&
+                   IsTrampoline(FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal,
+                       FoodUpkeepSettlementHelperOffset) &&
+                   IsTrampoline(FoodUpkeepRoamingSiteVa, FoodUpkeepRoamingOriginal,
+                       FoodUpkeepRoamingHelperOffset) &&
+                   IsVanilla(ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal) &&
+                   IsVanilla(HungerListAddSiteVa, HungerListAddOriginal) &&
+                   IsVanilla(ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal);
+
+        // 以下都是「兩個危險站點維持原版」的世代，可以直接用 header 的數字區分。
+        return info.Hooks switch
+        {
+            LegacyElevenHookCount =>
+                SitesAreOriginal(pe, GenerationTwoSites),
+
+            LegacyThirteenHookCount =>
+                IsTrampoline(CommandDelayGetterSiteVa, CommandDelayGetterOriginal,
+                    CommandDelayGetterHelperOffset) &&
+                IsTrampoline(FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal,
+                    FoodUpkeepSettlementHelperOffset) &&
+                IsVanilla(ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal) &&
+                IsVanilla(HungerListAddSiteVa, HungerListAddOriginal) &&
+                IsVanilla(ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal),
+
+            LegacyFourteenHookCount =>
+                IsTrampoline(CommandDelayGetterSiteVa, CommandDelayGetterOriginal,
+                    CommandDelayGetterHelperOffset) &&
+                IsTrampoline(FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal,
+                    FoodUpkeepSettlementHelperOffset) &&
+                IsTrampoline(ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal,
+                    ArmyFoodUpkeepHelperOffset) &&
+                IsVanilla(HungerListAddSiteVa, HungerListAddOriginal) &&
+                IsVanilla(ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal),
+
+            LegacyFifteenHookCount =>
+                IsTrampoline(CommandDelayGetterSiteVa, CommandDelayGetterOriginal,
+                    CommandDelayGetterHelperOffset) &&
+                IsTrampoline(FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal,
+                    FoodUpkeepSettlementHelperOffset) &&
+                IsTrampoline(ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal,
+                    ArmyFoodUpkeepHelperOffset) &&
+                IsTrampoline(HungerListAddSiteVa, HungerListAddOriginal,
+                    HungerListAddHelperOffset) &&
+                IsVanilla(ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal),
+
+            HookCount =>
+                IsTrampoline(CommandDelayGetterSiteVa, CommandDelayGetterOriginal,
+                    CommandDelayGetterHelperOffset) &&
+                IsTrampoline(FoodUpkeepSettlementSiteVa, FoodUpkeepSettlementOriginal,
+                    FoodUpkeepSettlementHelperOffset) &&
+                IsTrampoline(ArmyFoodUpkeepSiteVa, ArmyFoodUpkeepOriginal,
+                    ArmyFoodUpkeepHelperOffset) &&
+                IsTrampoline(HungerListAddSiteVa, HungerListAddOriginal,
+                    HungerListAddHelperOffset) &&
+                IsTrampoline(ArmyCarriedFoodSiteVa, ArmyCarriedFoodOriginal,
+                    ArmyCarriedFoodHelperOffset),
+
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// section 內的 helper 本體是否逐位元組等於「目前這一版」產生的內容。
+    /// 只用來判斷是否需要就地重建 helper，以及 verify 是否該回報「需重新套用」。
+    /// </summary>
+    private static bool HasCurrentHelpers(PeFile pe, PatchInfo info)
+    {
         byte[] expectedHelper = BuildCommandHelper(info.SectionVa + ConfigOffset);
         byte[] expectedGoldHelper = BuildGoldProductionHelper(info.SectionVa + ConfigOffset);
         byte[] expectedFoodHelper = BuildFoodProductionHelper(info.SectionVa + ConfigOffset);
@@ -1133,34 +1709,30 @@ public static class ScopedTweakPatch
                info.FeedsHelperSize == expectedFeedsHelper.Length &&
                pe.ReadBytesAtVa(info.FeedsHelperVa, expectedFeedsHelper.Length)
                  .AsSpan().SequenceEqual(expectedFeedsHelper) &&
-               pe.ReadBytesAtVa(GoldProductionSiteVa, GoldProductionOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(GoldProductionSiteVa, info.GoldHelperVa, GoldProductionOriginal.Length)) &&
-               pe.ReadBytesAtVa(FoodProductionSiteVa, FoodProductionOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(FoodProductionSiteVa, info.FoodHelperVa, FoodProductionOriginal.Length)) &&
-               pe.ReadBytesAtVa(PopulationGrowthAmountSiteVa, PopulationGrowthAmountOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(PopulationGrowthAmountSiteVa,
-                     info.PopulationGrowthAmountHelperVa, PopulationGrowthAmountOriginal.Length)) &&
-               pe.ReadBytesAtVa(PopulationGrowthIntervalSiteVa, PopulationGrowthIntervalOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(PopulationGrowthIntervalSiteVa,
-                     info.PopulationGrowthIntervalHelperVa, PopulationGrowthIntervalOriginal.Length)) &&
-               pe.ReadBytesAtVa(PopulationLossPercentSiteVa, PopulationLossPercentOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(PopulationLossPercentSiteVa,
-                     info.PopulationLossPercentHelperVa, PopulationLossPercentOriginal.Length)) &&
-               pe.ReadBytesAtVa(PopulationLossIntervalSiteVa, PopulationLossIntervalOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(PopulationLossIntervalSiteVa,
-                     info.PopulationLossIntervalHelperVa, PopulationLossIntervalOriginal.Length)) &&
-               pe.ReadBytesAtVa(InitialGoldSiteVa, InitialGoldOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(InitialGoldSiteVa,
-                     info.InitialGoldHelperVa, InitialGoldOriginal.Length)) &&
-               pe.ReadBytesAtVa(OwnerScalarSiteVa, OwnerScalarOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(OwnerScalarSiteVa,
-                     info.OwnerScalarHelperVa, OwnerScalarOriginal.Length)) &&
-               pe.ReadBytesAtVa(SpeedSiteVa, SpeedOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(SpeedSiteVa,
-                     info.SpeedHelperVa, SpeedOriginal.Length)) &&
-               pe.ReadBytesAtVa(FeedsSiteVa, FeedsOriginal.Length).AsSpan()
-                 .SequenceEqual(BuildRelativeCall(FeedsSiteVa,
-                     info.FeedsHelperVa, FeedsOriginal.Length));
+               info.Hooks == HookCount &&
+               HasCurrentGenerationTwoHelpers(pe, info);
+    }
+
+    private static bool HasCurrentGenerationTwoHelpers(PeFile pe, PatchInfo info)
+    {
+        uint configVa = info.SectionVa + ConfigOffset;
+        byte[] expectedCommandDelayGetter = BuildCommandDelayGetterHelper(configVa);
+        byte[] expectedUpkeepSettlement = BuildFoodUpkeepHelper(
+            configVa, info.SectionVa + FoodUpkeepSettlementHelperOffset);
+        byte[] expectedArmyUpkeep = BuildArmyFoodUpkeepHelper(
+            configVa, info.SectionVa + ArmyFoodUpkeepHelperOffset);
+        byte[] expectedHungerListAdd = BuildHungerListAddHelper(configVa);
+        byte[] expectedCarriedFood = BuildArmyCarriedFoodHelper(configVa);
+        return pe.ReadBytesAtVa(info.SectionVa + ArmyCarriedFoodHelperOffset, expectedCarriedFood.Length)
+                 .AsSpan().SequenceEqual(expectedCarriedFood) &&
+               pe.ReadBytesAtVa(info.SectionVa + CommandDelayGetterHelperOffset, expectedCommandDelayGetter.Length)
+                 .AsSpan().SequenceEqual(expectedCommandDelayGetter) &&
+               pe.ReadBytesAtVa(info.SectionVa + FoodUpkeepSettlementHelperOffset, expectedUpkeepSettlement.Length)
+                 .AsSpan().SequenceEqual(expectedUpkeepSettlement) &&
+               pe.ReadBytesAtVa(info.SectionVa + ArmyFoodUpkeepHelperOffset, expectedArmyUpkeep.Length)
+                 .AsSpan().SequenceEqual(expectedArmyUpkeep) &&
+               pe.ReadBytesAtVa(info.SectionVa + HungerListAddHelperOffset, expectedHungerListAdd.Length)
+                 .AsSpan().SequenceEqual(expectedHungerListAdd);
     }
 
     private static CommandSettings ValidateSettings(CommandSettings settings)
@@ -1357,29 +1929,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x85, 0xF6);                               // test esi,esi
         x86.Jump(0x84, "done");                            // jz done
 
-        x86.EmitAbsoluteLoadEcx(GameGlobalVa);               // ecx = game
-        x86.Emit(0x85, 0xC9);                               // test ecx,ecx
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x49, (byte)SessionOffset);           // mov ecx,[ecx+50]
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x80, 0xB9);                               // cmp byte [ecx+108],0
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "done");                            // jne done: all scoped tweaks disabled
-
-        x86.EmitAbsoluteLoadEcx(EngineBaseGlobalVa);         // ecx = engine base
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x89);                               // mov ecx,[ecx+CD0]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-
-        x86.Emit(0x33, 0xDB);                               // xor ebx,ebx (self=0)
-        x86.Emit(0x39, 0x8E);                               // cmp [esi+6E],ecx
-        x86.EmitUInt32(ObjectOwnerOffset);
-        x86.Emit(0x0F, 0x95, 0xC3);                         // setne bl (enemy=1)
+        // 敵我分流：比較 player 索引（引擎自己的寫法），不是比較 player 指標。
+        x86.Emit(0x8B, 0xCE);                               // mov ecx,esi (Obj*)
+        EmitObjectScope(x86, Reg.Ecx, Reg.Ebx, Reg.Edi, "done");
 
         x86.Emit(0x80, 0xBA);                               // cmp byte [edx+CF],0
         x86.EmitUInt32(CommandTrainFlagOffset);
@@ -1440,28 +1992,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x50, 0x52, 0x53, 0x56, 0x57, 0x55);       // push eax/edx/ebx/esi/edi/ebp
         x86.Emit(0x8B, 0x4E, (byte)SettlementGoldProductionOffset); // vanilla default
 
-        x86.EmitAbsoluteLoadEdx(GameGlobalVa);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x52, (byte)SessionOffset);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x80, 0xBA);
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "done");
-
-        x86.EmitAbsoluteLoadEdx(EngineBaseGlobalVa);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x92);                               // mov edx,[edx+CD0]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x33, 0xDB);                               // self=0, enemy=1
-        x86.Emit(0x39, 0x96);                               // cmp [esi+90],edx
-        x86.EmitUInt32(SettlementOwnerOffset);
-        x86.Emit(0x0F, 0x95, 0xC3);
+        // edx = settlement owner；分流一律比較 player 索引。
+        x86.Emit(MovRegFromDisp32(Reg.Edx, Reg.Esi, SettlementOwnerOffset));
+        EmitPlayerScope(x86, Reg.Edx, Reg.Ebx, Reg.Edi, "done");
 
         // Vanilla storage remains untouched: non-zero gold marks Townhall;
         // otherwise non-zero food marks Village. Neither means an unsupported settlement.
@@ -1506,28 +2039,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x51, 0x52, 0x53, 0x56, 0x57, 0x55);       // push ecx/edx/ebx/esi/edi/ebp
         x86.Emit(0x8B, 0x46, (byte)SettlementFoodProductionOffset); // vanilla default
 
-        x86.EmitAbsoluteLoadEcx(GameGlobalVa);
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x49, (byte)SessionOffset);
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x80, 0xB9);
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "done");
-
-        x86.EmitAbsoluteLoadEcx(EngineBaseGlobalVa);
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x89);
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xC9);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x33, 0xDB);
-        x86.Emit(0x39, 0x8E);                               // cmp [esi+90],ecx
-        x86.EmitUInt32(SettlementOwnerOffset);
-        x86.Emit(0x0F, 0x95, 0xC3);
+        // ecx = settlement owner；分流一律比較 player 索引。
+        x86.Emit(MovRegFromDisp32(Reg.Ecx, Reg.Esi, SettlementOwnerOffset));
+        EmitPlayerScope(x86, Reg.Ecx, Reg.Ebx, Reg.Edi, "done");
 
         x86.Emit(0x8B, 0x56, (byte)SettlementGoldProductionOffset);
         x86.Emit(0x85, 0xD2);
@@ -1579,17 +2093,6 @@ public static class ScopedTweakPatch
         x86.Emit(0x00);
         x86.Jump(0x84, "done");
 
-        x86.EmitAbsoluteLoadEax(GameGlobalVa);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x40, (byte)SessionOffset);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x80, 0xB8);
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "done");
-
         x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);
         x86.Emit(0x85, 0xC0);
         x86.Jump(0x84, "done");
@@ -1600,12 +2103,10 @@ public static class ScopedTweakPatch
         x86.Emit(0x8B, 0x5C, 0x24, 0x2C);                  // ebx = constructor owner slot
         x86.Emit(0x83, 0xFB, 0x10);
         x86.Jump(0x83, "done");                           // invalid/neutral slot: vanilla
-        x86.Emit(0x69, 0xDB);                              // imul ebx,ebx,0x254
-        x86.EmitUInt32(PlayerStructSize);
-        x86.Emit(0x8D, 0x9C, 0x18);                        // owner ptr = base + index + CD4
-        x86.EmitUInt32(PlayerArrayOffset);
+        // 分流直接比較索引：EBX 本來就是 slot 編號，[localPlayer+8] 也是索引，
+        // 不必再從 base + idx*0x254 + 0xCD4 還原指標（ISSUE-071／072）。
         x86.Emit(0x33, 0xC0);                              // self=0, enemy=1
-        x86.Emit(0x3B, 0xDA);                              // cmp ebx,edx
+        x86.Emit(CmpRegFromDisp8(Reg.Ebx, Reg.Edx, (byte)PlayerIndexOffset));
         x86.Emit(0x0F, 0x95, 0xC0);                        // setne al
 
         x86.Emit(0x33, 0xDB);                              // Townhall type=0
@@ -1669,28 +2170,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x85, 0xC0);                              // test eax,eax
         x86.Jump(0x84, "done");
 
-        x86.EmitAbsoluteLoadEdx(GameGlobalVa);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x52, (byte)SessionOffset);          // mov edx,[edx+50]
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x80, 0xBA);                               // cmp byte [edx+108],0
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "done");
-
-        x86.EmitAbsoluteLoadEdx(EngineBaseGlobalVa);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-        x86.Emit(0x8B, 0x92);                               // mov edx,[edx+CD0]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xD2);
-        x86.Jump(0x84, "done");
-
-        x86.Emit(0x33, 0xDB);                               // xor ebx,ebx (self=0)
-        x86.Emit(0x3B, 0xC2);                               // cmp eax,edx (new owner vs local player)
-        x86.Emit(0x0F, 0x95, 0xC3);                         // setne bl (enemy=1)
+        // EAX 就是這次要寫進 [esi+6E] 的 owner；分流比較 player 索引。
+        x86.Emit(0x8B, 0xD0);                               // mov edx,eax
+        EmitPlayerScope(x86, Reg.Edx, Reg.Ebx, Reg.Edi, "done");
 
         x86.Emit(0x8B, 0x7E, (byte)ObjectClassOffset);       // mov edi,[esi+3A]
         x86.Emit(0x85, 0xFF);                               // test edi,edi
@@ -1757,29 +2239,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x85, 0xF6);                               // test esi,esi
         x86.Jump(0x84, "use_base");                         // jz use_base
 
-        x86.EmitAbsoluteLoadEax(GameGlobalVa);               // eax = game
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "use_base");
-        x86.Emit(0x8B, 0x40, (byte)SessionOffset);           // mov eax,[eax+50h]
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "use_base");
-        x86.Emit(0x80, 0xB8);                               // cmp byte [eax+108h],0
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "use_base");                         // jne use_base
-
-        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);         // eax = engine base
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "use_base");
-        x86.Emit(0x8B, 0x80);                               // mov eax,[eax+CD0h]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, "use_base");
-
-        // Scope selection: compare [esi+6Eh] (owner) with local player pointer in eax
-        x86.Emit(0x39, 0x46, (byte)ObjectOwnerOffset);       // cmp [esi+6Eh],eax
-        x86.Emit(0x0F, 0x95, 0xC2);                         // setne dl (self=0, enemy=1)
-        x86.Emit(0x0F, 0xB6, 0xD2);                         // movzx edx,dl
+        // 敵我分流：比較 player 索引（引擎自己的寫法），不是比較 player 指標。
+        x86.Emit(0x8B, 0xC6);                               // mov eax,esi (CVXUnit*)
+        EmitObjectScope(x86, Reg.Eax, Reg.Edx, Reg.Ecx, "use_base");
 
         // Load multiplier from configVa + 252 + edx*4 into ecx
         x86.EmitIndexedLoadEcxByEdx(configVa + 252);        // mov ecx,[edx*4 + (configVa+252)]
@@ -1820,29 +2282,9 @@ public static class ScopedTweakPatch
         x86.Emit(0x85, 0xED);                               // test ebp,ebp
         x86.Jump(0x84, "fallback");                         // jz fallback
 
-        x86.EmitAbsoluteLoadEax(GameGlobalVa);               // eax = game
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "fallback");
-        x86.Emit(0x8B, 0x40, (byte)SessionOffset);           // mov eax,[eax+50h]
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "fallback");
-        x86.Emit(0x80, 0xB8);                               // cmp byte [eax+108h],0
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, "fallback");                         // jne fallback
-
-        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);         // eax = engine base
-        x86.Emit(0x85, 0xC0);                               // test eax,eax
-        x86.Jump(0x84, "fallback");
-        x86.Emit(0x8B, 0x80);                               // mov eax,[eax+CD0h]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, "fallback");
-
-        // Scope selection: compare [ebp+6Eh] (owner) with local player pointer in eax
-        x86.Emit(0x39, 0x45, (byte)ObjectOwnerOffset);       // cmp [ebp+6Eh],eax
-        x86.Emit(0x0F, 0x95, 0xC2);                         // setne dl (self=0, enemy=1)
-        x86.Emit(0x0F, 0xB6, 0xD2);                         // movzx edx,dl
+        // 敵我分流：比較 player 索引（引擎自己的寫法），不是比較 player 指標。
+        x86.Emit(0x8B, 0x45, (byte)ObjectOwnerOffset);       // mov eax,[ebp+6Eh] (owner player*)
+        EmitPlayerScope(x86, Reg.Eax, Reg.Edx, Reg.Ecx, "fallback");
 
         // Load config tri-state from configVa + 260 + edx*4
         x86.EmitIndexedLoadEcxByEdx(configVa + 260);        // mov ecx,[edx*4 + (configVa+260)]
@@ -1874,6 +2316,354 @@ public static class ScopedTweakPatch
         x86.Emit(0xC3);                                     // ret
 
         return x86.Build();
+    }
+
+    /// <summary>
+    /// <c>0x004FB83E</c>：<c>Obj::cmddelay</c> 交還給腳本的 execdelay。
+    ///
+    /// 進場時 EAX = command definition，出場時 EAX 必須是（可能已縮放的）execdelay。
+    /// 這是**原版兵營訓練唯一會走到的 execdelay 讀取點**：`SUBAI\BARRACK_TRAIN.VS`
+    /// 寫的是 <c>.Progress((.cmddelay * perc) / 100)</c>，先用 <c>Obj::cmddelay</c>
+    /// 取值、自己算完再呼叫一參數版本的 <c>Obj::Progress</c>，一次都不會流經
+    /// <see cref="CommandDelaySiteVa"/>（那在零參數版本裡）。舊版只掛零參數版本，
+    /// 所以生產倍率結構性無效（ISSUE-072）。
+    ///
+    /// 發令物件從腳本 VM 堆疊頂端的 handle 重新查表取得（<see cref="ObjectHandleTableVa"/>），
+    /// 指令類別依 definition 的 <c>+0xCF</c>（traincommand）／<c>+0xD0</c>
+    /// （researchcommand）判斷——投資、加人口那幾個也呼叫 <c>.Progress(.cmddelay)</c>
+    /// 的腳本兩個旗標都是 0，會原封不動地退回原值。
+    ///
+    /// 與 <see cref="BuildCommandHelper"/> 使用同一組設定欄位與同一套除法／
+    /// clamp／最小 1 tick 規則，因此同一個指令不管走哪一條腳本路徑都得到相同結果，
+    /// 也不會被縮放兩次（訓練走 cmddelay、研究與英雄訓練走零參數 Progress()）。
+    /// </summary>
+    private static byte[] BuildCommandDelayGetterHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        // 被覆寫的 MOV 只改 EAX，其餘暫存器與 EFLAGS 一律保持原狀。
+        x86.Emit(0x51, 0x52, 0x53, 0x57, 0x9C);             // push ecx/edx/ebx/edi; pushfd
+        x86.Emit(0x8B, 0xD0);                               // mov edx,eax (definition)
+        x86.Emit(0x8B, 0x82);                               // mov eax,[edx+F4]  (original)
+        x86.EmitUInt32(0xF4);
+        x86.Emit(0x85, 0xC0);                               // test eax,eax
+        x86.Jump(0x84, "done");                             // 原版 0 保持 0
+
+        // 發令物件：handle 還留在腳本 VM 的堆疊頂端（ESI 是 VM 堆疊指標的存放處），
+        // 用引擎自己的 objects[handle & 0xFFFF] 查表解出來。全程唯讀，
+        // 不需要 scratch slot，也不猜任何堆疊位移（ISSUE-072）。
+        x86.Emit(0x8B, 0x0E);                               // mov ecx,[esi]
+        x86.Emit(0x85, 0xC9);
+        x86.Jump(0x84, "done");
+        x86.Emit(0x0F, 0xB7, 0x09);                         // movzx ecx,word [ecx]
+        x86.EmitIndexedLoadEcxByEcx(ObjectHandleTableVa);   // mov ecx,[ecx*4+objects]
+
+        EmitObjectScope(x86, Reg.Ecx, Reg.Ebx, Reg.Edi, "done");
+
+        x86.Emit(0x80, 0xBA);                               // cmp byte [edx+CF],0
+        x86.EmitUInt32(CommandTrainFlagOffset);
+        x86.Emit(0x00);
+        x86.Jump(0x85, "train");
+        x86.Emit(0x80, 0xBA);                               // cmp byte [edx+D0],0
+        x86.EmitUInt32(CommandResearchFlagOffset);
+        x86.Emit(0x00);
+        x86.Jump(0x85, "research");
+        x86.Jump("done");
+
+        x86.Label("train");
+        x86.Emit(0x85, 0xDB);
+        x86.Jump(0x85, "enemy_train");
+        x86.EmitAbsoluteLoadEcx(configVa);
+        x86.Jump("scale");
+        x86.Label("enemy_train");
+        x86.EmitAbsoluteLoadEcx(configVa + 4);
+        x86.Jump("scale");
+
+        x86.Label("research");
+        x86.Emit(0x85, 0xDB);
+        x86.Jump(0x85, "enemy_research");
+        x86.EmitAbsoluteLoadEcx(configVa + 8);
+        x86.Jump("scale");
+        x86.Label("enemy_research");
+        x86.EmitAbsoluteLoadEcx(configVa + 12);
+
+        x86.Label("scale");
+        x86.Emit(0x85, 0xC9);                               // 設定值 0 一律 fail-closed
+        x86.Jump(0x84, "done");
+        x86.Emit(0xBF);                                     // mov edi,65536
+        x86.EmitUInt32(1u << 16);
+        x86.Emit(0xF7, 0xE7);                               // mul edi -> edx:eax
+        x86.Emit(0x3B, 0xD1);                               // cmp edx,ecx
+        x86.Jump(0x83, "clamp");
+        x86.Emit(0xF7, 0xF1);                               // div ecx
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x85, "done");
+        x86.Emit(0x40);                                     // 非零延遲至少保留 1 tick
+        x86.Jump("done");
+        x86.Label("clamp");
+        x86.Emit(0x83, 0xC8, 0xFF);                         // or eax,-1
+
+        x86.Label("done");
+        x86.Emit(0x9D, 0x5F, 0x5B, 0x5A, 0x59, 0xC3);       // popfd; pop edi/ebx/edx/ecx; ret
+        return x86.Build();
+    }
+
+    /// <summary>
+    /// 接管 <c>Settlement::TakeResource(amount, 1)</c> 在 <c>0x0050FCB1</c> 的呼叫。
+    ///
+    /// <c>0x0050FC30</c> 是「隸屬聚落的單位補糧」：<c>ESI</c> 是 <c>CVXUnit*</c>
+    /// （<c>0x0050FC36 mov esi,ecx</c>，之後不再改寫），<c>0x0050FC9D</c> 取 class、
+    /// <c>0x0050FCA0</c> 取 <c>class+0xEC</c> 的食量、<c>0x0050FCA6</c> 扣掉
+    /// <c>unit+0x120</c> 的存糧，把差額交給 <c>TakeResource</c> 從聚落扣走。
+    /// **這條路徑完全沒有 feeds 旗標檢查**——舊版只掛在
+    /// <c>CVXUnit::ProcessFood</c>（<see cref="FeedsSiteVa"/>，野外覓食）的 hook
+    /// 管不到它，這就是「我方設 0 仍然消耗聚落食物」的真正原因（ISSUE-071）。
+    ///
+    /// 進場堆疊：<c>[esp]</c> 回傳位址、<c>[esp+4]</c> 扣糧量、<c>[esp+8]</c> 資源
+    /// 類別（食物固定為 1）；ECX 是資源持有物件。三態設定為「不進食」時**不呼叫**
+    /// 原函式，改為直接回報「已扣到請求的全額」——呼叫端會把回傳值加進
+    /// <c>unit+0x120</c>，所以部隊照樣吃飽、不會觸發飢餓旗標，聚落的存糧則分毫未動。
+    /// 其餘情況（0＝保持原版、2＝明確進食）以 <c>JMP</c> 尾呼叫原函式，堆疊與
+    /// <c>ret 8</c> 的清理責任完全交還給它。
+    ///
+    /// EAX／EDX 在原版呼叫後本來就是被破壞的（<c>TakeResource</c> 用 EAX 回傳、
+    /// 內部改 EDX），因此 helper 直接拿它們當 scratch，不必保存任何東西；ECX 是
+    /// 尾呼叫要用的 <c>this</c>，全程不動。
+    /// </summary>
+    private static byte[] BuildFoodUpkeepHelper(uint configVa, uint helperVa)
+    {
+        var x86 = new X86Builder();
+
+        // edx = CVXUnit* -> owner player；分流一律比較 player 索引，
+        // 可用的 scratch 只有 EAX／EDX，因此直接用 cmp/jne 分支，不做 scope 暫存器。
+        x86.Emit(0x8B, 0xD6);                               // mov edx,esi (CVXUnit*)
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "original");
+        x86.Emit(MovRegFromDisp8(Reg.Edx, Reg.Edx, (byte)ObjectOwnerOffset));
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "original");
+        x86.Emit(MovRegFromDisp8(Reg.Edx, Reg.Edx, (byte)PlayerIndexOffset));
+
+        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "original");
+        x86.Emit(MovRegFromDisp32(Reg.Eax, Reg.Eax, LocalPlayerOffset));
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "original");
+
+        x86.Emit(CmpRegFromDisp8(Reg.Edx, Reg.Eax, (byte)PlayerIndexOffset));
+        x86.Jump(0x85, "enemy");
+        x86.EmitAbsoluteLoadEax(configVa + 260);            // self tri-state
+        x86.Jump("decide");
+        x86.Label("enemy");
+        x86.EmitAbsoluteLoadEax(configVa + 264);            // enemy tri-state
+
+        x86.Label("decide");
+        x86.Emit(0x83, 0xF8, 0x01);                         // cmp eax,1  (1 = 不進食)
+        x86.Jump(0x85, "original");
+        x86.Emit(0x8B, 0x44, 0x24, 0x04);                   // mov eax,[esp+4] (請求量)
+        x86.Emit(0xC2, 0x08, 0x00);                         // ret 8
+
+        x86.Label("original");
+        x86.Emit(0xE9);                                     // jmp TakeResource (尾呼叫)
+        x86.EmitUInt32(0);                                  // 位移於下方回填
+        byte[] body = x86.Build();
+        int displacement = checked((int)TakeResourceVa - (int)(helperVa + (uint)body.Length));
+        BitConverter.TryWriteBytes(body.AsSpan(body.Length - 4, 4), displacement);
+        return body;
+    }
+
+    /// <summary>
+    /// 接管飢餓管理器 tick 在 <c>0x005A1D36</c> 的 <c>TakeResource(1, FOOD)</c>。
+    ///
+    /// **這才是部隊伙食的主要扣糧點。** 名單成員資格看的是 class <c>+0x29C</c>
+    /// （<c>0x005A1B40</c> 加入／<c>0x005A1BE0</c> 移除），與 instance
+    /// <c>+0x138</c> 的位元無關——後者只被 <c>0x0050B080 CVXUnit::GetFeeds</c> 讀，
+    /// 唯一呼叫者是 <c>0x005A21A9</c> 的**回血**常式。所以只翻 instance 位元
+    /// （<see cref="FeedsSiteVa"/>）或只掛聚落補糧（<see cref="FoodUpkeepSettlementSiteVa"/>）
+    /// 都攔不到這條路，聚落的糧照樣被吃掉（ISSUE-071 第二輪實測）。
+    ///
+    /// 進場狀態（全部由被覆寫指令的上文保證）：
+    /// <list type="bullet">
+    /// <item><c>ECX</c> = 資源持有物件（<c>0x005A1D34 mov ecx,eax</c>）。</item>
+    /// <item><c>[esp+4]</c> = 扣糧量 1、<c>[esp+8]</c> = 資源類別 1（食物）。</item>
+    /// <item><c>EDI</c> = 聚落的中央建築，<c>0x005A1D1D</c> 已做 null-check；
+    ///   <c>[EDI+0x90]</c> 是 owner，引擎自己在 <c>0x005A1D3F</c> 用的就是它。</item>
+    /// </list>
+    ///
+    /// 「不進食」時**不呼叫**原函式，直接回報「已扣到請求的全額」：呼叫端
+    /// <c>0x005A1D3B test eax,eax</c> 因此走「吃飽」分支（只累加一筆統計），
+    /// 不會掉進 <c>0x005A1D71</c> 去扣單位自己的存糧、更不會餓死；聚落存糧分毫未動。
+    /// 其餘情況（0＝保持原版、2＝明確進食）以 <c>JMP</c> 尾呼叫原函式。
+    ///
+    /// EAX／EDX 在原版呼叫後本來就會被 <c>TakeResource</c> 破壞，直接當 scratch；
+    /// ECX 是尾呼叫的 <c>this</c>，全程不動。
+    /// </summary>
+    /// <summary>
+    /// 接管 <c>HungerManager::Add</c>（<c>0x005A1B40</c>）在 <c>0x005A1B4B</c> 讀取
+    /// class <c>feeds</c>（<c>+0x29C</c>）的那一步。
+    ///
+    /// **這是「單位需不需要吃飯」的正規開關**——class XML 的
+    /// <c>&lt;properties feeds="0"/&gt;</c>、地圖編輯器改的也是它。原版
+    /// <c>UNIT.SC.XML</c> 是 <c>feeds="1"</c>，動物／幽靈／運輸車則是 0。
+    /// 只要這裡回 0，單位就**從不進入飢餓名單**，於是既不扣聚落的糧、也不扣自己背的糧
+    /// （<c>0x005A1DA7 dec [unit+0x120]</c> 只存在於名單迴圈裡），更不會餓死。
+    /// class 本身一個位元組都沒有被改寫，所以敵方與存檔完全不受影響。
+    ///
+    /// 進場：<c>EAX</c> = <c>Obj*</c>（<c>0x005A1B41 mov eax,[esp+8]</c>）、
+    /// <c>ECX</c> = class（<c>0x005A1B48</c>）、<c>ESI</c> = manager。
+    /// 出場：<c>EAX</c> = 要用的 feeds 值；<c>0x005A1B51 test eax,eax</c> 緊接在後，
+    /// 但被覆寫的 <c>MOV</c> 本來就不動旗標，<c>POP</c> 也不動，所以不需要旗標契約。
+    /// <c>ECX</c>（class，<c>0x005A1B5E</c> 還要 push）與 <c>ESI</c> 一律保持原狀。
+    /// </summary>
+    private static byte[] BuildHungerListAddHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        x86.Emit(0x51);                                     // push ecx (class)
+        x86.Emit(0x52);                                     // push edx
+
+        x86.Emit(0x8B, 0xD0);                               // mov edx,eax (Obj*)
+        x86.Emit(MovRegFromDisp32(Reg.Eax, Reg.Ecx, ClassFeedsOffset)); // 原版 feeds
+
+        x86.Emit(0x85, 0xD2);                               // test edx,edx
+        x86.Jump(0x84, "done");
+        x86.Emit(MovRegFromDisp8(Reg.Edx, Reg.Edx, (byte)ObjectOwnerOffset));
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "done");
+        x86.Emit(MovRegFromDisp8(Reg.Edx, Reg.Edx, (byte)PlayerIndexOffset));
+
+        x86.EmitAbsoluteLoadEcx(EngineBaseGlobalVa);
+        x86.Emit(0x85, 0xC9);
+        x86.Jump(0x84, "done");
+        x86.Emit(MovRegFromDisp32(Reg.Ecx, Reg.Ecx, LocalPlayerOffset));
+        x86.Emit(0x85, 0xC9);
+        x86.Jump(0x84, "done");
+
+        x86.Emit(CmpRegFromDisp8(Reg.Edx, Reg.Ecx, (byte)PlayerIndexOffset));
+        x86.Jump(0x85, "enemy");
+        x86.EmitAbsoluteLoadEdx(configVa + 260);            // self tri-state
+        x86.Jump("decide");
+        x86.Label("enemy");
+        x86.EmitAbsoluteLoadEdx(configVa + 264);            // enemy tri-state
+
+        x86.Label("decide");
+        x86.Emit(0x83, 0xFA, 0x01);                         // cmp edx,1 (不進食)
+        x86.Jump(0x84, "no_feed");
+        x86.Emit(0x83, 0xFA, 0x02);                         // cmp edx,2 (明確進食)
+        x86.Jump(0x84, "force_feed");
+        x86.Jump("done");                                   // 0 或其他 = 保持原版
+
+        x86.Label("no_feed");
+        x86.Emit(0x33, 0xC0);                               // xor eax,eax
+        x86.Jump("done");
+        x86.Label("force_feed");
+        x86.Emit(0xB8);                                     // mov eax,1
+        x86.EmitUInt32(1);
+
+        x86.Label("done");
+        x86.Emit(0x5A);                                     // pop edx
+        x86.Emit(0x59);                                     // pop ecx
+        x86.Emit(0xC3);                                     // ret
+        return x86.Build();
+    }
+
+    /// <summary>
+    /// 接管飢餓名單迴圈在 <c>0x005A1DA7</c> 的 <c>dec dword [eax+0x120]</c>——
+    /// **單位自己背的糧唯一的扣除點**（ISSUE-071 第四輪）。
+    ///
+    /// 迴圈拿不到聚落的糧時（單位沒有所屬聚落、聚落沒有中央建築，或
+    /// <c>TakeResource</c> 回 0）就走 <c>0x005A1D71</c> 這條分支扣單位自己的存糧，
+    /// 完全不經過 <c>TakeResource</c>，所以 <see cref="ArmyFoodUpkeepSiteVa"/> 的
+    /// hook 攔不到。野戰部隊幾乎每回合都走這裡。
+    ///
+    /// 進場狀態：
+    /// <list type="bullet">
+    /// <item><c>EAX</c> = 單位（<c>0x005A1DA3 mov eax,[esp+0x10]</c>）。</item>
+    /// <item><c>[EAX+0x6E]</c> 必為非 NULL——引擎自己在 <c>0x005A1D83</c>／
+    ///   <c>0x005A1D86</c> 就無條件解了兩層參考。</item>
+    /// </list>
+    ///
+    /// 「不進食」時直接不扣：單位存糧不動，<c>0x005A1DB1</c> 重新讀到的值仍然
+    /// 非 0，於是 <c>0x005A1DB9 jne</c> 繼續跑迴圈，永遠不會掉進餓死分支。
+    /// 其餘情況（0＝保持原版、2＝明確進食）照樣執行原版的 <c>dec</c>。
+    ///
+    /// 旗標：原版 <c>dec</c> 產生的旗標是死的——下一個讀旗標的指令是
+    /// <c>0x005A1DB7 test ecx,ecx</c>，它自己會重新產生。即便如此，扣糧路徑上
+    /// helper 的最後一條指令仍然就是那條 <c>dec</c>（<c>ret</c> 不動旗標），
+    /// 因此與原版逐旗標一致。
+    /// </summary>
+    private static byte[] BuildArmyCarriedFoodHelper(uint configVa)
+    {
+        var x86 = new X86Builder();
+
+        // EAX 是單位，扣糧時還要用，所以三個 scratch 全部借用並還原。
+        // EBX 在這個迴圈裡是「本回合還要處理幾個單位」的計數器，絕不能破壞。
+        x86.Emit(0x53);                                     // push ebx
+        x86.Emit(0x51);                                     // push ecx
+        x86.Emit(0x52);                                     // push edx
+
+        x86.Emit(0x8B, 0xC8);                               // mov ecx,eax (Obj*)
+        EmitObjectScope(x86, Reg.Ecx, Reg.Edx, Reg.Ebx, "take_food");
+
+        x86.EmitIndexedLoadEcxByEdx(configVa + 260);        // mov ecx,[edx*4 + (configVa+260)]
+        x86.Emit(0x83, 0xF9, 0x01);                         // cmp ecx,1 (1 = 不進食)
+        x86.Jump(0x84, "skip_food");
+
+        x86.Label("take_food");
+        x86.Emit(0x5A);                                     // pop edx
+        x86.Emit(0x59);                                     // pop ecx
+        x86.Emit(0x5B);                                     // pop ebx
+        x86.Emit(0xFF, 0x88);                               // dec dword [eax+0x120] (原版指令)
+        x86.EmitUInt32(UnitCarriedFoodOffset);
+        x86.Emit(0xC3);                                     // ret
+
+        x86.Label("skip_food");
+        x86.Emit(0x5A);                                     // pop edx
+        x86.Emit(0x59);                                     // pop ecx
+        x86.Emit(0x5B);                                     // pop ebx
+        x86.Emit(0xC3);                                     // ret
+        return x86.Build();
+    }
+
+    private static byte[] BuildArmyFoodUpkeepHelper(uint configVa, uint helperVa)
+    {
+        var x86 = new X86Builder();
+
+        // edx = 中央建築 owner -> owner 索引；可用 scratch 只有 EAX／EDX，
+        // 因此直接 cmp/jne 分支，不做 scope 暫存器。
+        x86.Emit(MovRegFromDisp32(Reg.Edx, Reg.Edi, CentralBuildingOwnerOffset));
+        x86.Emit(0x85, 0xD2);
+        x86.Jump(0x84, "original");
+        x86.Emit(MovRegFromDisp8(Reg.Edx, Reg.Edx, (byte)PlayerIndexOffset));
+
+        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "original");
+        x86.Emit(MovRegFromDisp32(Reg.Eax, Reg.Eax, LocalPlayerOffset));
+        x86.Emit(0x85, 0xC0);
+        x86.Jump(0x84, "original");
+
+        x86.Emit(CmpRegFromDisp8(Reg.Edx, Reg.Eax, (byte)PlayerIndexOffset));
+        x86.Jump(0x85, "enemy");
+        x86.EmitAbsoluteLoadEax(configVa + 260);            // self tri-state
+        x86.Jump("decide");
+        x86.Label("enemy");
+        x86.EmitAbsoluteLoadEax(configVa + 264);            // enemy tri-state
+
+        x86.Label("decide");
+        x86.Emit(0x83, 0xF8, 0x01);                         // cmp eax,1  (1 = 不進食)
+        x86.Jump(0x85, "original");
+        x86.Emit(0x8B, 0x44, 0x24, 0x04);                   // mov eax,[esp+4] (請求量)
+        x86.Emit(0xC2, 0x08, 0x00);                         // ret 8
+
+        x86.Label("original");
+        x86.Emit(0xE9);                                     // jmp TakeResource (尾呼叫)
+        x86.EmitUInt32(0);                                  // 位移於下方回填
+        byte[] body = x86.Build();
+        int displacement = checked((int)TakeResourceVa - (int)(helperVa + (uint)body.Length));
+        BitConverter.TryWriteBytes(body.AsSpan(body.Length - 4, 4), displacement);
+        return body;
     }
 
     private enum PopulationLoadTarget
@@ -1937,28 +2727,9 @@ public static class ScopedTweakPatch
         string fallbackLabel,
         Action<uint> emitLoad)
     {
-        x86.EmitAbsoluteLoadEax(GameGlobalVa);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, fallbackLabel);
-        x86.Emit(0x8B, 0x40, (byte)SessionOffset);          // mov eax,[eax+50]
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, fallbackLabel);
-        x86.Emit(0x80, 0xB8);                              // cmp byte [eax+108],0
-        x86.EmitUInt32(MultiplayerMaskOffset);
-        x86.Emit(0x00);
-        x86.Jump(0x85, fallbackLabel);
-
-        x86.EmitAbsoluteLoadEax(EngineBaseGlobalVa);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, fallbackLabel);
-        x86.Emit(0x8B, 0x80);                              // mov eax,[eax+CD0]
-        x86.EmitUInt32(LocalPlayerOffset);
-        x86.Emit(0x85, 0xC0);
-        x86.Jump(0x84, fallbackLabel);
-        x86.Emit(0x33, 0xDB);                              // self=0, enemy=1
-        x86.Emit(0x39, 0x81);                              // cmp [ecx+90],eax
-        x86.EmitUInt32(SettlementOwnerOffset);
-        x86.Emit(0x0F, 0x95, 0xC3);
+        // eax = settlement owner；分流一律比較 player 索引。
+        x86.Emit(MovRegFromDisp32(Reg.Eax, Reg.Ecx, SettlementOwnerOffset));
+        EmitPlayerScope(x86, Reg.Eax, Reg.Ebx, Reg.Ebp, fallbackLabel);
 
         x86.Emit(0x8B, 0x41, (byte)SettlementGoldProductionOffset);
         x86.Emit(0x85, 0xC0);
@@ -1991,12 +2762,92 @@ public static class ScopedTweakPatch
         emitLoad(firstConfigVa + 12);
     }
 
+    /// <summary>x86 暫存器編號（ModRM 的 reg／rm 欄位）。</summary>
+    private static class Reg
+    {
+        public const byte Eax = 0;
+        public const byte Ecx = 1;
+        public const byte Edx = 2;
+        public const byte Ebx = 3;
+        public const byte Ebp = 5;
+        public const byte Esi = 6;
+        public const byte Edi = 7;
+    }
+
+    /// <summary>mov &lt;dst&gt;,[&lt;baseReg&gt;+disp8]（baseReg 不得為 ESP）。</summary>
+    private static byte[] MovRegFromDisp8(byte dst, byte baseReg, byte disp) =>
+        [0x8B, (byte)(0x40 | (dst << 3) | baseReg), disp];
+
+    /// <summary>mov &lt;dst&gt;,[&lt;baseReg&gt;+disp32]（baseReg 不得為 ESP）。</summary>
+    private static byte[] MovRegFromDisp32(byte dst, byte baseReg, uint disp) =>
+        [0x8B, (byte)(0x80 | (dst << 3) | baseReg),
+         (byte)disp, (byte)(disp >> 8), (byte)(disp >> 16), (byte)(disp >> 24)];
+
+    /// <summary>mov &lt;dst&gt;,[abs32]。</summary>
+    private static byte[] MovRegFromAbsolute(byte dst, uint address) =>
+        dst == Reg.Eax
+            ? [0xA1, (byte)address, (byte)(address >> 8), (byte)(address >> 16), (byte)(address >> 24)]
+            : [0x8B, (byte)(0x05 | (dst << 3)),
+               (byte)address, (byte)(address >> 8), (byte)(address >> 16), (byte)(address >> 24)];
+
+    /// <summary>test &lt;reg&gt;,&lt;reg&gt;。</summary>
+    private static byte[] TestRegReg(byte reg) => [0x85, (byte)(0xC0 | (reg << 3) | reg)];
+
+    /// <summary>cmp &lt;reg&gt;,[&lt;baseReg&gt;+disp8]。</summary>
+    private static byte[] CmpRegFromDisp8(byte reg, byte baseReg, byte disp) =>
+        [0x3B, (byte)(0x40 | (reg << 3) | baseReg), disp];
+
+    /// <summary>setne &lt;reg8&gt; 後 movzx 回 32 bit（reg 必須是 EAX/ECX/EDX/EBX）。</summary>
+    private static byte[] SetneMovzx(byte reg) =>
+        [0x0F, 0x95, (byte)(0xC0 | reg), 0x0F, 0xB6, (byte)(0xC0 | (reg << 3) | reg)];
+
+    /// <summary>
+    /// 產生「這個 player 是不是本機玩家」的判定，寫法與引擎自己在
+    /// <c>0x0050BA9B..0x0050BAAF</c> 完全一致：比較 <c>[player+8]</c> 這個**索引**，
+    /// 不比較 player 指標（見 <see cref="PlayerIndexOffset"/>）。
+    ///
+    /// 進場 <paramref name="playerReg"/> 必須是候選 player 指標（可為 NULL）；
+    /// 出場 <paramref name="scopeReg"/> = 0（我方）／1（敵方），
+    /// <paramref name="playerReg"/> 與 <paramref name="scratchReg"/> 內容都會被破壞。
+    /// 任何一環解不出來就跳到 <paramref name="fallbackLabel"/>（保持原版行為）。
+    /// </summary>
+    private static void EmitPlayerScope(
+        X86Builder x86, byte playerReg, byte scopeReg, byte scratchReg, string fallbackLabel)
+    {
+        x86.Emit(TestRegReg(playerReg));
+        x86.Jump(0x84, fallbackLabel);
+        x86.Emit(MovRegFromDisp8(playerReg, playerReg, (byte)PlayerIndexOffset));
+
+        x86.Emit(MovRegFromAbsolute(scratchReg, EngineBaseGlobalVa));
+        x86.Emit(TestRegReg(scratchReg));
+        x86.Jump(0x84, fallbackLabel);
+        x86.Emit(MovRegFromDisp32(scratchReg, scratchReg, LocalPlayerOffset));
+        x86.Emit(TestRegReg(scratchReg));
+        x86.Jump(0x84, fallbackLabel);
+
+        x86.Emit(CmpRegFromDisp8(playerReg, scratchReg, (byte)PlayerIndexOffset));
+        x86.Emit(SetneMovzx(scopeReg));
+    }
+
+    /// <summary>
+    /// <see cref="EmitPlayerScope"/> 的物件版：先從 <c>[obj+0x6E]</c> 取出 owner。
+    /// 進場 <paramref name="objReg"/> 是 <c>Obj*</c>，出場它已被覆寫。
+    /// </summary>
+    private static void EmitObjectScope(
+        X86Builder x86, byte objReg, byte scopeReg, byte scratchReg, string fallbackLabel)
+    {
+        x86.Emit(TestRegReg(objReg));
+        x86.Jump(0x84, fallbackLabel);
+        x86.Emit(MovRegFromDisp8(objReg, objReg, (byte)ObjectOwnerOffset));
+        EmitPlayerScope(x86, objReg, scopeReg, scratchReg, fallbackLabel);
+    }
+
     private static byte[] BuildCommandHook(uint helperVa)
     {
         return BuildRelativeCall(CommandDelaySiteVa, helperVa, CommandDelayOriginal.Length);
     }
 
-    private static byte[] BuildRelativeCall(uint siteVa, uint helperVa, int overwrittenLength)
+    internal static byte[] BuildRelativeCall(uint siteVa, uint helperVa, int overwrittenLength)
     {
         if (overwrittenLength < 5)
             throw new ArgumentOutOfRangeException(nameof(overwrittenLength));
@@ -2034,6 +2885,12 @@ public static class ScopedTweakPatch
         public void EmitAbsoluteLoadEdx(uint address)
         {
             Emit(0x8B, 0x15);
+            EmitUInt32(address);
+        }
+
+        public void EmitAbsoluteLoadEbx(uint address)
+        {
+            Emit(0x8B, 0x1D);
             EmitUInt32(address);
         }
 
@@ -2076,6 +2933,12 @@ public static class ScopedTweakPatch
         public void EmitIndexedLoadEcxByEax(uint address)
         {
             Emit(0x8B, 0x0C, 0x85);                        // mov ecx,[eax*4+disp32]
+            EmitUInt32(address);
+        }
+
+        public void EmitIndexedLoadEcxByEcx(uint address)
+        {
+            Emit(0x8B, 0x0C, 0x8D);                        // mov ecx,[ecx*4+disp32]
             EmitUInt32(address);
         }
 

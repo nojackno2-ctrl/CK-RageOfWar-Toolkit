@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using CKToolkit.Core.Trainer;
 using CKToolkit.I18n;
@@ -101,6 +101,17 @@ public sealed class TrainerConfig
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// 修改器套用模式：
+    /// <list type="bullet">
+    ///   <item><c>"both"</c>：兩者皆啟用（檔案修補與注入小視窗，預設）</item>
+    ///   <item><c>"patch"</c>（或 <c>"file"</c>）：單純用修改程式的方式（檔案修補）</item>
+    ///   <item><c>"panel"</c>（或 <c>"window"</c>）：單純用注入小視窗的方式（遊戲中面板）</item>
+    /// </list>
+    /// </summary>
+    [JsonPropertyName("mode")]
+    public string Mode { get; set; } = "both";
+
     [JsonPropertyName("numpadKeys")]
     public bool NumpadKeys { get; set; } = true;
 
@@ -129,6 +140,17 @@ public sealed class TrainerConfig
     [JsonPropertyName("scopedTweaks")]
     public Dictionary<string, Dictionary<string, decimal>> ScopedTweaks { get; set; } =
         new(StringComparer.Ordinal);
+
+    [JsonIgnore]
+    public bool SupportsFilePatch =>
+        !string.Equals(Mode, "panel", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(Mode, "window", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(Mode, "inject", StringComparison.OrdinalIgnoreCase);
+
+    [JsonIgnore]
+    public bool SupportsInGamePanel =>
+        !string.Equals(Mode, "patch", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(Mode, "file", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -180,6 +202,7 @@ public sealed class ToolkitConfig
     {
         var config = JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
         CleanRetiredTweaks(config);
+        ClampTweakValues(config);
         ResolveConflictingTrainerBindings(config);
         return config;
     }
@@ -195,6 +218,7 @@ public sealed class ToolkitConfig
     private static void ResolveConflictingTrainerBindings(ToolkitConfig config)
     {
         if (config.Trainer?.Cheats is not { Count: > 0 }) return;
+        if (!config.Trainer.SupportsFilePatch) return;
 
         bool numpad = config.Trainer.NumpadKeys;
         bool keepVanilla = config.Trainer.KeepVanilla;
@@ -274,6 +298,37 @@ public sealed class ToolkitConfig
             foreach (string retired in Tweaks.Retired)
             {
                 config.Trainer.ScopedTweaks.Remove(retired);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自動將設定檔中的永久調整數值限制在合法範圍內（Math.Clamp）。
+    /// </summary>
+    private static void ClampTweakValues(ToolkitConfig config)
+    {
+        if (config.Trainer == null) return;
+        if (config.Trainer.Tweaks != null && config.Trainer.Tweaks.Count > 0)
+        {
+            foreach (var (id, value) in config.Trainer.Tweaks.ToList())
+            {
+                if (Tweaks.ById.TryGetValue(id, out var tweak))
+                {
+                    config.Trainer.Tweaks[id] = Math.Clamp(value, tweak.Minimum, tweak.Maximum);
+                }
+            }
+        }
+        if (config.Trainer.ScopedTweaks != null && config.Trainer.ScopedTweaks.Count > 0)
+        {
+            foreach (var (id, scopes) in config.Trainer.ScopedTweaks.ToList())
+            {
+                if (Tweaks.ById.TryGetValue(id, out var tweak) && scopes != null)
+                {
+                    foreach (var (scope, value) in scopes.ToList())
+                    {
+                        scopes[scope] = Math.Clamp(value, tweak.Minimum, tweak.Maximum);
+                    }
+                }
             }
         }
     }

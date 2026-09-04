@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using CKToolkit.Core.Common;
@@ -66,16 +66,18 @@ public static class TrainerInstaller
         var marker = new TrainerMarker();
 
         // 2. 作弊：產生 SCDEBUG.XML
-        var selections = config.Cheats
-            .Where(c => c.Enabled)
-            .Select(c => new CheatSelection
-            {
-                Id = c.Id,
-                Key = c.Key,
-                Parameters = c.Parameters.ToDictionary(
-                    p => p.Key, p => (object)p.Value, StringComparer.Ordinal)
-            })
-            .ToList();
+        var selections = config.SupportsFilePatch
+            ? config.Cheats
+                .Where(c => c.Enabled)
+                .Select(c => new CheatSelection
+                {
+                    Id = c.Id,
+                    Key = c.Key,
+                    Parameters = c.Parameters.ToDictionary(
+                        p => p.Key, p => (object)p.Value, StringComparer.Ordinal)
+                })
+                .ToList()
+            : [];
 
         if (selections.Count > 0)
         {

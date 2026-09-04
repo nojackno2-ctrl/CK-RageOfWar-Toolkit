@@ -1,4 +1,4 @@
-﻿using CKToolkit.Core.Common;
+using CKToolkit.Core.Common;
 
 namespace CKToolkit.Core.Trainer;
 
@@ -42,7 +42,7 @@ public sealed class TrainerModule : IPatchModule
                 scoped.UnitScalars);
         }
 
-        if (!config.Trainer.NumpadKeys)
+        if (!config.Trainer.SupportsFilePatch || !config.Trainer.NumpadKeys)
         {
             return;
         }
@@ -64,7 +64,7 @@ public sealed class TrainerModule : IPatchModule
             return;
         }
 
-        bool anyCheat = config.Trainer.Cheats.Any(c => c.Enabled);
+        bool anyCheat = config.Trainer.SupportsFilePatch && config.Trainer.Cheats.Any(c => c.Enabled);
         bool anyTweak = config.Trainer.Tweaks.Any(kv =>
             !ScopedTweakPatch.ShouldRouteToScopedPatch(config.Trainer, kv.Key) &&
             Tweaks.ById.TryGetValue(kv.Key, out var t) && kv.Value != t.Default);

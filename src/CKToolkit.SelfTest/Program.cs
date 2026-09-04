@@ -2911,12 +2911,40 @@ internal static class Program
             scopedInfo.SpeedHelperVa, checked((int)scopedInfo.SpeedHelperSize));
         byte[] scopedFeedsHelper = scopedPe.ReadBytesAtVa(
             scopedInfo.FeedsHelperVa, checked((int)scopedInfo.FeedsHelperSize));
+        // ISSUE-071／ISSUE-072 的兩個新 helper 沒有 header 長度欄位（它們的長度是
+        // 由 builder 決定的固定值），因此讀取各自保留區的完整長度後再比對特徵。
+        byte[] scopedCommandDelayGetterHelper = scopedPe.ReadBytesAtVa(scopedInfo.CommandDelayGetterHelperVa, 208);
+        byte[] scopedUpkeepSettlementHelper = scopedPe.ReadBytesAtVa(scopedInfo.FoodUpkeepSettlementHelperVa, 96);
+        byte[] scopedArmyUpkeepHelper = scopedPe.ReadBytesAtVa(scopedInfo.ArmyFoodUpkeepHelperVa, 96);
+        byte[] scopedHungerListAddHelper = scopedPe.ReadBytesAtVa(scopedInfo.HungerListAddHelperVa, 128);
+        byte[] scopedCarriedFoodHelper = scopedPe.ReadBytesAtVa(scopedInfo.ArmyCarriedFoodHelperVa, 96);
+        byte[] carriedFoodHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.ArmyCarriedFoodSiteVa, ScopedTweakPatch.ArmyCarriedFoodOriginal.Length);
+        uint carriedFoodTarget =
+            (uint)(ScopedTweakPatch.ArmyCarriedFoodSiteVa + 5 + BitConverter.ToInt32(carriedFoodHook, 1));
+        byte[] hungerListAddHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.HungerListAddSiteVa, ScopedTweakPatch.HungerListAddOriginal.Length);
+        uint hungerListAddTarget =
+            (uint)(ScopedTweakPatch.HungerListAddSiteVa + 5 + BitConverter.ToInt32(hungerListAddHook, 1));
+        byte[] armyUpkeepHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.ArmyFoodUpkeepSiteVa, ScopedTweakPatch.ArmyFoodUpkeepOriginal.Length);
+        uint armyUpkeepTarget =
+            (uint)(ScopedTweakPatch.ArmyFoodUpkeepSiteVa + 5 + BitConverter.ToInt32(armyUpkeepHook, 1));
+        byte[] commandDelayGetterHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.CommandDelayGetterSiteVa, ScopedTweakPatch.CommandDelayGetterOriginal.Length);
+        uint commandDelayGetterTarget =
+            (uint)(ScopedTweakPatch.CommandDelayGetterSiteVa + 5 + BitConverter.ToInt32(commandDelayGetterHook, 1));
+        byte[] upkeepSettlementHook = scopedPe.ReadBytesAtVa(
+            ScopedTweakPatch.FoodUpkeepSettlementSiteVa, ScopedTweakPatch.FoodUpkeepSettlementOriginal.Length);
+        uint upkeepSettlementTarget =
+            (uint)(ScopedTweakPatch.FoodUpkeepSettlementSiteVa + 5 + BitConverter.ToInt32(upkeepSettlementHook, 1));
 
-        Check("ScopedTweakPatch 建立版本化 .cktw 與單人限定 manifest",
+        Check("ScopedTweakPatch 建立版本化 .cktw 且 manifest 不再標記單人限定",
             ScopedTweakPatch.IsApplied(scopedPatched) &&
             scopedPe.FindSection(ScopedTweakPatch.SectionName) >= 0 &&
-            scopedInfo.Flags == ScopedTweakPatch.FlagSinglePlayerOnly &&
-            scopedInfo.Hooks == 11);
+            scopedInfo.Flags == ScopedTweakPatch.FlagsAllModes &&
+            (scopedInfo.Flags & ScopedTweakPatch.FlagSinglePlayerOnly) == 0 &&
+            scopedInfo.Hooks == 16);
         Check("ScopedTweakPatch command hook CALL 指向 .cktw helper",
             scopedHook[0] == 0xE8 && scopedHook[^1] == 0x90 &&
             helperTarget == scopedInfo.HelperVa);
@@ -2946,18 +2974,151 @@ internal static class Program
         Check("ScopedTweakPatch feeds hook 指向專用 helper 並以 NOP 填充",
             feedsHook[0] == 0xE8 && feedsHook.AsSpan(5).ToArray().All(b => b == 0x90) &&
             feedsTarget == scopedInfo.FeedsHelperVa);
+
+        // ISSUE-072：cmddelay 的 execdelay getter 是原版兵營訓練唯一會走到的讀取點。
+        Check("ScopedTweakPatch cmddelay execdelay hook 指向專用 helper",
+            commandDelayGetterHook[0] == 0xE8 && commandDelayGetterHook[^1] == 0x90 &&
+            commandDelayGetterTarget == scopedInfo.CommandDelayGetterHelperVa);
+        // ISSUE-071：隸屬聚落的單位補糧點（0x0050FC30 內），這條路徑原本完全沒有
+        // feeds 檢查，是「我方設 0 仍然消耗聚落食物」的真正成因。
+        Check("ScopedTweakPatch 聚落補糧 TakeResource hook 指向專用 helper",
+            upkeepSettlementHook[0] == 0xE8 &&
+            upkeepSettlementTarget == scopedInfo.FoodUpkeepSettlementHelperVa);
+        // ISSUE-071 第二輪：飢餓管理器 tick（0x005A1C60）在 0x005A1D36 的
+        // TakeResource(1, FOOD) 才是部隊伙食的主要扣糧點。名單成員資格看的是
+        // class +0x29C，不是 instance +0x138 的位元，所以前兩個站點都攔不到它。
+        Check("ScopedTweakPatch 飢餓管理器扣糧 hook 指向專用 helper",
+            armyUpkeepHook[0] == 0xE8 &&
+            armyUpkeepTarget == scopedInfo.ArmyFoodUpkeepHelperVa);
+        // ISSUE-071 第三輪：真正的開關是 class +0x29C（class XML 的 feeds 屬性，
+        // 地圖編輯器改的就是它）。HungerManager::Add 在 0x005A1B4B 讀它決定要不要
+        // 把單位放進飢餓名單；回 0 就從不入列，聚落的糧與單位自己背的糧都不會被扣。
+        Check("ScopedTweakPatch 飢餓名單成員資格 hook 指向專用 helper 並以 NOP 填充",
+            hungerListAddHook[0] == 0xE8 && hungerListAddHook[^1] == 0x90 &&
+            hungerListAddTarget == scopedInfo.HungerListAddHelperVa);
+        Check("ScopedTweakPatch 飢餓名單 helper 讀原版 class feeds 並保留三態",
+            ContainsSequence(scopedHungerListAddHelper, [0x8B, 0x81, 0x9C, 0x02, 0x00, 0x00]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0x8B, 0x52, 0x6E]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0x3B, 0x51, 0x08]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0x83, 0xFA, 0x01]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0x83, 0xFA, 0x02]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0x33, 0xC0]) &&
+            ContainsSequence(scopedHungerListAddHelper, [0xB8, 0x01, 0x00, 0x00, 0x00]) &&
+            scopedHungerListAddHelper.AsSpan(0, 2).SequenceEqual(new byte[] { 0x51, 0x52 }));
+        // ISSUE-071 第四輪：名單迴圈拿不到聚落的糧時走 0x005A1D71，改扣單位自己背的
+        // 存糧（0x005A1DA7 dec [unit+0x120]）。那條分支不經過 TakeResource，所以
+        // 0x005A1D36 的 hook 攔不到；野戰部隊幾乎每回合都走這裡。
+        Check("ScopedTweakPatch 單位自帶存糧扣除 hook 指向專用 helper 並以 NOP 填充",
+            carriedFoodHook[0] == 0xE8 && carriedFoodHook[^1] == 0x90 &&
+            carriedFoodTarget == scopedInfo.ArmyCarriedFoodHelperVa);
+        Check("ScopedTweakPatch 自帶存糧 helper 保留原版 dec 並在不進食時完全不扣",
+            scopedCarriedFoodHelper.AsSpan(0, 3).SequenceEqual(new byte[] { 0x53, 0x51, 0x52 }) &&
+            ContainsSequence(scopedCarriedFoodHelper, [0x8B, 0xC8]) &&
+            ContainsSequence(scopedCarriedFoodHelper, [0x8B, 0x49, 0x6E]) &&
+            ContainsSequence(scopedCarriedFoodHelper, [0x83, 0xF9, 0x01]) &&
+            ContainsSequence(scopedCarriedFoodHelper,
+                [0x5A, 0x59, 0x5B, 0xFF, 0x88, 0x20, 0x01, 0x00, 0x00, 0xC3]) &&
+            ContainsSequence(scopedCarriedFoodHelper, [0x5A, 0x59, 0x5B, 0xC3]));
+        Check("ScopedTweakPatch 飢餓管理器 helper 以中央建築 owner 分流且不進食時零扣糧",
+            ContainsSequence(scopedArmyUpkeepHelper, [0x8B, 0x97, 0x90, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedArmyUpkeepHelper, [0x3B, 0x50, 0x08]) &&
+            ContainsSequence(scopedArmyUpkeepHelper, [0x8B, 0x44, 0x24, 0x04, 0xC2, 0x08, 0x00]) &&
+            ContainsSequence(scopedArmyUpkeepHelper, [0xE9]));
+        // 已退役的 15 站點世代那兩個會閃退的站點必須維持原版 Steam 位元組：
+        // 0x004FB7E8 的 helper 會寫入唯讀的 .cktw 節區，0x0050B9AF 把
+        // [esp+0x2C] 的整數 (esi+1)<<8 當成 this 解構，兩者都直接 0xC0000005。
+        Check("ScopedTweakPatch 兩個已知崩潰站點保持原版 Steam 位元組零寫入",
+            scopedPe.ReadBytesAtVa(ScopedTweakPatch.CommandObjectSiteVa, ScopedTweakPatch.CommandObjectOriginal.Length)
+                .SequenceEqual(ScopedTweakPatch.CommandObjectOriginal) &&
+            scopedPe.ReadBytesAtVa(ScopedTweakPatch.FoodUpkeepRoamingSiteVa, ScopedTweakPatch.FoodUpkeepRoamingOriginal.Length)
+                .SequenceEqual(ScopedTweakPatch.FoodUpkeepRoamingOriginal));
+        // 目前世代的 helper 一律不得再對 .cktw 節區做執行期寫入（節區是唯讀）。
+        Check("ScopedTweakPatch helper 全數不對唯讀的 .cktw 節區寫入",
+            new[]
+            {
+                scopedCommandDelayGetterHelper, scopedUpkeepSettlementHelper,
+                scopedArmyUpkeepHelper, scopedHungerListAddHelper
+            }.All(helperBytes => !ContainsSequence(helperBytes, [0xA3, 0x00, 0xBF, 0x8C, 0x00])));
         Check("ScopedTweakPatch helper 保存旗標/暫存器並回復後 RET",
             scopedHelper.AsSpan(0, 7).SequenceEqual(new byte[] { 0x9C, 0x51, 0x52, 0x53, 0x56, 0x57, 0x55 }) &&
             scopedHelper.AsSpan(scopedHelper.Length - 8).SequenceEqual(new byte[] { 0x5D, 0x5F, 0x5E, 0x5B, 0x5A, 0x59, 0x9D, 0xC3 }));
-        Check("ScopedTweakPatch helper 內含多人 fail-closed 與本機玩家來源",
-            ContainsSequence(scopedHelper, [0x8B, 0x0D, 0x8C, 0x1C, 0x8C, 0x00]) &&
-            ContainsSequence(scopedHelper, [0x80, 0xB9, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedHelper, [0x8B, 0x0D, 0xC8, 0xA6, 0x8A, 0x00]) &&
-            ContainsSequence(scopedHelper, [0x8B, 0x89, 0xD0, 0x0C, 0x00, 0x00]) &&
-            ContainsSequence(scopedHelper, [0x39, 0x8E, 0x6E, 0x00, 0x00, 0x00]));
+        // ISSUE-069：多人偵測整組移除。實機量測證實 [0x008C1C8C] 在單人對局中恆為 0，
+        // 舊的 fail-closed 守衛因此讓 11 個 hook 在單人模式永遠不生效。這三組
+        // 「不得含有」斷言就是防止有人把守衛加回來的圍籬。
+        Check("ScopedTweakPatch helper 不再偵測多人，只以本機玩家分 self/enemy",
+            !ContainsSequence(scopedHelper, [0x8B, 0x0D, 0x8C, 0x1C, 0x8C, 0x00]) &&
+            !ContainsSequence(scopedHelper, [0x80, 0xB9, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x8B, 0x3D, 0xC8, 0xA6, 0x8A, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x8B, 0xBF, 0xD0, 0x0C, 0x00, 0x00]) &&
+            ContainsSequence(scopedHelper, [0x8B, 0x49, 0x6E]));
+        // ISSUE-071／ISSUE-072：敵我分流必須比較 player 索引 [player+8]，不是比較
+        // player 指標——引擎自己在 0x0050BA9B..0x0050BAAF 就是這樣判「這是我的單位」。
+        // 舊版用指標比較，實機計數器顯示我方單位一次都沒被判成 self。
+        Check("ScopedTweakPatch 所有 helper 以 player 索引而非指標分 self/enemy",
+            new[]
+            {
+                scopedHelper, scopedGoldHelper, scopedFoodHelper,
+                scopedGrowthAmountHelper, scopedGrowthIntervalHelper,
+                scopedLossPercentHelper, scopedLossIntervalHelper,
+                scopedInitialGoldHelper, scopedOwnerScalarHelper,
+                scopedSpeedHelper, scopedFeedsHelper,
+                scopedCommandDelayGetterHelper, scopedUpkeepSettlementHelper,
+                scopedArmyUpkeepHelper, scopedHungerListAddHelper
+            }.All(helperBytes =>
+                // cmp <reg>,[<localPlayer>+8]
+                ContainsSequence(helperBytes, [0x3B, 0x4F, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x57, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x41, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x51, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x50, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x5A, 0x08]) ||
+                ContainsSequence(helperBytes, [0x3B, 0x45, 0x08])) &&
+            // 舊的指標比較寫法必須完全消失
+            new[]
+            {
+                scopedHelper, scopedGoldHelper, scopedFoodHelper,
+                scopedOwnerScalarHelper, scopedSpeedHelper, scopedFeedsHelper,
+                scopedCommandDelayGetterHelper, scopedUpkeepSettlementHelper,
+                scopedArmyUpkeepHelper, scopedHungerListAddHelper
+            }.All(helperBytes =>
+                !ContainsSequence(helperBytes, [0x39, 0x8E, 0x6E, 0x00, 0x00, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x39, 0x46, 0x6E]) &&
+                !ContainsSequence(helperBytes, [0x39, 0x45, 0x6E]) &&
+                !ContainsSequence(helperBytes, [0x3B, 0xC2])));
+        Check("ScopedTweakPatch 15 個 helper 全數不含 game/session 多人偵測",
+            new[]
+            {
+                scopedHelper, scopedGoldHelper, scopedFoodHelper,
+                scopedGrowthAmountHelper, scopedGrowthIntervalHelper,
+                scopedLossPercentHelper, scopedLossIntervalHelper,
+                scopedInitialGoldHelper, scopedOwnerScalarHelper,
+                scopedSpeedHelper, scopedFeedsHelper,
+                scopedCommandDelayGetterHelper, scopedUpkeepSettlementHelper,
+                scopedArmyUpkeepHelper, scopedHungerListAddHelper
+            }.All(helperBytes =>
+                !ContainsSequence(helperBytes, [0xA1, 0x8C, 0x1C, 0x8C, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x8B, 0x0D, 0x8C, 0x1C, 0x8C, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x8B, 0x15, 0x8C, 0x1C, 0x8C, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x80, 0xB8, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x80, 0xB9, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+                !ContainsSequence(helperBytes, [0x80, 0xBA, 0x08, 0x01, 0x00, 0x00, 0x00])));
         Check("ScopedTweakPatch helper 以 definition CF/D0 分類 train/research",
             ContainsSequence(scopedHelper, [0x80, 0xBA, 0xCF, 0x00, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedHelper, [0x80, 0xBA, 0xD0, 0x00, 0x00, 0x00, 0x00]));
+            ContainsSequence(scopedHelper, [0x80, 0xBA, 0xD0, 0x00, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedCommandDelayGetterHelper, [0x80, 0xBA, 0xCF, 0x00, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedCommandDelayGetterHelper, [0x80, 0xBA, 0xD0, 0x00, 0x00, 0x00, 0x00]));
+        // ISSUE-072：cmddelay helper 必須改用「腳本 VM 堆疊頂端的 handle 查表」
+        // 取得發令物件（mov ecx,[esi] / movzx ecx,word [ecx] / mov ecx,[ecx*4+0x798CB8]）。
+        Check("ScopedTweakPatch cmddelay helper 以物件表查表取得發令物件",
+            ContainsSequence(scopedCommandDelayGetterHelper, [0x8B, 0x0E]) &&
+            ContainsSequence(scopedCommandDelayGetterHelper, [0x0F, 0xB7, 0x09]) &&
+            ContainsSequence(scopedCommandDelayGetterHelper,
+                [0x8B, 0x0C, 0x8D, 0xB8, 0x8C, 0x79, 0x00]));
+        // ISSUE-071：聚落補糧 helper 的「不進食」路徑必須直接回報全額並 ret 8，
+        // 其餘情況以 JMP 尾呼叫原版 TakeResource。
+        Check("ScopedTweakPatch 聚落補糧 helper 不進食時零扣糧並照樣餵飽",
+            ContainsSequence(scopedUpkeepSettlementHelper, [0x8B, 0x44, 0x24, 0x04, 0xC2, 0x08, 0x00]) &&
+            ContainsSequence(scopedUpkeepSettlementHelper, [0xE9]));
         Check("ScopedTweakPatch command 設定表完整往返",
             scopedInfo.Settings == commandSettings);
         Check("ScopedTweakPatch 要塞/村莊敵我金錢與食物八 scope 完整往返",
@@ -2978,8 +3139,9 @@ internal static class Program
         Check("ScopedTweakPatch settlement helper 以原版 32/36 欄位分要塞/村莊並用 +90 owner",
             ContainsSequence(scopedGoldHelper, [0x8B, 0x56, 0x32, 0x85, 0xD2]) &&
             ContainsSequence(scopedGoldHelper, [0x8B, 0x56, 0x36, 0x85, 0xD2]) &&
-            ContainsSequence(scopedGoldHelper, [0x39, 0x96, 0x90, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedFoodHelper, [0x39, 0x8E, 0x90, 0x00, 0x00, 0x00]));
+            // owner 現在是「載入 [esi+90] 後比索引」，不再是「拿指標直接 cmp」
+            ContainsSequence(scopedGoldHelper, [0x8B, 0x96, 0x90, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedFoodHelper, [0x8B, 0x8E, 0x90, 0x00, 0x00, 0x00]));
         Check("ScopedTweakPatch gold tick 以 owner*2+type 索引更新三種容量",
             ContainsSequence(scopedGoldHelper, [0x8D, 0x1C, 0x5F]) &&
             ContainsSequence(scopedGoldHelper, [0x89, 0x50, 0x0C]) &&
@@ -2988,8 +3150,10 @@ internal static class Program
         Check("ScopedTweakPatch 初始金錢 helper 只取 constructor owner slot 並保留 class fallback",
             ContainsSequence(scopedInitialGoldHelper, [0x8B, 0x8D, 0xEC, 0x03, 0x00, 0x00]) &&
             ContainsSequence(scopedInitialGoldHelper, [0x8B, 0x5C, 0x24, 0x2C]) &&
-            ContainsSequence(scopedInitialGoldHelper, [0x69, 0xDB, 0x54, 0x02, 0x00, 0x00]) &&
-            ContainsSequence(scopedInitialGoldHelper, [0x8D, 0x9C, 0x18, 0xD4, 0x0C, 0x00, 0x00]) &&
+            // slot 編號直接與 [localPlayer+8] 比較，不再重建 base+idx*0x254+0xCD4 指標
+            ContainsSequence(scopedInitialGoldHelper, [0x3B, 0x5A, 0x08]) &&
+            !ContainsSequence(scopedInitialGoldHelper, [0x69, 0xDB, 0x54, 0x02, 0x00, 0x00]) &&
+            !ContainsSequence(scopedInitialGoldHelper, [0x8D, 0x9C, 0x18, 0xD4, 0x0C, 0x00, 0x00]) &&
             scopedInitialGoldHelper.AsSpan(scopedInitialGoldHelper.Length - 5)
                 .SequenceEqual(new byte[] { 0x5B, 0x5A, 0x58, 0x9D, 0xC3 }));
         Check("ScopedTweakPatch 人口 load helper 保存原 MOV 的旗標契約",
@@ -3003,9 +3167,13 @@ internal static class Program
         Check("ScopedTweakPatch 人口流失比例重做原版 IMUL EDX,selectedPercent",
             scopedLossPercentHelper.AsSpan(scopedLossPercentHelper.Length - 9)
                 .SequenceEqual(new byte[] { 0x0F, 0xAF, 0xD7, 0x5D, 0x5F, 0x5E, 0x5B, 0x58, 0xC3 }));
-        Check("ScopedTweakPatch 人口 helper 內含多人/type/owner 共用 scope 判定",
-            ContainsSequence(scopedGrowthAmountHelper, [0x80, 0xB8, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedGrowthAmountHelper, [0x39, 0x81, 0x90, 0x00, 0x00, 0x00]) &&
+        Check("ScopedTweakPatch 人口 helper 不再偵測多人，保留 type/owner 共用 scope 判定",
+            !ContainsSequence(scopedGrowthAmountHelper, [0xA1, 0x8C, 0x1C, 0x8C, 0x00]) &&
+            !ContainsSequence(scopedGrowthAmountHelper, [0x80, 0xB8, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x2D, 0xC8, 0xA6, 0x8A, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0xAD, 0xD0, 0x0C, 0x00, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x81, 0x90, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedGrowthAmountHelper, [0x3B, 0x45, 0x08]) &&
             ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x41, 0x32, 0x85, 0xC0]) &&
             ContainsSequence(scopedGrowthAmountHelper, [0x8B, 0x41, 0x36, 0x85, 0xC0]));
         Check("ScopedTweakPatch owner-scalar helper 保留原 SetPlayer 兩指令並於返回前恢復暫存器",
@@ -3017,12 +3185,12 @@ internal static class Program
             }) &&
             scopedOwnerScalarHelper.AsSpan(scopedOwnerScalarHelper.Length - 7)
                 .SequenceEqual(new byte[] { 0x58, 0x59, 0x5F, 0x5B, 0x5A, 0x9D, 0xC3 }));
-        Check("ScopedTweakPatch owner-scalar helper 內含多人 fail-closed 與本機玩家來源",
-            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x15, 0x8C, 0x1C, 0x8C, 0x00]) &&
-            ContainsSequence(scopedOwnerScalarHelper, [0x80, 0xBA, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x15, 0xC8, 0xA6, 0x8A, 0x00]) &&
-            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x92, 0xD0, 0x0C, 0x00, 0x00]) &&
-            ContainsSequence(scopedOwnerScalarHelper, [0x3B, 0xC2, 0x0F, 0x95, 0xC3]));
+        Check("ScopedTweakPatch owner-scalar helper 不再偵測多人，只以本機玩家分 self/enemy",
+            !ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x15, 0x8C, 0x1C, 0x8C, 0x00]) &&
+            !ContainsSequence(scopedOwnerScalarHelper, [0x80, 0xBA, 0x08, 0x01, 0x00, 0x00, 0x00]) &&
+            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x3D, 0xC8, 0xA6, 0x8A, 0x00]) &&
+            ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0xBF, 0xD0, 0x0C, 0x00, 0x00]) &&
+            ContainsSequence(scopedOwnerScalarHelper, [0x3B, 0x57, 0x08, 0x0F, 0x95, 0xC3]));
         Check("ScopedTweakPatch owner-scalar helper 讀取 class 指標並以 [ebx*4] 選敵我倍率",
             ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x7E, 0x3A]) &&
             ContainsSequence(scopedOwnerScalarHelper, [0x8B, 0x14, 0x9D]) &&
@@ -3053,7 +3221,8 @@ internal static class Program
         Check("ScopedTweakPatch speed helper 保留 EBX/ECX/EDX/EAX 並執行 Q16 除數縮放與除以零保護",
             scopedSpeedHelper.AsSpan(0, 4).SequenceEqual(new byte[] { 0x53, 0x51, 0x50, 0x52 }) &&
             ContainsSequence(scopedSpeedHelper, [0x8B, 0x99, 0xF4, 0x00, 0x00, 0x00]) &&
-            ContainsSequence(scopedSpeedHelper, [0x39, 0x46, 0x6E]) &&
+            ContainsSequence(scopedSpeedHelper, [0x8B, 0x40, 0x6E]) &&
+            ContainsSequence(scopedSpeedHelper, [0x3B, 0x41, 0x08]) &&
             ContainsSequence(scopedSpeedHelper, [0x8B, 0x0C, 0x95]) &&
             ContainsSequence(scopedSpeedHelper, [0xF7, 0xE1]) &&
             ContainsSequence(scopedSpeedHelper, [0x81, 0xFA, 0x00, 0x00, 0x01, 0x00]) &&
@@ -3062,7 +3231,8 @@ internal static class Program
                 .SequenceEqual(new byte[] { 0x5A, 0x58, 0xF7, 0xFB, 0x59, 0x5B, 0xC3 }));
         Check("ScopedTweakPatch feeds helper 包含三態分支且無 popfd 以 test eax,eax 結束",
             scopedFeedsHelper.AsSpan(0, 2).SequenceEqual(new byte[] { 0x51, 0x52 }) &&
-            ContainsSequence(scopedFeedsHelper, [0x39, 0x45, 0x6E]) &&
+            ContainsSequence(scopedFeedsHelper, [0x8B, 0x45, 0x6E]) &&
+            ContainsSequence(scopedFeedsHelper, [0x3B, 0x41, 0x08]) &&
             ContainsSequence(scopedFeedsHelper, [0x8B, 0x0C, 0x95]) &&
             ContainsSequence(scopedFeedsHelper, [0x83, 0xF9, 0x01]) &&
             ContainsSequence(scopedFeedsHelper, [0x83, 0xF9, 0x02]) &&
@@ -3260,13 +3430,193 @@ internal static class Program
         catch (InvalidOperationException) { populationHookMixedRejected = true; }
         Check("ScopedTweakPatch 拒絕遭修改的人口 hook 狀態", populationHookMixedRejected);
 
+        // ISSUE-069：helper 本體換世代（或被改動）不得再擋住移除。11 個站點的跳板
+        // 仍然指向我們自己的 section，還原只是把原始位元組寫回並移除 section，
+        // 不存在「猜測」。若這裡改回拒絕，使用者升級工具版本後上一版修補過的 EXE
+        // 會被 PatchState 判成第三方修改而無法還原，等於直接鎖死。
         byte[] scopedHelperTampered = (byte[])scopedPatched.Clone();
         PeFile helperTamperedPe = PeFile.Parse(scopedHelperTampered);
         helperTamperedPe.WriteBytesAtVa(scopedInfo.HelperVa, [0x90]);
-        bool helperTamperRejected = false;
-        try { _ = ScopedTweakPatch.Reverse(helperTamperedPe.ToBytes()); }
-        catch (InvalidOperationException) { helperTamperRejected = true; }
-        Check("ScopedTweakPatch 拒絕遭修改的 helper payload", helperTamperRejected);
+        byte[] staleGeneration = helperTamperedPe.ToBytes();
+        Check("ScopedTweakPatch 仍辨識 helper 內容不同世代的 .cktw",
+            ScopedTweakPatch.IsApplied(staleGeneration));
+        byte[] staleReversed = ScopedTweakPatch.Reverse(staleGeneration);
+        Check("ScopedTweakPatch 可移除 helper 內容不同世代的 .cktw 並回到原版",
+            staleReversed.SequenceEqual(scopedVanilla) && ScopedTweakPatch.IsOriginal(staleReversed));
+        byte[] staleUpgraded = ScopedTweakPatch.Apply(
+            staleGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 就地重建舊世代 helper 後等於全新套用",
+            staleUpgraded.SequenceEqual(scopedPatched));
+
+        // ISSUE-069 世代（11 站點）：兩個選配站點都還是原版位元組。
+        // 這一版的 EXE 必須仍能被辨識、還原，並且就地升級成 13 站點。
+        byte[] elevenHookGeneration = (byte[])scopedPatched.Clone();
+        PeFile elevenHookPe = PeFile.Parse(elevenHookGeneration);
+        elevenHookPe.WriteBytesAtVa(ScopedTweakPatch.CommandDelayGetterSiteVa,
+            ScopedTweakPatch.CommandDelayGetterOriginal);
+        elevenHookPe.WriteBytesAtVa(ScopedTweakPatch.FoodUpkeepSettlementSiteVa,
+            ScopedTweakPatch.FoodUpkeepSettlementOriginal);
+        elevenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyFoodUpkeepSiteVa,
+            ScopedTweakPatch.ArmyFoodUpkeepOriginal);
+        elevenHookPe.WriteBytesAtVa(ScopedTweakPatch.HungerListAddSiteVa,
+            ScopedTweakPatch.HungerListAddOriginal);
+        elevenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyCarriedFoodSiteVa,
+            ScopedTweakPatch.ArmyCarriedFoodOriginal);
+        elevenHookPe.WriteUInt32AtVa(scopedInfo.SectionVa + 32, 11);
+        elevenHookGeneration = elevenHookPe.ToBytes();
+        Check("ScopedTweakPatch 仍辨識 ISSUE-069 的 11 站點世代 .cktw",
+            ScopedTweakPatch.IsApplied(elevenHookGeneration) &&
+            ScopedTweakPatch.ReadInfo(elevenHookGeneration).Hooks == 11 &&
+            ScopedTweakPatch.ReadInfo(elevenHookGeneration).IsLegacyGeneration);
+        byte[] elevenHookReversed = ScopedTweakPatch.Reverse(elevenHookGeneration);
+        Check("ScopedTweakPatch 可移除 11 站點世代的 .cktw 並逐位元組回到原版",
+            elevenHookReversed.SequenceEqual(scopedVanilla) &&
+            ScopedTweakPatch.IsOriginal(elevenHookReversed));
+        byte[] elevenHookUpgraded = ScopedTweakPatch.Apply(
+            elevenHookGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 把 11 站點世代就地升級成 16 站點且等於全新套用",
+            ScopedTweakPatch.ReadInfo(elevenHookUpgraded).Hooks == 16 &&
+            elevenHookUpgraded.SequenceEqual(scopedPatched));
+
+        // 第一版 13 站點世代（進食只掛了聚落補糧，漏掉飢餓管理器的主要扣糧點）。
+        byte[] thirteenHookGeneration = (byte[])scopedPatched.Clone();
+        PeFile thirteenHookPe = PeFile.Parse(thirteenHookGeneration);
+        thirteenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyFoodUpkeepSiteVa,
+            ScopedTweakPatch.ArmyFoodUpkeepOriginal);
+        thirteenHookPe.WriteBytesAtVa(ScopedTweakPatch.HungerListAddSiteVa,
+            ScopedTweakPatch.HungerListAddOriginal);
+        thirteenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyCarriedFoodSiteVa,
+            ScopedTweakPatch.ArmyCarriedFoodOriginal);
+        thirteenHookPe.WriteUInt32AtVa(scopedInfo.SectionVa + 32, 13);
+        thirteenHookGeneration = thirteenHookPe.ToBytes();
+        Check("ScopedTweakPatch 仍辨識第一版 13 站點世代的 .cktw",
+            ScopedTweakPatch.IsApplied(thirteenHookGeneration) &&
+            ScopedTweakPatch.ReadInfo(thirteenHookGeneration).Hooks == 13 &&
+            ScopedTweakPatch.ReadInfo(thirteenHookGeneration).IsLegacyThirteenGeneration);
+        byte[] thirteenHookReversed = ScopedTweakPatch.Reverse(thirteenHookGeneration);
+        Check("ScopedTweakPatch 可移除 13 站點世代的 .cktw 並逐位元組回到原版",
+            thirteenHookReversed.SequenceEqual(scopedVanilla) &&
+            ScopedTweakPatch.IsOriginal(thirteenHookReversed));
+        byte[] thirteenHookUpgraded = ScopedTweakPatch.Apply(
+            thirteenHookGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 把 13 站點世代就地升級成 16 站點且等於全新套用",
+            ScopedTweakPatch.ReadInfo(thirteenHookUpgraded).Hooks == 16 &&
+            thirteenHookUpgraded.SequenceEqual(scopedPatched));
+
+        // 第二版 14 站點世代（有扣糧點 hook，但還沒接管飢餓名單成員資格）。
+        byte[] fourteenHookGeneration = (byte[])scopedPatched.Clone();
+        PeFile fourteenHookPe = PeFile.Parse(fourteenHookGeneration);
+        fourteenHookPe.WriteBytesAtVa(ScopedTweakPatch.HungerListAddSiteVa,
+            ScopedTweakPatch.HungerListAddOriginal);
+        fourteenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyCarriedFoodSiteVa,
+            ScopedTweakPatch.ArmyCarriedFoodOriginal);
+        fourteenHookPe.WriteUInt32AtVa(scopedInfo.SectionVa + 32, 14);
+        fourteenHookGeneration = fourteenHookPe.ToBytes();
+        Check("ScopedTweakPatch 仍辨識第二版 14 站點世代的 .cktw",
+            ScopedTweakPatch.IsApplied(fourteenHookGeneration) &&
+            ScopedTweakPatch.ReadInfo(fourteenHookGeneration).Hooks == 14 &&
+            ScopedTweakPatch.ReadInfo(fourteenHookGeneration).IsLegacyFourteenGeneration);
+        byte[] fourteenHookReversed = ScopedTweakPatch.Reverse(fourteenHookGeneration);
+        Check("ScopedTweakPatch 可移除 14 站點世代的 .cktw 並逐位元組回到原版",
+            fourteenHookReversed.SequenceEqual(scopedVanilla) &&
+            ScopedTweakPatch.IsOriginal(fourteenHookReversed));
+        byte[] fourteenHookUpgraded = ScopedTweakPatch.Apply(
+            fourteenHookGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 把 14 站點世代就地升級成 16 站點且等於全新套用",
+            ScopedTweakPatch.ReadInfo(fourteenHookUpgraded).Hooks == 16 &&
+            fourteenHookUpgraded.SequenceEqual(scopedPatched));
+
+        // 第三版 15 站點世代（ISSUE-071 第三輪）：接管了飢餓名單成員資格，但那一關
+        // 在實機上惰性（HungerManager::Add 由建構子呼叫，owner 還是 NULL），而且
+        // 漏掉單位自己背的糧的扣除點。使用者實機那顆 EXE 就是這個世代。
+        byte[] legacyFifteenGeneration = (byte[])scopedPatched.Clone();
+        PeFile legacyFifteenPe = PeFile.Parse(legacyFifteenGeneration);
+        legacyFifteenPe.WriteBytesAtVa(ScopedTweakPatch.ArmyCarriedFoodSiteVa,
+            ScopedTweakPatch.ArmyCarriedFoodOriginal);
+        legacyFifteenPe.WriteUInt32AtVa(scopedInfo.SectionVa + 32, 15);
+        legacyFifteenGeneration = legacyFifteenPe.ToBytes();
+        Check("ScopedTweakPatch 仍辨識第三版 15 站點世代的 .cktw",
+            ScopedTweakPatch.IsApplied(legacyFifteenGeneration) &&
+            ScopedTweakPatch.ReadInfo(legacyFifteenGeneration).Hooks == 15 &&
+            ScopedTweakPatch.ReadInfo(legacyFifteenGeneration).IsLegacyFifteenGeneration);
+        byte[] legacyFifteenReversed = ScopedTweakPatch.Reverse(legacyFifteenGeneration);
+        Check("ScopedTweakPatch 可移除第三版 15 站點世代的 .cktw 並逐位元組回到原版",
+            legacyFifteenReversed.SequenceEqual(scopedVanilla) &&
+            ScopedTweakPatch.IsOriginal(legacyFifteenReversed));
+        byte[] legacyFifteenUpgraded = ScopedTweakPatch.Apply(
+            legacyFifteenGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 把第三版 15 站點世代就地升級成 16 站點且等於全新套用",
+            ScopedTweakPatch.ReadInfo(legacyFifteenUpgraded).Hooks == 16 &&
+            legacyFifteenUpgraded.SequenceEqual(scopedPatched));
+
+        // 已廢棄的 15 站點測試世代（ISSUE-071／ISSUE-072 的第一次嘗試，會閃退）。
+        // 曾被修補過 15 站點的 EXE 必須仍能被辨識、還原與就地改成 13 站點，
+        // 同時把兩個有崩潰風險的站點精確還原回原版 Steam 位元組。
+        byte[] fifteenHookGeneration = (byte[])scopedPatched.Clone();
+        PeFile fifteenHookPe = PeFile.Parse(fifteenHookGeneration);
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.CommandObjectSiteVa,
+            ScopedTweakPatch.BuildRelativeCall(ScopedTweakPatch.CommandObjectSiteVa,
+                scopedInfo.SectionVa + 3200, ScopedTweakPatch.CommandObjectOriginal.Length));
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.CommandDelayGetterSiteVa,
+            ScopedTweakPatch.BuildRelativeCall(ScopedTweakPatch.CommandDelayGetterSiteVa,
+                scopedInfo.SectionVa + 3328, ScopedTweakPatch.CommandDelayGetterOriginal.Length));
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.FoodUpkeepSettlementSiteVa,
+            ScopedTweakPatch.BuildRelativeCall(ScopedTweakPatch.FoodUpkeepSettlementSiteVa,
+                scopedInfo.SectionVa + 3584, ScopedTweakPatch.FoodUpkeepSettlementOriginal.Length));
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.FoodUpkeepRoamingSiteVa,
+            ScopedTweakPatch.BuildRelativeCall(ScopedTweakPatch.FoodUpkeepRoamingSiteVa,
+                scopedInfo.SectionVa + 3712, ScopedTweakPatch.FoodUpkeepRoamingOriginal.Length));
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyFoodUpkeepSiteVa,
+            ScopedTweakPatch.ArmyFoodUpkeepOriginal);
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.HungerListAddSiteVa,
+            ScopedTweakPatch.HungerListAddOriginal);
+        fifteenHookPe.WriteBytesAtVa(ScopedTweakPatch.ArmyCarriedFoodSiteVa,
+            ScopedTweakPatch.ArmyCarriedFoodOriginal);
+        fifteenHookPe.WriteUInt32AtVa(scopedInfo.SectionVa + 32, 15);
+        fifteenHookGeneration = fifteenHookPe.ToBytes();
+        // 第三版世代的 header hook 數也是 15，所以辨識**不能**只看數字：
+        // 只有已退役的測試世代會接管 0x004FB7E8／0x0050B9AF 這兩個站點。
+        Check("ScopedTweakPatch 仍辨識已廢棄 15 站點測試世代的 .cktw（靠站點而非數字）",
+            ScopedTweakPatch.IsApplied(fifteenHookGeneration) &&
+            ScopedTweakPatch.ReadInfo(fifteenHookGeneration).Hooks == 15 &&
+            !PeFile.Parse(fifteenHookGeneration)
+                .ReadBytesAtVa(ScopedTweakPatch.CommandObjectSiteVa,
+                    ScopedTweakPatch.CommandObjectOriginal.Length)
+                .SequenceEqual(ScopedTweakPatch.CommandObjectOriginal));
+        byte[] fifteenHookReversed = ScopedTweakPatch.Reverse(fifteenHookGeneration);
+        Check("ScopedTweakPatch 可移除 15 站點世代的 .cktw 並逐位元組回到原版",
+            fifteenHookReversed.SequenceEqual(scopedVanilla) &&
+            ScopedTweakPatch.IsOriginal(fifteenHookReversed));
+        byte[] fifteenHookUpgraded = ScopedTweakPatch.Apply(
+            fifteenHookGeneration, commandSettings, productionSettings, populationSettings,
+            capacitySettings, initialGoldSettings, unitScalarSettings);
+        Check("ScopedTweakPatch 把已廢棄 15 站點世代就地改成目前世代且兩個崩潰站點還原原版",
+            ScopedTweakPatch.ReadInfo(fifteenHookUpgraded).Hooks == 16 &&
+            PeFile.Parse(fifteenHookUpgraded)
+                .ReadBytesAtVa(ScopedTweakPatch.CommandObjectSiteVa,
+                    ScopedTweakPatch.CommandObjectOriginal.Length)
+                .SequenceEqual(ScopedTweakPatch.CommandObjectOriginal) &&
+            PeFile.Parse(fifteenHookUpgraded)
+                .ReadBytesAtVa(ScopedTweakPatch.FoodUpkeepRoamingSiteVa,
+                    ScopedTweakPatch.FoodUpkeepRoamingOriginal.Length)
+                .SequenceEqual(ScopedTweakPatch.FoodUpkeepRoamingOriginal) &&
+            fifteenHookUpgraded.SequenceEqual(scopedPatched));
+
+        // 反向圍籬：第三方也動過站點時必須拒絕，不能把別人的修補當成自己的舊世代。
+        byte[] fifteenHookForeign = (byte[])fifteenHookGeneration.Clone();
+        PeFile fifteenHookForeignPe = PeFile.Parse(fifteenHookForeign);
+        fifteenHookForeignPe.WriteBytesAtVa(ScopedTweakPatch.FoodUpkeepRoamingSiteVa, [0x90]);
+        bool fifteenHookForeignRejected = false;
+        try { _ = ScopedTweakPatch.Reverse(fifteenHookForeignPe.ToBytes()); }
+        catch (InvalidOperationException) { fifteenHookForeignRejected = true; }
+        Check("ScopedTweakPatch 拒絕站點遭第三方改寫的 15 站點世代",
+            fifteenHookForeignRejected &&
+            !ScopedTweakPatch.IsApplied(fifteenHookForeignPe.ToBytes()));
 
         byte[] scopedRestored = ScopedTweakPatch.Reverse(scopedPatched);
         Check("ScopedTweakPatch 反轉後逐位元組等於原版",
@@ -4140,7 +4490,11 @@ internal static class Program
                     ["trainer", "set", "--scoped-tweak", "train_speed.self=999999", "--config", configPath, "--json"],
                     stdout,
                     stderr);
-                Check("CLI scoped tweak 拒絕超出原 tweak 範圍的值", exitCode == ExitCodes.InvalidArgs);
+                JsonEnvelope? env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("CLI scoped tweak 超界值自動 clamp 並回傳成功與警告",
+                    exitCode == ExitCodes.Success &&
+                    ToolkitConfig.Load(configPath).Trainer.ScopedTweaks["train_speed"]["self"] == 20m &&
+                    env is not null && env.Warnings.Count > 0);
             }
 
             // 3. trainer set 拒絕未知的作弊代號 -> exit code 2
@@ -4186,14 +4540,34 @@ internal static class Program
                     env is not null && !env.Ok && env.Errors.Any(e => e.Contains(expectedErrMsg, StringComparison.Ordinal)));
             }
 
-            // 5. trainer set 拒絕超出範圍的 tweak 數值 -> exit code 2
+            // 5. trainer set 自動 clamp 超出範圍的 tweak 數值 -> exit code 0 且產生警告
             using (var stdout = new StringWriter())
             using (var stderr = new StringWriter())
             {
                 int exitCode = CliHost.Execute(["trainer", "set", "--tweak", "hero_max_army=9999999", "--config", configPath, "--json"], stdout, stderr);
-                Check("CLI trainer set 拒絕超出範圍的 tweak 數值 (exitCode 2)", exitCode == ExitCodes.InvalidArgs);
-                var env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
-                Check("JSON 封套 ok == false 且包含錯誤", env is not null && !env.Ok && env.Errors.Count > 0);
+                JsonEnvelope? env = JsonSerializer.Deserialize<JsonEnvelope>(stdout.ToString());
+                Check("CLI trainer set 自動 clamp 超出範圍的 tweak 數值",
+                    exitCode == ExitCodes.Success &&
+                    ToolkitConfig.Load(configPath).Trainer.Tweaks["hero_max_army"] == 2000m &&
+                    env is not null && env.Warnings.Count > 0);
+            }
+
+            // 5b. trainer set --mode both|patch|panel
+            using (var stdout = new StringWriter())
+            using (var stderr = new StringWriter())
+            {
+                int exitCode = CliHost.Execute(["trainer", "set", "--mode", "panel", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 支援 --mode panel",
+                    exitCode == ExitCodes.Success &&
+                    ToolkitConfig.Load(configPath).Trainer.Mode == "panel" &&
+                    !ToolkitConfig.Load(configPath).Trainer.SupportsFilePatch &&
+                    ToolkitConfig.Load(configPath).Trainer.SupportsInGamePanel);
+
+                CliHost.Execute(["trainer", "set", "--mode", "both", "--config", configPath, "--json"], stdout, stderr);
+                Check("CLI trainer set 支援切換回 --mode both",
+                    ToolkitConfig.Load(configPath).Trainer.Mode == "both" &&
+                    ToolkitConfig.Load(configPath).Trainer.SupportsFilePatch &&
+                    ToolkitConfig.Load(configPath).Trainer.SupportsInGamePanel);
             }
 
             // 6. trainer set 拒絕未知的按鍵代號 -> exit code 2
@@ -4450,22 +4824,110 @@ internal static class Program
         Tweak trainTweak = (Tweak)trainRow.Tag!;
         trainRow.Cells["Self"].Value = (trainTweak.Maximum + 1m)
             .ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var rejectedConfig = new TrainerConfig();
-        bool rejected = false;
+        var clampedConfig = new TrainerConfig();
+        page.SaveConfig(clampedConfig);
+
+        Check("GUI SaveConfig 自動將超出 train_speed 範圍的 scoped 值限制在最大值",
+            clampedConfig.ScopedTweaks.TryGetValue("train_speed", out var clampedMap) &&
+            clampedMap["self"] == trainTweak.Maximum);
+        Check("超界 scoped 儲存後表格顯示已被修正為最大值",
+            trainRow.Cells["Self"].Value?.ToString() == trainTweak.Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        // 「重設全部調整（含分流）」必須連兩張分流表一起清乾淨，
+        // 否則使用者按了重設、看到全域欄回到原版，卻仍被 .cktw 套用舊的分流值。
+        var resetFlags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var globalGrid = (DataGridView)typeof(TrainerPage).GetField("_tweaks", resetFlags)!.GetValue(page)!;
+        var dirtyConfig = new TrainerConfig { Enabled = true };
+        dirtyConfig.Tweaks["hero_maxhealth"] = 9999m;
+        dirtyConfig.ScopedTweaks["train_speed"] = new Dictionary<string, decimal>(StringComparer.Ordinal)
+        {
+            ["self"] = 4m,
+            ["enemy"] = 3m
+        };
+        dirtyConfig.ScopedTweaks["gold_production"] = new Dictionary<string, decimal>(StringComparer.Ordinal)
+        {
+            ["selfTownhall"] = 777m,
+            ["enemyVillage"] = 55m
+        };
+        page.LoadConfig(dirtyConfig);
+        var beforeReset = new TrainerConfig();
+        page.SaveConfig(beforeReset);
+        Check("重設前分流值確實存在",
+            beforeReset.ScopedTweaks.ContainsKey("train_speed") &&
+            beforeReset.ScopedTweaks.ContainsKey("gold_production") &&
+            beforeReset.Tweaks["hero_maxhealth"] == 9999m);
+
+        typeof(TrainerPage).GetMethod("ResetAllTweaks", resetFlags)!.Invoke(page, null);
+        var afterReset = new TrainerConfig();
+        page.SaveConfig(afterReset);
+
+        Check("重設全部調整後全域欄回到原廠預設",
+            globalGrid.Rows.Cast<DataGridViewRow>()
+                .Where(r => r.Tag is Tweak)
+                .All(r => Convert.ToString(r.Cells["Value"].Value, System.Globalization.CultureInfo.InvariantCulture)
+                          == ((Tweak)r.Tag!).Default.ToString(System.Globalization.CultureInfo.InvariantCulture)) &&
+            afterReset.Tweaks.All(kv => !Tweaks.ById.TryGetValue(kv.Key, out Tweak? t) || kv.Value == t.Default));
+        Check("重設全部調整同時清空兩張分流表（不再落盤任何 scoped 值）",
+            afterReset.ScopedTweaks.Count == 0);
+        Check("重設全部調整後分流欄顯示的是原版 fallback 而非空白",
+            new[] { simpleGrid, settlementGrid }.All(grid =>
+                grid.Rows.Cast<DataGridViewRow>()
+                    .Where(r => r.Tag is Tweak)
+                    .All(r => grid.Columns.Cast<DataGridViewColumn>()
+                        .Where(c => c.Name is "Self" or "Enemy" or "SelfTownhall" or "SelfVillage"
+                                             or "EnemyTownhall" or "EnemyVillage")
+                        .All(c => !string.IsNullOrWhiteSpace(
+                            Convert.ToString(r.Cells[c.Name].Value,
+                                System.Globalization.CultureInfo.InvariantCulture))))));
+
+        // 只重設分流的按鈕仍然只動分流表，不碰全域欄。
+        page.LoadConfig(dirtyConfig);
+        typeof(TrainerPage).GetMethod("ResetAllScopedTweaks", resetFlags)!.Invoke(page, null);
+        var scopedOnlyReset = new TrainerConfig();
+        page.SaveConfig(scopedOnlyReset);
+        Check("只重設分流不會動到全域欄",
+            scopedOnlyReset.ScopedTweaks.Count == 0 &&
+            scopedOnlyReset.Tweaks["hero_maxhealth"] == 9999m);
+
+        // 測試一鍵操作：全部啟用、全部關閉、一鍵清除快捷鍵
+        var privFlags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var cheatsGrid = (DataGridView)typeof(TrainerPage).GetField("_cheats", privFlags)!.GetValue(page)!;
+        var modeCombo = (ComboBox)typeof(TrainerPage).GetField("_mode", privFlags)!.GetValue(page)!;
+        var enableAllMethod = typeof(TrainerPage).GetMethod("EnableAllCheats", privFlags)!;
+        var disableAllMethod = typeof(TrainerPage).GetMethod("DisableAllCheats", privFlags)!;
+        var clearAllKeysMethod = typeof(TrainerPage).GetMethod("ClearAllKeys", privFlags)!;
+
+        enableAllMethod.Invoke(page, null);
+        Check("一鍵全部啟用使所有作弊皆勾選", cheatsGrid.Rows.Cast<DataGridViewRow>().All(r => (bool)(r.Cells["Enabled"].Value ?? false)));
+
+        disableAllMethod.Invoke(page, null);
+        Check("一鍵全部關閉使所有作弊皆取消勾選", cheatsGrid.Rows.Cast<DataGridViewRow>().All(r => !(bool)(r.Cells["Enabled"].Value ?? false)));
+
+        clearAllKeysMethod.Invoke(page, null);
+        Check("一鍵清除快捷鍵使所有按鍵皆為空/未設定",
+            cheatsGrid.Rows.Cast<DataGridViewRow>().All(r => r.Cells["Key"].Tag == null && string.Equals(r.Cells["Key"].Value as string, Strings.Get("Gui_Trainer_KeyUnset"), StringComparison.Ordinal)));
+
+        // 測試小視窗模式下允許快捷鍵為未設定
+        modeCombo.SelectedIndex = 2; // panel only
+        enableAllMethod.Invoke(page, null);
+        var panelSavedConfig = new TrainerConfig();
+        page.SaveConfig(panelSavedConfig);
+        Check("小視窗模式下已啟用的作弊允許未設定快捷鍵且成功儲存",
+            panelSavedConfig.Mode == "panel" &&
+            panelSavedConfig.Cheats.All(c => c.Enabled && string.IsNullOrEmpty(c.Key)));
+
+        // 測試檔案修補模式下已啟用的作弊若無快捷鍵會被拒絕
+        modeCombo.SelectedIndex = 1; // patch only
+        bool patchWithoutKeysRejected = false;
         try
         {
-            page.SaveConfig(rejectedConfig);
+            page.SaveConfig(new TrainerConfig());
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException)
         {
-            rejected = ex.Message.Contains("Gui_Trainer_InvalidScopedTweak", StringComparison.Ordinal) ||
-                !string.IsNullOrWhiteSpace(ex.Message);
+            patchWithoutKeysRejected = true;
         }
-
-        Check("GUI SaveConfig 拒絕超出 train_speed 範圍的 scoped 值", rejected);
-        Check("超界 scoped 值不會寫入 rejected config",
-            rejectedConfig.ScopedTweaks.Count == 0 &&
-            !rejectedConfig.ScopedTweaks.ContainsKey("train_speed"));
+        Check("檔案修補模式下已啟用的作弊若無快捷鍵會拋出異常拒絕儲存", patchWithoutKeysRejected);
 
         using var conflictPage = new TrainerPage();
         conflictPage.CreateControl();
@@ -5187,33 +5649,43 @@ internal static class Program
             "townhall_maxgold", "townhall_maxfood", "townhall_max_population",
             "village_maxgold", "village_maxfood", "village_max_population"
         ];
-        (string Language, string NewOnlyText, string ExistingAndNewText, string MapSaveText, string MultiplayerText)[] scopeWording =
+        // ISSUE-069：多人限制已由使用者決定取消。說明文字必須改成「單人多人皆生效、
+        // 多人會 desync」，而且不得再宣稱多人退回原版值——否則使用者會依錯誤的說明
+        // 以為多人是安全的。
+        (string Language, string NewOnlyText, string ExistingAndNewText, string MapSaveText,
+         string DesyncText, string StaleFallbackText)[] scopeWording =
         [
-            ("zh-TW", "僅限新建聚落", "已存在與新建聚落", "地圖或存檔", "多人連線退回原版值"),
-            ("zh-CN", "仅限新建聚落", "已有和新建聚落", "地图或存档", "多人联机时退回原版值"),
-            ("en", "New Settlements Only", "both existing and newly created settlements", "map or save", "multiplayer falls back to stock values")
+            ("zh-TW", "僅限新建聚落", "已存在與新建聚落", "地圖或存檔", "不同步", "多人連線退回原版值"),
+            ("zh-CN", "仅限新建聚落", "已有和新建聚落", "地图或存档", "不同步", "多人联机时退回原版值"),
+            ("en", "New Settlements Only", "both existing and newly created settlements", "map or save", "desync", "falls back to stock values")
         ];
-        foreach ((string language, string newOnlyText, string existingAndNewText, string mapSaveText, string multiplayerText) in scopeWording)
+        foreach ((string language, string newOnlyText, string existingAndNewText, string mapSaveText,
+                  string desyncText, string staleFallbackText) in scopeWording)
         {
             IReadOnlyDictionary<string, string> strings = Strings.GetAll(language);
             Check($"{language} 六個容量／人口上限名稱不再宣稱僅限新建聚落",
                 capacityIds.All(id =>
                     !strings[TrainerStrings.TweakNameKey(id)].Contains(newOnlyText, StringComparison.OrdinalIgnoreCase)));
-            Check($"{language} 六個容量／人口上限說明明示單人 .cktw 涵蓋既有與新建且多人退回原版",
+            Check($"{language} 六個容量／人口上限說明明示 .cktw 涵蓋既有與新建且多人會不同步",
                 capacityIds.All(id =>
                     strings[TrainerStrings.TweakDescriptionKey(id)].Contains(".cktw", StringComparison.Ordinal) &&
                     strings[TrainerStrings.TweakDescriptionKey(id)].Contains(existingAndNewText, StringComparison.OrdinalIgnoreCase) &&
-                    strings[TrainerStrings.TweakDescriptionKey(id)].Contains(multiplayerText, StringComparison.OrdinalIgnoreCase)));
+                    strings[TrainerStrings.TweakDescriptionKey(id)].Contains(desyncText, StringComparison.OrdinalIgnoreCase)));
+            Check($"{language} 六個容量／人口上限說明不再宣稱多人退回原版值",
+                capacityIds.All(id =>
+                    !strings[TrainerStrings.TweakDescriptionKey(id)].Contains(staleFallbackText, StringComparison.OrdinalIgnoreCase)));
             Check($"{language} townhall_start_gold 名稱仍明示僅限新建聚落",
                 strings[TrainerStrings.TweakNameKey("townhall_start_gold")]
                     .Contains(newOnlyText, StringComparison.OrdinalIgnoreCase));
-            Check($"{language} townhall_start_gold 說明保留 constructor -1、map/save bypass 與多人退回原版邊界",
+            Check($"{language} townhall_start_gold 說明保留 constructor -1、map/save bypass 並改述多人不同步",
                 strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
                     .Contains("current-gold override -1", StringComparison.Ordinal) &&
                 strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
                     .Contains(mapSaveText, StringComparison.OrdinalIgnoreCase) &&
                 strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
-                    .Contains(multiplayerText, StringComparison.OrdinalIgnoreCase));
+                    .Contains(desyncText, StringComparison.OrdinalIgnoreCase) &&
+                !strings[TrainerStrings.TweakDescriptionKey("townhall_start_gold")]
+                    .Contains(staleFallbackText, StringComparison.OrdinalIgnoreCase));
         }
 
         string previousLanguage = Strings.Language;
@@ -5825,6 +6297,9 @@ internal static class Program
     private static bool ContainsSequence(byte[] haystack, byte[] needle) =>
         haystack.AsSpan().IndexOf(needle) >= 0;
 
+    private static int IndexOfSequence(byte[] haystack, byte[] needle) =>
+        haystack.AsSpan().IndexOf(needle);
+
     /// <summary>
     /// 建立結構完整、具備真實位址映射之合成 32 位元 Celtic kings.exe 檔案。
     /// </summary>
@@ -5948,6 +6423,29 @@ internal static class Program
         int scopedFeedsOff = (int)(ScopedTweakPatch.FeedsSiteVa - 0x00400000);
         ScopedTweakPatch.FeedsOriginal.CopyTo(
             pe.AsSpan(scopedFeedsOff, ScopedTweakPatch.FeedsOriginal.Length));
+        // ISSUE-071／ISSUE-072 的選配站點：Obj::cmddelay 的物件暫存與 execdelay 讀取、
+        // 兩個已退役／現役的部隊進食扣糧點，以及飢餓管理器 tick 的主要扣糧點。
+        int scopedCommandObjectOff = (int)(ScopedTweakPatch.CommandObjectSiteVa - 0x00400000);
+        ScopedTweakPatch.CommandObjectOriginal.CopyTo(
+            pe.AsSpan(scopedCommandObjectOff, ScopedTweakPatch.CommandObjectOriginal.Length));
+        int scopedCommandDelayGetterOff = (int)(ScopedTweakPatch.CommandDelayGetterSiteVa - 0x00400000);
+        ScopedTweakPatch.CommandDelayGetterOriginal.CopyTo(
+            pe.AsSpan(scopedCommandDelayGetterOff, ScopedTweakPatch.CommandDelayGetterOriginal.Length));
+        int scopedFoodUpkeepSettlementOff = (int)(ScopedTweakPatch.FoodUpkeepSettlementSiteVa - 0x00400000);
+        ScopedTweakPatch.FoodUpkeepSettlementOriginal.CopyTo(
+            pe.AsSpan(scopedFoodUpkeepSettlementOff, ScopedTweakPatch.FoodUpkeepSettlementOriginal.Length));
+        int scopedFoodUpkeepRoamingOff = (int)(ScopedTweakPatch.FoodUpkeepRoamingSiteVa - 0x00400000);
+        ScopedTweakPatch.FoodUpkeepRoamingOriginal.CopyTo(
+            pe.AsSpan(scopedFoodUpkeepRoamingOff, ScopedTweakPatch.FoodUpkeepRoamingOriginal.Length));
+        int scopedArmyFoodUpkeepOff = (int)(ScopedTweakPatch.ArmyFoodUpkeepSiteVa - 0x00400000);
+        ScopedTweakPatch.ArmyFoodUpkeepOriginal.CopyTo(
+            pe.AsSpan(scopedArmyFoodUpkeepOff, ScopedTweakPatch.ArmyFoodUpkeepOriginal.Length));
+        int scopedHungerListAddOff = (int)(ScopedTweakPatch.HungerListAddSiteVa - 0x00400000);
+        ScopedTweakPatch.HungerListAddOriginal.CopyTo(
+            pe.AsSpan(scopedHungerListAddOff, ScopedTweakPatch.HungerListAddOriginal.Length));
+        int scopedArmyCarriedFoodOff = (int)(ScopedTweakPatch.ArmyCarriedFoodSiteVa - 0x00400000);
+        ScopedTweakPatch.ArmyCarriedFoodOriginal.CopyTo(
+            pe.AsSpan(scopedArmyCarriedFoodOff, ScopedTweakPatch.ArmyCarriedFoodOriginal.Length));
 
         return pe;
     }

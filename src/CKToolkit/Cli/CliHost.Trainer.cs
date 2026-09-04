@@ -611,13 +611,13 @@ public static partial class CliHost
                         return OutputError("trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
                     }
 
-                    if (decVal < tweak.Minimum || decVal > tweak.Maximum)
+                    decimal clamped = Math.Clamp(decVal, tweak.Minimum, tweak.Maximum);
+                    if (clamped != decVal)
                     {
-                        string err = Strings.Get("Error_TrainerTweakOutOfRange", tweak.Id, tweakValStr, tweak.Minimum, tweak.Maximum);
-                        return OutputError("trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                        warnings.Add(Strings.Get("Warning_TrainerTweakClamped", tweak.Id, decVal, clamped, tweak.Minimum, tweak.Maximum));
                     }
 
-                    config.Trainer.Tweaks[tweak.Id] = decVal;
+                    config.Trainer.Tweaks[tweak.Id] = clamped;
                     break;
                 }
 
@@ -667,8 +667,7 @@ public static partial class CliHost
                             tweakValStr,
                             NumberStyles.Float | NumberStyles.AllowThousands,
                             CultureInfo.InvariantCulture,
-                            out decimal decVal) ||
-                        decVal < tweak.Minimum || decVal > tweak.Maximum)
+                            out decimal decVal))
                     {
                         string err = Strings.Get(
                             "Error_TrainerTweakOutOfRange",
@@ -680,6 +679,12 @@ public static partial class CliHost
                             "trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
                     }
 
+                    decimal clamped = Math.Clamp(decVal, tweak.Minimum, tweak.Maximum);
+                    if (clamped != decVal)
+                    {
+                        warnings.Add(Strings.Get("Warning_TrainerTweakClamped", $"{tweak.Id}.{scope}", decVal, clamped, tweak.Minimum, tweak.Maximum));
+                    }
+
                     if (!config.Trainer.ScopedTweaks.TryGetValue(
                             tweak.Id,
                             out Dictionary<string, decimal>? scopedValues))
@@ -687,7 +692,26 @@ public static partial class CliHost
                         scopedValues = new Dictionary<string, decimal>(StringComparer.Ordinal);
                         config.Trainer.ScopedTweaks[tweak.Id] = scopedValues;
                     }
-                    scopedValues[scope] = decVal;
+                    scopedValues[scope] = clamped;
+                    break;
+                }
+
+                case "--mode":
+                {
+                    if (val.Equals("both", StringComparison.OrdinalIgnoreCase) ||
+                        val.Equals("patch", StringComparison.OrdinalIgnoreCase) ||
+                        val.Equals("file", StringComparison.OrdinalIgnoreCase) ||
+                        val.Equals("panel", StringComparison.OrdinalIgnoreCase) ||
+                        val.Equals("window", StringComparison.OrdinalIgnoreCase) ||
+                        val.Equals("inject", StringComparison.OrdinalIgnoreCase))
+                    {
+                        config.Trainer.Mode = val.ToLowerInvariant();
+                    }
+                    else
+                    {
+                        string err = Strings.Get("Error_InvalidArgs", $"--mode 必須為 both、patch 或 panel，實際為 '{val}'");
+                        return OutputError("trainer set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
                     break;
                 }
 
@@ -767,25 +791,28 @@ public static partial class CliHost
         }
 
         // 與核心產生器共用同一套按鍵驗證；任何失敗都必須發生在 config.Save 之前。
-        var enabledSelections = config.Trainer.Cheats
-            .Where(c => c.Enabled && Cheats.ById.ContainsKey(c.Id))
-            .Select(c => new CheatSelection
+        if (config.Trainer.SupportsFilePatch)
+        {
+            var enabledSelections = config.Trainer.Cheats
+                .Where(c => c.Enabled && Cheats.ById.ContainsKey(c.Id))
+                .Select(c => new CheatSelection
+                {
+                    Id = c.Id,
+                    Key = c.Key,
+                    Parameters = c.Parameters.ToDictionary(
+                        p => p.Key, p => (object)p.Value, StringComparer.Ordinal)
+                })
+                .ToList();
+            try
             {
-                Id = c.Id,
-                Key = c.Key,
-                Parameters = c.Parameters.ToDictionary(
-                    p => p.Key, p => (object)p.Value, StringComparer.Ordinal)
-            })
-            .ToList();
-        try
-        {
-            Cheats.ValidateBindings(
-                enabledSelections, config.Trainer.KeepVanilla, config.Trainer.NumpadKeys);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return OutputError(
-                "trainer set", ex.Message, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                Cheats.ValidateBindings(
+                    enabledSelections, config.Trainer.KeepVanilla, config.Trainer.NumpadKeys);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return OutputError(
+                    "trainer set", ex.Message, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+            }
         }
 
         // 當 trainer.enabled 為 false 時加入警告提醒

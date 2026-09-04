@@ -386,10 +386,10 @@ public sealed class MainForm : Form
         SetBusy(true);
         try
         {
-            // 修改器開著就必須注入 ckperf.dll，否則遊戲中面板沒有腳本通道可用，
+            // 修改器開著且支援小視窗就必須注入 ckperf.dll，否則遊戲中面板沒有腳本通道可用，
             // 使用者又會回到「沒鍵可按」的狀態（ISSUE-068）。效能頁的保護關掉時
             // 走 channel-only 選項：只開通道，不替使用者打開任何他關掉的保護。
-            bool wantsChannel = _config.Trainer.Enabled;
+            bool wantsChannel = _config.Trainer.Enabled && _config.Trainer.SupportsInGamePanel;
             DiagnosticsOptions? options = perf.StabilityProtection
                 ? GameRunner.CreateStabilityOptions(perf, wantsChannel)
                 : wantsChannel ? GameRunner.CreateScriptChannelOnlyOptions() : null;
@@ -496,7 +496,7 @@ public sealed class MainForm : Form
     /// </summary>
     private void EnsureScriptChannelForRunningGame()
     {
-        if (!_config.Trainer.Enabled) return;
+        if (!_config.Trainer.Enabled || !_config.Trainer.SupportsInGamePanel) return;
 
         int pid = GameRunner.FindGameProcessId();
         if (pid == 0) return;                                   // 遊戲還沒開，等啟動時注入
