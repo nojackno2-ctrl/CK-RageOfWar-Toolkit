@@ -29,6 +29,7 @@
 
 | Issue 編號 | 問題標題 | 狀態 | 觸發／實機測試方式 | 預期結果 / 驗收標準 |
 |---|---|:---:|---|---|
+| [ISSUE-074](#issue-074-維京領主與自由鬥士無法編入英雄隊伍解除自由之身限制新增遊戲設定分頁) | **維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許維京領主編入英雄隊伍」與「允許自由鬥士編入英雄隊伍」，按「一鍵套用」。②進入遊戲，招募或生成維京領主／自由鬥士與一名英雄。③將英雄與維京領主／自由鬥士框選，按 F 鍵或右鍵點擊英雄編隊。④觀察單位是否成功進入英雄陣形，且保留吸血打擊／踐踏傷害。⑤在遊戲設定頁取消勾選再套用，`verify` 回報原版狀態。 | ②③單位成功編入英雄隊伍，享受陣形防禦與經驗分享，並保留專屬攻擊特性。④取消勾選後 data.pak 逐位元組還原原版。 |
 | [ISSUE-073](#issue-073-13-個-scoped-hook-用-player-指標比對本機玩家我方物件永遠被判成敵方) | **敵我分流比錯欄位，我方永遠被判成敵方（所有 scoped 調整只會套到敵方值）** | ⏳ 待實測 | ①修改器頁重新「套用」一次。②把任一項的「我方」與「敵方」設成明顯不同的值（例如我方聚落金錢產量 100000、敵方保持原值）。③進入單人戰役觀察我方是否真的套到我方數值。④`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方數值確實生效且與敵方互不影響（這是 ISSUE-069／071／072 共同的最後一關）。④verify 全綠。 |
 | [ISSUE-072](#issue-072-train_speedresearch_speed-掛在原版腳本用不到的-objprogress-多載上生產與研究倍率完全沒有效果) | **生產與研究倍率掛錯腳本入口，原版兵營訓練完全不受影響** | ⏳ 待實測 | ①修改器頁重新「套用」一次（必要：EXE 內是舊世代 helper）。②進入單人戰役，在兵營／神殿下單訓練一個單位，比對進度條秒數（自 20× 時 15000ms 的訓練應約 750ms）。③在有研究的建築下單研究，同樣比對。④把「敵方」設成 1× 再套用，觀察敵方 AI 出兵速度沒有變快。⑤`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方訓練與研究確實依倍率加速（不再毫無變化）。④敵我互不影響。⑤verify 全綠。全程單人戰役不得閃退。 |
 | ISSUE-070 | **「永久規則調整」的重設按鈕沒有清掉分流值** | ⏳ 待實測 | 在分流表填幾個非原版值（含要塞／村莊四欄），按「重設全部調整（含分流）」，然後套用並 `verify`。 | 全域表與兩張分流表同時回到原始值；套用後 `.cktw` 被移除、EXE 逐位元組回原版。下方「分流全部重設為單一值」仍只動分流表、不碰全域欄。 |
@@ -183,6 +184,30 @@
 ## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
 
 > 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+
+---
+
+### ISSUE-074: 維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）
+
+- **問題編號**: `ISSUE-074`
+- **提出日期**: 2026-09-04
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **來源**: 使用者需求：「找出把惟經領主跟自由鬥士變成一般士兵可以編入英雄隊伍的方法，用反編譯的方式，用方法一，加入修改器功能，新增一個頁面，你來命名來放這些修改遊戲設定的功能」
+
+- **逆向分析與根因**:
+  - `Celtic kings.exe` 字串表 `0x0073D710` 第 12 位為 `freedom`（bit 12: `0x00001000`）。
+  - `0x005C31EE` 解析 Class XML `speciality` 屬性並存入 `[class+0xF0]`；單位建構時由 `0x0050A7E0` 寫入 `[unit+0x138]`。
+  - `0x00513B00 Unit::HasFreedom` 導出給 VS 腳本；`SUBAI\UNIT_ATTACH_VERIFY.VS` 與 `SUBAI\UNIT_ATTACH.VS` 因 `if(.HasFreedom)` 阻擋編入英雄隊伍。
+  - 引擎底層 C++ 陣形與附著函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有檢查 `freedom`，因此只要移除 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML` 中的 `freedom` 特性標記，單位便能完全正常享受英雄陣形防禦、經驗分享，並完整保留其原有特性（維京領主保留吸血 `vampire`、自由鬥士保留踐踏 `trample`）。
+
+- **修復方案**:
+  - **核心邏輯**：新增 `GameRulesModifier` 提供 `HasFreedom` 判斷與 `RemoveFreedom` 安全精準 XML 轉換，並具備冪等性保證。
+  - **設定模型**：`ToolkitConfig` 新增 `GameSettingsConfig`（包含 `AllowVikingLordHeroArmy`, `AllowLiberatiHeroArmy`, `HasAnyModifications`），並掛載於 `ToolkitConfig.GameSettings`。
+  - **安裝管線**：`TrainerInstaller.Install` 支援傳入 `GameSettingsConfig`，當選項啟用時修改 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML`，並自動由既有快照機制納入 `marker.Originals` 實現 100% 精確逐位元組反轉（不留 backup 目錄，合規 AGENTS.md §2.1 / §2.3）。
+  - **標記檔與驗證**：`TrainerMarker` 擴充 `GameSettings` 屬性供診斷與 `verify` 比對；`PatchPipeline` 同步更新 `TrainerHasDataPakPayload` 與 `TrainerMarkerMatchesConfig`，保證 `verify` 零假警報。
+  - **使用者介面**：GUI 新增「遊戲設定」獨立頂層分頁（`GameSettingsPage`，置於修改器分頁旁），支援即時套用、三語在地化切換與配置持久化。
+  - **命令列支援**：CLI 新增 `settings get` 與 `settings set --viking-army=on|off --liberati-army=on|off`（支援 `settings` 與 `gamesettings` 指令別名）。
+  - **自我驗證測試**：SelfTest 新增第 47 組測試（`TestGameRulesModifierAndHeroArmyReversal`），全面覆蓋 XML 轉換、往返還原一致性、逐位元組原版還原與 CLI 指令。
 
 ---
 

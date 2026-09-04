@@ -59,24 +59,20 @@ public sealed class TrainerModule : IPatchModule
 
     public void ApplyDataPak(HmmPak pak, ToolkitConfig config, List<string>? warnings = null)
     {
-        if (!config.Trainer.Enabled)
-        {
-            return;
-        }
-
-        bool anyCheat = config.Trainer.SupportsFilePatch && config.Trainer.Cheats.Any(c => c.Enabled);
-        bool anyTweak = config.Trainer.Tweaks.Any(kv =>
+        bool anyCheat = config.Trainer.Enabled && config.Trainer.SupportsFilePatch && config.Trainer.Cheats.Any(c => c.Enabled);
+        bool anyTweak = config.Trainer.Enabled && config.Trainer.Tweaks.Any(kv =>
             !ScopedTweakPatch.ShouldRouteToScopedPatch(config.Trainer, kv.Key) &&
             Tweaks.ById.TryGetValue(kv.Key, out var t) && kv.Value != t.Default);
+        bool anyGameSetting = config.GameSettings.HasAnyModifications;
 
-        if (!anyCheat && !anyTweak)
+        if (!anyCheat && !anyTweak && !anyGameSetting)
         {
-            // 修改器開著但什麼都沒選：不要寫入標記檔，否則 data.pak 會被判成
+            // 修改器與遊戲設定都沒選實質項目：不要寫入標記檔，否則 data.pak 會被判成
             // 「已安裝修改器」卻沒有任何實際內容，徒增一次無謂的重寫。
             return;
         }
 
-        TrainerInstaller.Install(pak, config.Trainer);
+        TrainerInstaller.Install(pak, config.Trainer, config.GameSettings);
     }
 
     public void ApplyLocalPak(HmmPak pak, ToolkitConfig config)

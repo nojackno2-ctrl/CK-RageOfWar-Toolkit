@@ -52,9 +52,9 @@ public static class TrainerInstaller
              n.EndsWith(".SC.XML", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
-    /// 依設定把修改器安裝進 data.pak。呼叫端必須先確保 pak 已正規化為原版狀態。
+    /// 依設定把修改器與遊戲設定安裝進 data.pak。呼叫端必須先確保 pak 已正規化為原版狀態。
     /// </summary>
-    public static void Install(HmmPak pak, TrainerConfig config, Action<string>? log = null)
+    public static void Install(HmmPak pak, TrainerConfig config, GameSettingsConfig? gameSettings = null, Action<string>? log = null)
     {
         // 1. 快照所有候選項目的原文
         var snapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -116,6 +116,34 @@ public static class TrainerInstaller
             {
                 marker.Tweaks[id] = value;
                 log?.Invoke($"  {tweak.Label}：{value}（{touched} {tweak.TouchedUnit}）");
+            }
+        }
+
+        // 3.5 遊戲設定（如解除維京領主與自由鬥士自由之身限制）
+        if (gameSettings is not null)
+        {
+            if (gameSettings.AllowVikingLordHeroArmy && pak.Contains(GameRulesModifier.VikingLordClassPath))
+            {
+                string originalXml = pak.ReadText(GameRulesModifier.VikingLordClassPath);
+                string modifiedXml = GameRulesModifier.RemoveFreedom(originalXml);
+                if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                {
+                    pak.WriteText(GameRulesModifier.VikingLordClassPath, modifiedXml);
+                    marker.GameSettings.Add("allow_viking_lord_army");
+                    log?.Invoke("  維京領主：解除自由之身限制（可編入英雄隊伍）");
+                }
+            }
+
+            if (gameSettings.AllowLiberatiHeroArmy && pak.Contains(GameRulesModifier.LiberatusClassPath))
+            {
+                string originalXml = pak.ReadText(GameRulesModifier.LiberatusClassPath);
+                string modifiedXml = GameRulesModifier.RemoveFreedom(originalXml);
+                if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                {
+                    pak.WriteText(GameRulesModifier.LiberatusClassPath, modifiedXml);
+                    marker.GameSettings.Add("allow_liberati_army");
+                    log?.Invoke("  自由鬥士：解除自由之身限制（可編入英雄隊伍）");
+                }
             }
         }
 

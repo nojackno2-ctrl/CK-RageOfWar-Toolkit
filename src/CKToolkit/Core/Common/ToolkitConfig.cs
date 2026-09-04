@@ -154,6 +154,23 @@ public sealed class TrainerConfig
 }
 
 /// <summary>
+/// 遊戲設定與規則調整模組設定。
+/// </summary>
+public sealed class GameSettingsConfig
+{
+    /// <summary>允許維京領主編入英雄隊伍（移除 freedom 特性）。</summary>
+    [JsonPropertyName("allowVikingLordHeroArmy")]
+    public bool AllowVikingLordHeroArmy { get; set; }
+
+    /// <summary>允許自由鬥士編入英雄隊伍（移除 freedom 特性）。</summary>
+    [JsonPropertyName("allowLiberatiHeroArmy")]
+    public bool AllowLiberatiHeroArmy { get; set; }
+
+    [JsonIgnore]
+    public bool HasAnyModifications => AllowVikingLordHeroArmy || AllowLiberatiHeroArmy;
+}
+
+/// <summary>
 /// 統一設定檔 DTO (cktoolkit.json, SPEC.md §8)。
 /// </summary>
 public sealed class ToolkitConfig
@@ -182,6 +199,9 @@ public sealed class ToolkitConfig
 
     [JsonPropertyName("trainer")]
     public TrainerConfig Trainer { get; set; } = new();
+
+    [JsonPropertyName("gameSettings")]
+    public GameSettingsConfig GameSettings { get; set; } = new();
 
     [JsonIgnore]
     public List<string> MigrationsApplied { get; set; } = [];

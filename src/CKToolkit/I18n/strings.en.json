@@ -845,6 +845,16 @@
   "Error_FontRangeNotFound": "No range starting at code point {0} was found in the font",
   "Error_FontCreateFailed": "Could not create the font {0} at {1}px",
   "Error_ZoomTableDimensionOutOfRange": "The table capacity dimension must be between 1600 and 16384",
-  "Gui_Profiler_OutputDirFallback": "Failed to create the output folder ({0}): {1} - falling back to the default location {2} this time"
+  "Gui_Profiler_OutputDirFallback": "Failed to create the output folder ({0}): {1} - falling back to the default location {2} this time",
+  "Gui_Tab_GameSettings": "Game Settings",
+  "GameSettings_Title": "Game Rules & Settings",
+  "GameSettings_Subtitle": "Customize unit traits, hero army attachment rules, and gameplay mechanics. Safely applied to data.pak and fully reversible.",
+  "GameSettings_Group_HeroArmy": "Hero Army Rules",
+  "GameSettings_AllowVikingLordHeroArmy_Label": "Allow Viking Lords in hero armies",
+  "GameSettings_AllowVikingLordHeroArmy_Desc": "Removes the 'Freedom' restriction from Viking Lords, allowing heroes to attach them into formations and share EXP while keeping vampire blow.",
+  "GameSettings_AllowLiberatiHeroArmy_Label": "Allow Liberati in hero armies",
+  "GameSettings_AllowLiberatiHeroArmy_Desc": "Removes the 'Freedom' restriction from Liberati, allowing heroes to attach them into formations and share EXP while keeping trample damage.",
+  "Error_SettingsSubcommandRequired": "The settings command requires a 'get' or 'set' subcommand."
 }
+
 

@@ -845,6 +845,16 @@
   "Error_FontRangeNotFound": "字型中找不到起始碼位為 {0} 之範圍",
   "Error_FontCreateFailed": "無法建立字型 {0} {1}px",
   "Error_ZoomTableDimensionOutOfRange": "表格容量維度必須介於 1600 與 16384 之間",
-  "Gui_Profiler_OutputDirFallback": "輸出資料夾建立失敗（{0}）：{1}，這次改用預設位置 {2}"
+  "Gui_Profiler_OutputDirFallback": "輸出資料夾建立失敗（{0}）：{1}，這次改用預設位置 {2}",
+  "Gui_Tab_GameSettings": "遊戲設定",
+  "GameSettings_Title": "遊戲規則與設定",
+  "GameSettings_Subtitle": "自訂兵種特性、英雄編隊規則與遊戲機制。修改會安全寫入 data.pak，隨時可還原。",
+  "GameSettings_Group_HeroArmy": "英雄編隊規則",
+  "GameSettings_AllowVikingLordHeroArmy_Label": "允許維京領主編入英雄隊伍",
+  "GameSettings_AllowVikingLordHeroArmy_Desc": "移除維京領主的「自由之身 (Freedom)」限制，使其能被英雄編隊帶領，享受陣形加成與經驗分享，並保留吸血打擊。",
+  "GameSettings_AllowLiberatiHeroArmy_Label": "允許自由鬥士編入英雄隊伍",
+  "GameSettings_AllowLiberatiHeroArmy_Desc": "移除自由鬥士的「自由之身 (Freedom)」限制，使其能被英雄編隊帶領，享受陣形加成與經驗分享，並保留踐踏傷害。",
+  "Error_SettingsSubcommandRequired": "settings 指令必須指定 get 或 set 子指令。"
 }
+
 

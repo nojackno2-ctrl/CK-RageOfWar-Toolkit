@@ -327,7 +327,7 @@ public sealed class PatchPipeline
              !Resolutions.StockResolutions.Any(s => $"{s.Width}x{s.Height}".Equals(config.Perf.Resolution, StringComparison.OrdinalIgnoreCase))) ||
             config.Perf.AddRes.Count > 0;
         if (hasCustomRes) layered[GameFile.DataPak].Add("resolutions_append");
-        if (TrainerHasDataPakPayload(config.Trainer)) layered[GameFile.DataPak].Add("trainer_marker");
+        if (TrainerHasDataPakPayload(config)) layered[GameFile.DataPak].Add("trainer_marker");
         foreach (IPatchModule module in _modules)
         {
             try
@@ -818,7 +818,7 @@ public sealed class PatchPipeline
             }
             else if (matchesConfig && f == GameFile.DataPak)
             {
-                matchesConfig = TrainerMarkerMatchesConfig(liveBytes, effectiveConfig.Trainer);
+                matchesConfig = TrainerMarkerMatchesConfig(liveBytes, effectiveConfig);
             }
 
             string stateStr = fileState.Kind switch
@@ -891,7 +891,7 @@ public sealed class PatchPipeline
                 {
                     list.Add("resolutions_append");
                 }
-                if (TrainerHasDataPakPayload(config.Trainer)) list.Add("trainer_marker");
+                if (TrainerHasDataPakPayload(config)) list.Add("trainer_marker");
                 break;
 
             case GameFile.LocalPak:
@@ -926,16 +926,17 @@ public sealed class PatchPipeline
         return list;
     }
 
-    private static bool TrainerHasDataPakPayload(TrainerConfig trainer) =>
-        trainer.Enabled &&
-        ((trainer.SupportsFilePatch && trainer.Cheats.Any(c => c.Enabled)) ||
-         trainer.Tweaks.Any(kv =>
-             !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
-             Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default));
+    internal static bool TrainerHasDataPakPayload(ToolkitConfig config) =>
+        (config.Trainer.Enabled &&
+         ((config.Trainer.SupportsFilePatch && config.Trainer.Cheats.Any(c => c.Enabled)) ||
+          config.Trainer.Tweaks.Any(kv =>
+              !ScopedTweakPatch.ShouldRouteToScopedPatch(config.Trainer, kv.Key) &&
+              Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default))) ||
+        config.GameSettings.HasAnyModifications;
 
-    private static bool TrainerMarkerMatchesConfig(byte[] dataPakBytes, TrainerConfig trainer)
+    internal static bool TrainerMarkerMatchesConfig(byte[] dataPakBytes, ToolkitConfig config)
     {
-        bool expected = TrainerHasDataPakPayload(trainer);
+        bool expected = TrainerHasDataPakPayload(config);
         HmmPak pak;
         try
         {
@@ -952,22 +953,29 @@ public sealed class PatchPipeline
         if (marker is null)
             return false;
 
-        var expectedCheats = trainer.SupportsFilePatch
-            ? trainer.Cheats
+        var expectedCheats = (config.Trainer.Enabled && config.Trainer.SupportsFilePatch)
+            ? config.Trainer.Cheats
                 .Where(c => c.Enabled)
                 .Select(c => c.Id)
                 .ToList()
             : [];
-        var expectedTweaks = trainer.Tweaks
-            .Where(kv =>
-                !ScopedTweakPatch.ShouldRouteToScopedPatch(trainer, kv.Key) &&
-                Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default)
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+        var expectedTweaks = config.Trainer.Enabled
+            ? config.Trainer.Tweaks
+                .Where(kv =>
+                    !ScopedTweakPatch.ShouldRouteToScopedPatch(config.Trainer, kv.Key) &&
+                    Tweaks.ById.TryGetValue(kv.Key, out var tweak) && kv.Value != tweak.Default)
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal)
+            : new Dictionary<string, decimal>(StringComparer.Ordinal);
+
+        var expectedGameSettings = new List<string>();
+        if (config.GameSettings.AllowVikingLordHeroArmy) expectedGameSettings.Add("allow_viking_lord_army");
+        if (config.GameSettings.AllowLiberatiHeroArmy) expectedGameSettings.Add("allow_liberati_army");
 
         return marker.Cheats.SequenceEqual(expectedCheats, StringComparer.Ordinal) &&
                marker.Tweaks.Count == expectedTweaks.Count &&
                marker.Tweaks.All(kv => expectedTweaks.TryGetValue(kv.Key, out decimal value) &&
-                                       value == kv.Value);
+                                       value == kv.Value) &&
+               marker.GameSettings.SequenceEqual(expectedGameSettings, StringComparer.Ordinal);
     }
 
     // ---- 先寫 .cktmp 再取代之安全寫檔輔助 ----------------------------------

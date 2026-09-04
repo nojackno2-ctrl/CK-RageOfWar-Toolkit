@@ -146,6 +146,7 @@ internal static class Program
         RunGroup("44. TrainerDefaultKeyTableInvariants", TestTrainerDefaultKeyTableInvariants);
         RunGroup("45. CliOptionStrictness", TestCliOptionStrictness);
         RunGroup("46. RuntimeScriptChannel", TestRuntimeScriptChannel);
+        RunGroup("47. GameRulesModifierAndHeroArmyReversal", TestGameRulesModifierAndHeroArmyReversal);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -6990,6 +6991,181 @@ internal static class Program
         finally
         {
             try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+        }
+    }
+
+    private static (int Code, JsonEnvelope? Envelope, string Raw) RunCli(params string[] args)
+    {
+        using var outWriter = new StringWriter();
+        using var errWriter = new StringWriter();
+        int code = CliHost.Execute(args, outWriter, errWriter);
+        string raw = outWriter.ToString();
+        JsonEnvelope? envelope = null;
+        try { envelope = JsonSerializer.Deserialize<JsonEnvelope>(raw); }
+        catch (JsonException) { }
+        return (code, envelope, raw);
+    }
+
+    private static void TestGameRulesModifierAndHeroArmyReversal()
+    {
+        Console.WriteLine("\n47. GameRulesModifier 兵種規則修改與 data.pak 精確反轉測試");
+
+        // 1. XML 轉換與 freedom 移除邏輯測試
+        string xmlWithFreedom1 = "<class parent=\"Military\" speciality=\"freedom, vampire\">\n</class>";
+        string xmlWithFreedom2 = "<class parent=\"Military\" speciality=\"trample, freedom\">\n</class>";
+        string xmlWithFreedom3 = "<class parent=\"Military\" speciality=\"freedom\">\n</class>";
+        string xmlWithFreedom4 = "<class parent=\"Military\" speciality=\"vampire, freedom, trample\">\n</class>";
+        string xmlNoFreedom = "<class parent=\"Military\" speciality=\"vampire\">\n</class>";
+
+        Check("GameRulesModifier.HasFreedom 正確判定 freedom, vampire", GameRulesModifier.HasFreedom(xmlWithFreedom1));
+        Check("GameRulesModifier.HasFreedom 正確判定 trample, freedom", GameRulesModifier.HasFreedom(xmlWithFreedom2));
+        Check("GameRulesModifier.HasFreedom 正確判定 單獨 freedom", GameRulesModifier.HasFreedom(xmlWithFreedom3));
+        Check("GameRulesModifier.HasFreedom 正確判定 包含 freedom 的多重特性", GameRulesModifier.HasFreedom(xmlWithFreedom4));
+        Check("GameRulesModifier.HasFreedom 正確判定 不含 freedom", !GameRulesModifier.HasFreedom(xmlNoFreedom));
+
+        string modified1 = GameRulesModifier.RemoveFreedom(xmlWithFreedom1);
+        Check("RemoveFreedom 移除 freedom, vampire 中的 freedom",
+            !GameRulesModifier.HasFreedom(modified1) && modified1.Contains("speciality=\"vampire\""));
+
+        string modified2 = GameRulesModifier.RemoveFreedom(xmlWithFreedom2);
+        Check("RemoveFreedom 移除 trample, freedom 中的 freedom",
+            !GameRulesModifier.HasFreedom(modified2) && modified2.Contains("speciality=\"trample\""));
+
+        string modified3 = GameRulesModifier.RemoveFreedom(xmlWithFreedom3);
+        Check("RemoveFreedom 移除單獨 freedom 後不再包含 freedom 特性",
+            !GameRulesModifier.HasFreedom(modified3));
+
+        string modified4 = GameRulesModifier.RemoveFreedom(xmlWithFreedom4);
+        Check("RemoveFreedom 移除中間的 freedom 保留其他特性",
+            !GameRulesModifier.HasFreedom(modified4) && modified4.Contains("vampire") && modified4.Contains("trample"));
+
+        // 冪等性測試
+        string idempotent1 = GameRulesModifier.RemoveFreedom(modified1);
+        Check("RemoveFreedom 具備冪等性（套用兩次與一次完全相同）", idempotent1 == modified1);
+
+        string unchanged = GameRulesModifier.RemoveFreedom(xmlNoFreedom);
+        Check("RemoveFreedom 在無 freedom 時原文不變", unchanged == xmlNoFreedom);
+
+        // 2. data.pak 合成安裝與逐位元組精確反轉測試
+        string vikingLordXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"GVikingLord\" parent=\"Military\" speciality=\"vampire, freedom\">\r\n\t<health value=\"800\"/>\r\n</class>\r\n";
+        string liberatusXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"RLiberatus\" parent=\"Military\" speciality=\"trample, freedom\">\r\n\t<health value=\"600\"/>\r\n</class>\r\n";
+
+        var pak = CreateSyntheticDataPak();
+        pak.WriteText(GameRulesModifier.VikingLordClassPath, vikingLordXml);
+        pak.WriteText(GameRulesModifier.LiberatusClassPath, liberatusXml);
+        byte[] vanillaBytes = pak.ToBytes();
+
+        Check("初始合成 data.pak 為原版", PatchState.Inspect(GameFile.DataPak, vanillaBytes).IsVanilla);
+
+        // 套用單獨維京領主
+        var configViking = ToolkitConfig.CreateDefault();
+        configViking.GameSettings.AllowVikingLordHeroArmy = true;
+        configViking.GameSettings.AllowLiberatiHeroArmy = false;
+
+        var patchedPak1 = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPak1, configViking.Trainer, configViking.GameSettings);
+        byte[] patchedBytes1 = patchedPak1.ToBytes();
+
+        var state1 = PatchState.Inspect(GameFile.DataPak, patchedBytes1);
+        Check("套用維京領主後 data.pak 辨識為 PatchedByUs (trainer_marker)",
+            state1.IsPatched && state1.AppliedPatches.Contains("trainer_marker"));
+
+        var marker1 = TrainerInstaller.ReadMarker(patchedPak1);
+        Check("TrainerMarker 包含 allow_viking_lord_army",
+            marker1 is not null && marker1.GameSettings.Contains("allow_viking_lord_army") && !marker1.GameSettings.Contains("allow_liberati_army"));
+        Check("TrainerMarker.Originals 只記錄有變動的檔案",
+            marker1 is not null && marker1.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+
+        string currentVikingXml = patchedPak1.ReadText(GameRulesModifier.VikingLordClassPath)!;
+        string currentLiberatusXml = patchedPak1.ReadText(GameRulesModifier.LiberatusClassPath)!;
+        Check("data.pak 內維京領主已移除 freedom", !GameRulesModifier.HasFreedom(currentVikingXml));
+        Check("data.pak 內自由鬥士保留 freedom", GameRulesModifier.HasFreedom(currentLiberatusXml));
+
+        // 反轉 / 正規化
+        var uninstalled1 = HmmPak.FromBytes(patchedBytes1);
+        TrainerInstaller.Uninstall(uninstalled1);
+        byte[] restoredBytes1 = uninstalled1.ToBytes();
+        Check("Uninstall 單獨維京領主後與原版逐位元組相同", restoredBytes1.SequenceEqual(vanillaBytes));
+
+        var normalised1 = PatchState.Normalise(GameFile.DataPak, patchedBytes1);
+        Check("PatchState.Normalise 單獨維京領主後與原版逐位元組相同",
+            normalised1.Success && normalised1.Value is not null && normalised1.Value.SequenceEqual(vanillaBytes));
+
+        // 同時套用維京領主與自由鬥士
+        var configBoth = ToolkitConfig.CreateDefault();
+        configBoth.GameSettings.AllowVikingLordHeroArmy = true;
+        configBoth.GameSettings.AllowLiberatiHeroArmy = true;
+
+        var patchedPakBoth = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakBoth, configBoth.Trainer, configBoth.GameSettings);
+        byte[] patchedBytesBoth = patchedPakBoth.ToBytes();
+
+        var markerBoth = TrainerInstaller.ReadMarker(patchedPakBoth);
+        Check("TrainerMarker 包含兩項遊戲設定",
+            markerBoth is not null &&
+            markerBoth.GameSettings.Contains("allow_viking_lord_army") &&
+            markerBoth.GameSettings.Contains("allow_liberati_army"));
+        Check("TrainerMarker.Originals 包含兩個原始檔案",
+            markerBoth is not null &&
+            markerBoth.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
+            markerBoth.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+
+        var uninstalledBoth = HmmPak.FromBytes(patchedBytesBoth);
+        TrainerInstaller.Uninstall(uninstalledBoth);
+        byte[] restoredBytesBoth = uninstalledBoth.ToBytes();
+        Check("Uninstall 兩項設定後與原版逐位元組相同", restoredBytesBoth.SequenceEqual(vanillaBytes));
+
+        var normalisedBoth = PatchState.Normalise(GameFile.DataPak, patchedBytesBoth);
+        Check("PatchState.Normalise 兩項設定後與原版逐位元組相同",
+            normalisedBoth.Success && normalisedBoth.Value is not null && normalisedBoth.Value.SequenceEqual(vanillaBytes));
+
+        // 3. PatchPipeline 端對端驗證 (TrainerMarkerMatchesConfig)
+        Check("PatchPipeline.TrainerMarkerMatchesConfig: 正確比對符合的設定",
+            PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configBoth));
+
+        var configMismatched = ToolkitConfig.CreateDefault();
+        configMismatched.GameSettings.AllowVikingLordHeroArmy = true;
+        configMismatched.GameSettings.AllowLiberatiHeroArmy = false;
+        Check("PatchPipeline.TrainerMarkerMatchesConfig: 設定不符時回報 false",
+            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configMismatched));
+
+        // 4. CLI settings get / set 測試
+        string tempConfigDir = Path.Combine(Path.GetTempPath(), "ckselftest_settings_cli_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempConfigDir);
+        string cliConfigFile = Path.Combine(tempConfigDir, "config.json");
+        try
+        {
+            var initialCfg = ToolkitConfig.CreateDefault();
+            initialCfg.Save(cliConfigFile);
+
+            var getInitial = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 成功執行", getInitial.Code == ExitCodes.Success && getInitial.Envelope is { Ok: true });
+
+            var setBoth = RunCli("settings", "set", "--viking-army=on", "--liberati-army=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --viking-army=on --liberati-army=on` 成功執行", setBoth.Code == ExitCodes.Success && setBoth.Envelope is { Ok: true });
+
+            var loadedCfg = ToolkitConfig.Load(cliConfigFile);
+            Check("CLI settings set 成功寫入設定檔",
+                loadedCfg.GameSettings.AllowVikingLordHeroArmy && loadedCfg.GameSettings.AllowLiberatiHeroArmy);
+
+            var setVikingOff = RunCli("settings", "set", "--viking-army=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --viking-army=off` 成功修改單一項目", setVikingOff.Code == ExitCodes.Success);
+            var loadedCfg2 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 VikingLord=off, Liberati=on",
+                !loadedCfg2.GameSettings.AllowVikingLordHeroArmy && loadedCfg2.GameSettings.AllowLiberatiHeroArmy);
+
+            var setInvalid = RunCli("settings", "set", "--viking-army=maybe", "--config", cliConfigFile, "--json");
+            Check("`settings set` 拒絕無效的 on/off 值", setInvalid.Code == ExitCodes.InvalidArgs);
+
+            var setNoArgs = RunCli("settings", "set", "--config", cliConfigFile, "--json");
+            Check("`settings set` 缺少選項時拒絕", setNoArgs.Code == ExitCodes.InvalidArgs);
+
+            var noSubCmd = RunCli("settings", "--config", cliConfigFile, "--json");
+            Check("`settings` 缺少子指令時拒絕", noSubCmd.Code == ExitCodes.InvalidArgs);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempConfigDir)) Directory.Delete(tempConfigDir, true); } catch { }
         }
     }
 

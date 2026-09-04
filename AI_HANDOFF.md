@@ -14,6 +14,30 @@
 > 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
 > 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
 
+## 交接事項：2026-09-04 遊戲設定模組與維京領主／自由鬥士編入英雄隊伍功能（ISSUE-074）
+
+> ⏳ **已修碼 · 待實測（2026-09-04）**：
+> - 完整實作「解除維京領主與自由鬥士自由之身（Freedom）」功能。
+> - 依使用者指示新增獨立頂層分頁「遊戲設定」（`GameSettingsPage`）。
+> - 遵守 AGENTS.md 硬性約束：無備份目錄、100% 精確反轉原版、三語在地化、CLI 支援。
+> - SelfTest 新增第 47 組測試，47 組測試全綠通過。
+
+### 1. 逆向定位與設計原理
+- **引擎自由之身限制**：`0x0073D710` 屬性字串第 12 位為 `freedom`（bit 12: `0x00001000`）。`CLASSES\*.SC.XML` 定義 `speciality="..., freedom, ..."`，`0x005C31EE` 解析入 `[class+0xF0]`，單位建構子 `0x0050A7E0` 寫入 `[unit+0x138]`。`0x00513B00 Unit::HasFreedom` 被 `SUBAI\UNIT_ATTACH_VERIFY.VS` 與 `UNIT_ATTACH.VS` 調用阻止英雄附著。
+- **底層無阻擋**：`0x0050BC60 CVXUnit::AttachTo` 本身完全不檢查 freedom。因此移除 XML 屬性中的 `freedom` 字串即可讓兩單位順利編入英雄隊伍，享受陣形加成與經驗分享，並完整保留其專屬特性（維京領主 `vampire`、自由鬥士 `trample`）。
+
+### 2. 實作變更清冊
+- **核心轉換**：`src/CKToolkit/Core/Trainer/GameRulesModifier.cs`（`HasFreedom`, `RemoveFreedom`）。
+- **設定模型**：`src/CKToolkit/Core/Common/ToolkitConfig.cs` 新增 `GameSettingsConfig` 與 `ToolkitConfig.GameSettings`。
+- **安裝與快照**：`src/CKToolkit/Core/Trainer/TrainerInstaller.cs` 與 `TrainerModule.cs` 支援 `GameSettingsConfig`，由既有快照機制記錄至 `marker.Originals`，在 `Uninstall` 與 `Normalise` 時 100% 精確還原。
+- **標記與驗證**：`TrainerMarker.cs` 新增 `GameSettings` 屬性；`PatchPipeline.cs` 更新 `TrainerHasDataPakPayload` 與 `TrainerMarkerMatchesConfig`，保證 `verify` 零假警報。
+- **GUI 頁面**：`src/CKToolkit/Gui/GameSettingsPage.cs`，並於 `MainForm.cs` 掛載頂層分頁「遊戲設定」。
+- **CLI 指令**：`src/CKToolkit/Cli/CliHost.GameSettings.cs` 支援 `settings get` 與 `settings set --viking-army=on|off --liberati-army=on|off`。
+- **I18n**：`strings.zh-TW.json`、`strings.zh-CN.json`、`strings.en.json` 新增 9 個鍵，鍵集與佔位符 100% 對齊。
+- **測試**：`src/CKToolkit.SelfTest/Program.cs` 新增 Group 47，全套 47 組測試全數通過。
+
+---
+
 ## 交接事項：2026-09-04 第五輪（真正沒被攔到的是「自己背的糧」，16 站點世代）
 
 > ✅ **已實機驗收（2026-09-04）**：使用者回報「成功不用進食了」。
