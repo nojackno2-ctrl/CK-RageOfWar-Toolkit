@@ -38,9 +38,13 @@ public sealed class TrainerMarker
     [JsonPropertyName("cheats")]
     public List<string> Cheats { get; set; } = [];
 
-    /// <summary>套用當時的 tweak 數值，僅供顯示與診斷。</summary>
+    /// <summary>套用當時啟用的 tweak 數值，僅供顯示與診斷。</summary>
     [JsonPropertyName("tweaks")]
     public Dictionary<string, decimal> Tweaks { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>套用當時啟用的遊戲設定項目，僅供顯示與診斷。</summary>
+    [JsonPropertyName("gameSettings")]
+    public List<string> GameSettings { get; set; } = [];
 }
 
 /// <summary>

@@ -54,17 +54,34 @@
 
 ## 3. 玩家身分與多人同步
 
-使用者決定：scoped 永久 Tweak **只允許單人遊戲，多人模式整組禁用**，不提供固定槽位例外。
-否則同一個物件在不同電腦會依各端的 `CurPlayer()` 套用不同數值，必然造成 deterministic
-simulation desync。
+> **2026-09-03 決策變更（ISSUE-069）：多人限制整組取消。** 底下保留原始決策與它為什麼
+> 失敗的紀錄，因為那個 bug 只有在實機才看得出來，不寫下來一定會有人把守衛加回去。
 
-- 單人遊戲：由本機玩家槽位解析為 self player id。
-- 多人遊戲：所有 scoped hook 直接走原版值；UI 與 CLI 必須明示此限制。
-- `playerMode=fixed` 不得繞過多人禁用。
-- 中立／環境玩家（目前在聚落路徑觀察到 `0x0E`／`0x0F`）維持原版值，不歸入 enemy。
+### 3.1 現行規則
+
+scoped 永久 Tweak **在單人與多人都生效**，helper 只解析一條鏈：
+
+```text
+engine      = [0x008AA6C8]          ; NULL -> 用原版值
+localPlayer = [engine + 0xCD0]      ; NULL -> 用原版值
+self  := 物件 owner == localPlayer
+enemy := 其餘
+```
+
+- owner 欄位：一般物件是 `[obj + 0x6E]`，聚落是 `[settlement + 0x90]`，兩者都是
+  **player 物件指標**（`+0x08` 是 player id，`+0x24 + id*4` 是對各玩家的關係旗標）。
+  引擎自己在 `0x004F17AE` 就是用 `cmp [esi+6E],[ecx+6E]` 判同陣營，指標比較是對的。
+- 中立／環境玩家維持原版值，不歸入 enemy。
 - 物件被俘虜或 `SetPlayer` 後必須立即重新分類，不可沿用建立時的舊 owner。
+- **多人連線會 desync。** 每一端的 `localPlayer` 不同，同一個物件在不同電腦會拿到
+  不同數值，deterministic simulation 必然分岔。這是使用者在知情下明示接受的取捨
+  （原話：「乾脆取消什麼多人不能用的限制，通通都給我改下去」），三語說明文字已改成
+  「單人與多人皆生效，多人連線會造成模擬不同步」，SelfTest 有對應斷言。
 
-原廠 VS `IsMultiplayer` handler 位於 `0x005983D0`。其核心判斷為：
+### 3.2 原始決策，以及它為什麼是個 bug
+
+原始決策是「只允許單人遊戲，多人模式整組禁用」，helper 依原廠 VS `IsMultiplayer`
+handler（`0x005983D0`）的核心判斷 fail-closed：
 
 ```text
 game = [0x008C1C8C]
@@ -72,11 +89,27 @@ session = game ? [game + 0x50] : null
 multiplayer = session && byte[session + 0x108] != 0
 ```
 
-該 byte 是最多八個連線玩家的位元遮罩；任何一位存在即視為多人。EXE scoped helper 必須先做
-同一個 fail-closed 判斷，指標不存在也不得猜測為可套用狀態。
+當時寫下的規則是「指標不存在也不得猜測為可套用狀態」，於是 helper 在 `game == NULL`
+或 `session == NULL` 時直接跳 `done` 用原版值。
 
-為了讓多人真正保持原版，scoped 模式不可再把差異值寫入共享 `VXCONST.INI`、`COMMANDS.XML`
-或 class XML；這些檔案若被改過，即使 hook no-op，多人仍會讀到修改值。
+**實機量測推翻了這個前提**（2026-09-03，讀取執行中的 `Celtic kings.exe` 記憶體）：
+
+| 位址 | 單人對局中的實際值 |
+|---|---|
+| `[0x008C1C8C]` game | **0** |
+| `[0x008AA6C8]` engine | `0x10E32740`（有效） |
+| `[engine + 0xCD0]` localPlayer | `0x10E33414`（有效） |
+| `[localPlayer + 0x08]` player id | `0` |
+
+`0x008C1C8C` 是**網路對戰**的 game 物件，單人模式恆為 NULL——引擎 24 個讀取點全都先
+null-check，`IsMultiplayer` 也正是靠它為 NULL 才回傳「單人」。也就是說舊守衛的效果是
+**反的**：11 個 hook 只有在多人才可能通過第一關，而多人又會被遮罩擋掉，結果是
+**任何模式下都不生效**。使用者回報的「永久規則調整完全沒有作用」就是這件事。
+
+診斷探針保留在 `scratch/probe_cktw.py`（gitignored），要重驗時進單人對局後直接跑。
+
+為了讓 hook 是唯一的生效路徑，scoped 模式仍然不可把差異值寫入共享 `VXCONST.INI`、
+`COMMANDS.XML` 或 class XML——否則會變成 hook 與檔案兩份修改疊加。
 
 ## 4. 引擎修補架構
 
@@ -111,12 +144,11 @@ Steam `Celtic kings.exe` 專屬的可逆靜態補丁：
 - 原版 `BaseTownhall` 是 `produces_gold=1/produces_food=0`，`BaseVillage` 是相反組合；helper
   保留 `+0x32/+0x36` 原值，用非零欄位分型，再以 `Settlement+0x90` owner 選 self/enemy。
   聚落佔領後下一個 income tick 會自然改讀另一個 scope，不需額外型別欄位。
-- game/session/local-player 缺失、multiplayer mask 非零、或兩個原版 production 欄位皆為零時，
-  直接使用原版 instance 值。
+- local-player 指標缺失、或兩個原版 production 欄位皆為零時，直接使用原版 instance 值。
 
 人口四項亦已加入 `.cktw`：growth amount `0x005026B6`、growth interval `0x005026C7`、
 loss percent `0x005026EF`、loss interval `0x00502716`。四處執行時 `ECX` 均仍是 Settlement*，
-沿用 production helper 的 multiplayer／`+0x32/+0x36` 類型／`+0x90` owner 判定：
+沿用 production helper 的 `+0x32/+0x36` 類型／`+0x90` owner 判定：
 
 - growth amount 與兩個 interval 的原指令只是 absolute MOV；helper 以 `pushfd/popfd` 保存旗標，
   分別回傳 ESI 或 EDX。
@@ -134,7 +166,7 @@ loss percent `0x005026EF`、loss interval `0x00502716`。四處執行時 `ECX` �
   current-gold override `-1` 時執行；地圖／存檔傳入明確值會繞過，避免讀檔時重設現有金錢。
   helper 從 caller `[esp+0x18]` 的 owner slot（CALL/保存後為 `[esp+0x2C]`）按原廠
   `base+0xCD4+slot*0x254` 公式取得 owner pointer，再分 self/enemy × townhall/village。
-- 容量與初始金錢各有獨立 enable；多人、缺少引擎指標、非法 owner slot 或非兩種聚落時均用原值。
+- 容量與初始金錢各有獨立 enable；缺少引擎指標、非法 owner slot 或非兩種聚落時均用原值。
 
 ⚠️ **這七項的影響範圍在兩條路徑上不一樣，GUI 標籤目前只描述舊路徑**（`ISSUE-058`）。
 `townhall_maxgold`／`townhall_maxfood`／`townhall_max_population`／`townhall_start_gold`／
@@ -239,20 +271,47 @@ class `+0xF4` 在此是**除數**（值越大移動越快），倍率套用在�
 helper 必須先把 `EDX:EAX` 被除數壓堆疊才能做 `mul`，算完 `pop edx; pop eax` 還原後才 `idiv ebx`；
 含溢位保護（`cmp edx,0x10000; jae`）與除零保護（`test eax,eax; jz`），任一 fail-closed 條件成立即用原版除數。
 
-**`unit_feeds`** —— hook `0x0050B3DA`，原始 10 bytes `F7 85 38 01 00 00 00 00 02 00` =
-`test dword [ebp+0x138],0x20000`，位於 `CVXUnit::ProcessFood`（`0x0050B3D0`；`0x0050B3D8 mov ebp,ecx`
-證實 thiscall、`ebp` 必為 unit）。instance `+0x138` bit 17 的語意由原廠建構子決定：
-`0x0050A9D7 mov ecx,[eax+0x29C]` 讀 class feeds，接著 `and eax,0xFFFDFFFF` 清除、視情況 `or eax,0x20000` 設定。
+**`unit_feeds`** —— 三個 hook。設定仍是三態（0=保持原版、1=不進食、2=進食），
+但**扣糧與飢餓行為是兩件事**，2026-09-04（`ISSUE-071`）才分清楚：
+
+- **扣糧（真正的食物經濟）**：`Settlement::TakeResource(amount, type)`（`0x00516F00`，
+  資源存在 `holder+type*4+0x14`、type 1 = 食物、以 EAX 回傳實際扣到的量）。
+  全 EXE 只有七個呼叫者，其中兩個是單位吃飯，**兩個都要接管**：
+  - `0x0050FCB1`（原始 5 bytes `E8 4A 72 00 00`）位於 `0x0050FC30`，
+    `ESI` = CVXUnit、`EDI` = Settlement。內容是
+    `edx = class+0xEC（食量） − unit+0x120（存糧）`，扣完 `unit+0x120 += 回傳值`。
+    **這條路徑完全沒有讀 `+0x138` 的 feeds 位元**——玩家的部隊多半隸屬聚落，
+    走的就是它，這是「我方設 0 仍然消耗食物」的真正原因。
+  - `0x0050B9AF`（原始 5 bytes `E8 4C B5 00 00`）位於 `CVXUnit::ProcessFood`，
+    處理在野外自行找補給的單位；`this` 在 `[esp+0x20]`（`0x0050B3E6` 存入），
+    helper 內因為多了回傳位址與兩個引數而是 `[esp+0x2C]`。
+  - 共用 `BuildFoodUpkeepHelper`：owner 一律取 `[unit+0x6E]` 與
+    `[[0x008AA6C8]+0xCD0]` 比對。三態 1 時**不呼叫**原函式，直接
+    `mov eax,[esp+4]; ret 8` 回報「已扣到請求的全額」——兩個呼叫端都會把回傳值加進
+    `unit+0x120`，部隊因此照樣吃飽、不會觸發飢餓旗標，聚落存糧則分毫未動。
+    其餘情況以 `JMP 0x00516F00` 尾呼叫原函式，堆疊與 `ret 8` 交還給它。
+  - 另五個呼叫者刻意不接管：`0x004D5C6E`／`0x004D5C81` 是生產單位的金錢與食物成本、
+    `0x00516599`／`0x005166E8` 是運輸車裝載、`0x005A1D36` 是巨石陣飢餓儀式。
+- **飢餓行為（原有 hook，保留）**：`0x0050B3DA`，原始 10 bytes
+  `F7 85 38 01 00 00 00 00 02 00` = `test dword [ebp+0x138],0x20000`，位於
+  `CVXUnit::ProcessFood`（`0x0050B3D0`；`0x0050B3D8 mov ebp,ecx` 證實 thiscall、
+  `ebp` 必為 unit）。instance `+0x138` bit 17 的語意由原廠建構子決定：
+  `0x0050A9D7 mov ecx,[eax+0x29C]` 讀 class feeds，接著 `and eax,0xFFFDFFFF` 清除、
+  視情況 `or eax,0x20000` 設定。
 
 **刻意不把 feeds 併進 `0x004F479D` 的 owner-scalar helper**：那條 `SetPlayer` 共用路徑上流過建築與
 聚落子物件，而 `+0x138` 只在 `CVXUnit` 被證實是 feeds 欄位；對其他物件翻該位元沒有證據支持。
-設定採三態（0=保持原版、1=不進食、2=進食）。
 
-⚠️ **EFLAGS 契約與其他 helper 相反**：原廠 `test` 產生的 ZF 必須活到 `0x0050B3EA` 的
-`je 0x0050BAEC`（中間 `push esi`／`push edi`／`mov` 均不影響旗標），所以這個 helper 的職責是
-**產生**旗標而非還原旗標，**不得**使用 `pushfd`／`popfd`，收尾固定為
-`pop edx; pop ecx; test eax,eax; ret`（ZF=1 = 不進食）。EAX 在該處為死值：未採用路徑於
-`0x0050B407 xor eax,eax` 先寫後讀，採用路徑 `0x0050BAEC` 直接進 epilogue。
+⚠️ **`data/classes/unit.sc.xml` 的 `feeds` 屬性不再被用來套用這個設定**：class `feeds`
+（`+0x29C`）在整個引擎只被讀三次——建構子（轉成 instance bit 17）與兩處 UI 提示文字
+（`0x005A1B4B`／`0x005A1BEB`），而 instance bit 17 只被 `0x0050B3D0` 讀。它是**飢餓行為**
+的開關，不是**食物經濟**的開關。
+
+⚠️ **`0x0050B3DA` 的 EFLAGS 契約與其他 helper 相反**：原廠 `test` 產生的 ZF 必須活到
+`0x0050B3EA` 的 `je 0x0050BAEC`（中間 `push esi`／`push edi`／`mov` 均不影響旗標），
+所以這個 helper 的職責是**產生**旗標而非還原旗標，**不得**使用 `pushfd`／`popfd`，
+收尾固定為 `pop edx; pop ecx; test eax,eax; ret`（ZF=1 = 不進食）。EAX 在該處為死值：
+未採用路徑於 `0x0050B407 xor eax,eax` 先寫後讀，採用路徑 `0x0050BAEC` 直接進 epilogue。
 
 ⚠️ **哨兵必須本地處理**：`hero_max_army` 與 `unit_feeds` 都用一個「未設定」哨兵值，
 這類邏輯一律寫在 `TryBuildSettings` 內的本地函式（`HeroMaxArmy`／`UnitFeeds`），
@@ -330,6 +389,196 @@ parser 區域變數與 finalize 的延後 stack cleanup 已逐指令對齊，def
 `[0x008AA6C8]+0xC6C` 的目前 tick 設定 `ESI+0xDC = now`、`ESI+0xE0 = now+delay`。
 訓練與研究可共用這一個 owner-aware delay helper，非目標 command 保持原值。
 
+⚠️ **但這一個站點不夠**（2026-09-04，`ISSUE-072`）。`0x004FB6AB` 位在**零參數的
+`Obj::Progress()`**（本體 `0x004FB5C0`，於 `0x004FF964` 以 `0x0073231C` 註冊）。
+引擎另外註冊了兩個同名／相鄰的入口：
+
+| VA | 註冊名稱 | 用途 |
+|---|---|---|
+| `0x004FB5C0` | `Obj::Progress`（0 參數，`0x004FF964`） | 自己從 `definition+0xF4` 取 execdelay |
+| `0x004FB4F0` | `Obj::Progress`（1 參數，`0x004FF981`） | 由腳本傳入毫秒數，**不讀 `+0xF4`** |
+| `0x004FB790` | `Obj::cmddelay`（`0x004FF99A`） | `0x004FB83E mov eax,[eax+0xF4]` 把 execdelay 交還腳本 |
+
+而原版 `data.pak` 內 `method="train"` 的 barrack 訓練腳本寫的是：
+
+```
+perc = 100 - EnvReadInt(.settlement, "BarrackTrainTimeDecrease");
+if (bTemple) perc = 100;
+.Progress((.cmddelay * perc) / 100);
+```
+
+也就是**先用 `Obj::cmddelay` 讀出 execdelay，自己算完再呼叫一參數版本**——單位訓練
+一次都不會流經 `0x004FB6AB`。零參數版本只被英雄訓練、建築修復、`method="research"`
+與造船腳本使用。因此必須再加一個站點：
+
+- **`0x004FB83E`**（原始 6 bytes `8B 80 F4 00 00 00`）：進場時 `EAX` 是 definition，
+  發令物件則從**腳本 VM 堆疊頂端的 handle** 重新查表取得——
+  `mov ecx,[esi]` → `movzx ecx,word [ecx]` → `mov ecx,[ecx*4+0x00798CB8]`，
+  也就是引擎 `0x00481A20` 自己做的 `objects[handle & 0xFFFF]`。
+  `ESI` 自 `0x004FB794` 取得後到本站點之間沒有任何改寫，handle 也是引擎在
+  `0x004FB79F` 剛用過的同一份資料，所以這條路徑**全程唯讀、不猜任何堆疊位移**。
+
+> 🚫 **不要再用 `0x004FB7E8` + scratch slot 的作法**（2026-09-04 的 15 站點測試世代）。
+> 那個 helper 第一條指令是 `mov [section+3840], eax`，而 `.cktw` 是以
+> `CNT_CODE | CNT_INITIALIZED_DATA | MEM_EXECUTE | MEM_READ` 建立的**唯讀節區**，
+> 執行期寫入必然 `0xC0000005`——那就是使用者回報「進入單人遊戲閃退」的真正原因，
+> 與 `0x004FB790` 的暫存器語意完全無關（`0x004FB7E8` 的 `EAX` 確實是發令物件，
+> 對照 `Obj::GetPlayer` 在 `0x004F868A` 對同一個樣板做 `mov eax,[eax+0x6E]`）。
+> 若將來真的需要執行期可寫的空間，必須先替 `.cktw` 加上 `IMAGE_SCN_MEM_WRITE`，
+> 並同步更新節區辨識與還原邏輯。
+
+兩條路徑不會重複縮放：`method="train"`（14 個）與 `method="trainex"`（2 個）只經
+`cmddelay`；`method="research"`（41 個）、`method="trainpeasant"`、英雄訓練、建築修復
+與造船只經零參數 `Progress()`。`TAVERN_INVESTMENT.VS`（`method="invest"`）與
+`TOWNHALL_ADDPOP.VS`（`method="addpop"`）雖然也呼叫 `.Progress(.cmddelay)`，
+但它們的 definition `+0xCF`／`+0xD0` 都是 0，會原封退回原值。
+
+`+0xCF`／`+0xD0` 的寫入點已逐條複驗：`0x00552852 mov byte [edx+0xCF],cl`（traincommand）
+與 `0x00552876 mov byte [edx+0xD0],cl`（researchcommand），`cl` 來自
+`strcmp(attr, "no") != 0`，`edx` 是 `[0x008AA5F4]` 指向的目前 command definition。
+
+### 4.4.1 敵我分流一律比較 player 索引（`ISSUE-073`）
+
+**所有 helper 判定「這是不是本機玩家的」時，必須比較 `[player+8]` 這個索引，
+不得比較 player 指標。** 這不是風格問題，是引擎語意：
+
+```
+0050BA9B mov eax,[0x008AA6C8]     ; engine
+0050BAA0 mov edx,[ebp+0x6E]       ; 物件的 owner（player*）
+0050BAA3 mov ecx,[eax+0xCD0]      ; 本機玩家（player*）
+0050BAA9 mov eax,[edx+8]          ; owner 索引
+0050BAAC cmp eax,[ecx+8]          ; ← 引擎自己比的是索引
+0050BAAF jne ...                  ; 不是我的單位就不送 army starving 通知
+```
+
+`[player+8]` 就是 `Obj::GetPlayer`（`0x004F8630`）在 `0x004F868D` 讀出來、+1 之後
+回傳給腳本的那個玩家編號。指標相等一定索引相等，反之不然——引擎在這種比對上選了
+索引，代表同一個玩家在執行期可能有不只一個 player 結構位址。
+
+舊版 helper 全部寫成 `cmp [obj+0x6E], <localPlayer>`，實機量測的結果是
+**我方物件一次都沒有被判成 self**（ISSUE-071 的計數器：`entry=32322`、`self=0`、
+`enemy=32322`），於是每一項 scoped 設定都只會套到「敵方」那一欄。
+
+實作集中在 `ScopedTweakPatch.EmitPlayerScope`／`EmitObjectScope`：
+
+```
+test  <player>,<player>        ; jz fallback
+mov   <player>,[<player>+8]    ; owner 索引
+mov   <tmp>,[0x008AA6C8]       ; jz fallback
+mov   <tmp>,[<tmp>+0xCD0]      ; jz fallback
+cmp   <player>,[<tmp>+8]
+setne <scope8> / movzx <scope>,<scope8>   ; 0 = 我方、1 = 敵方
+```
+
+`BuildInitialGoldHelper` 是唯一的例外寫法：它手上本來就是 constructor 的 slot 編號，
+直接 `cmp ebx,[localPlayer+8]` 即可，不需要 `imul ebx,0x254` + `lea ...+0xCD4`
+先把索引還原成指標。
+
+### 4.4.2 部隊進食：正規開關是 class `feeds`（`ISSUE-071`）
+
+> ⚠️ **instance `+0x138` bit 17 不是吃飯的閘門。** 全 EXE 只有 `0x0050B080`
+> （`CVXUnit::GetFeeds`，`shr eax,0x11; and eax,1`）讀它，而它的唯一呼叫者是
+> `0x005A21A9`——依 `maxhealth` 比例**回血**的常式。
+
+**真正的開關是 class `+0x29C`**，也就是 class XML 的 `<properties feeds="0"/>`
+（原版 `UNIT.SC.XML` 是 `feeds="1"`，動物／幽靈／運輸車是 0；地圖編輯器改的也是它）。
+飢餓名單的成員資格完全由它決定：
+
+```
+005A1B40 HungerManager::Add(Obj*)
+  005A1B41 mov eax,[esp+8]        ; eax = Obj*
+  005A1B48 mov ecx,[eax+0x3A]     ; ecx = class
+  005A1B4B mov eax,[ecx+0x29C]    ; ← feeds
+  005A1B51 test eax,eax
+  005A1B53 je  0x005A1BD9         ; 不進食 -> 根本不加入名單
+005A1BE0 HungerManager::Remove(Obj*)  ; 同樣先查 class +0x29C
+```
+
+> 🚫 **但這一關不能拿來做敵我分流**（2026-09-04 實機證實惰性）。
+> `HungerManager::Add` 只由建構期間呼叫：`0x0050AA8C`（`CVXUnit` 建構子尾端）與
+> `0x005138D4`（多個 vtable 的虛擬方法）。而基底 `Object` 建構子才剛在
+> `0x004F115E mov dword [esi+0x6E],ebx`（`ebx = 0`）把 owner 清成 0，owner 要到
+> `Object::SetPlayer`（`0x004F479D`）才寫進 `+0x6E`。以 `[obj+0x6E]` 分流的 helper
+> 因此每一次都走 null 回退，一律傳回原版 `[class+0x29C]` = 1，單位照樣入列。
+> 站點仍然掛著（無害，且 owner 已確定時仍會分流），但**真正生效的是四個扣糧點**。
+
+**主要扣糧點是飢餓管理器的 tick（`0x005A1C60`）**，每回合以 round-robin 處理名單的一段：
+
+```
+005A1CED mov eax,[cursor+8]        ; 單位
+005A1CF6 mov cx,word [eax+0x10A]   ; 單位所屬聚落 handle
+005A1D0E mov dx,word [esi+0x0A]    ; 聚落 -> 中央建築 handle
+005A1D23 mov ax,word [edi+0x4A]    ; 中央建築 -> 資源持有物件
+005A1D30 push 1 / push 1
+005A1D36 call 0x00516F00           ; TakeResource(1, FOOD)   ← 主要扣糧
+005A1D3B test eax,eax / je 0x005A1D71
+005A1D3F mov ecx,[edi+0x90] / mov eax,[ecx+8]   ; 該玩家的統計
+```
+
+取不到（聚落沒糧、單位沒有所屬聚落、聚落沒有中央建築）才走 `0x005A1D71`：
+改扣單位自己的存糧 `+0x120`，歸零開始餓死。
+helper 掛在 `0x005A1D36`，用 `EDI`（中央建築，`0x005A1D1D` 已 null-check）的 `+0x90`
+owner 分流——引擎自己在 `0x005A1D3F` 用的就是同一個欄位，零堆疊猜測。
+
+**`0x005A1D71` 這條分支必須另外掛**（ISSUE-071 第四輪）：它完全不經過
+`TakeResource`，`0x005A1D36` 的 hook 攔不到，而跟著英雄在野外行動、沒有所屬聚落的
+部隊幾乎每回合都走這裡——這就是「部隊攜帶的食物還是會被消耗」的成因。
+
+```
+005A1D71 mov eax,[esp+0x10]        ; 單位
+005A1D75 mov ecx,[eax+0x120]       ; 自己背的糧
+005A1D7D je  0x005A1E65            ; 已經是 0 -> 餓死處理（未接管）
+005A1D83 mov edx,[eax+0x6E]        ; owner，引擎自己無條件解參考 -> 此處必非 NULL
+005A1D86 mov eax,[edx+8]
+005A1DA7 dec dword [eax+0x120]     ; ← 唯一會扣「自己背的糧」的指令
+005A1DAD mov eax,[esp+0x10]        ; 之後才重新 test，旗標是死的
+```
+
+helper 進場 `EAX` = 單位，以 `[EAX+0x6E]` 分流；三態 1 直接不扣就返回，
+0／2／owner 解析失敗照樣執行原版 `dec`。`EBX`（本回合剩餘處理數）／`ECX`／`EDX`
+全部 push/pop 還原，`EAX` 不動；扣糧路徑上 helper 的最後一條指令就是那條 `dec`。
+全 EXE 掃過 `unit+0x120` 的所有寫入點，只有這一個原本沒被接管。
+
+另外兩條路徑仍然要堵，否則駐軍與野外部隊會走旁路：
+
+`feeds` 旗標（instance `+0x138` 的 bit 17，由建構子 `0x0050A9D7` 依 class `+0x29C`
+設定）的閘門是 `0x0050B3DA test dword [ebp+0x138],0x20000`，位於
+`CVXUnit::ProcessFood`（`0x0050B3D0`）。那條常式只處理**野外自行覓食**的單位。
+
+隸屬聚落的單位是另一條路：`0x0050FC30`（`ESI` = `CVXUnit*`）
+
+```
+0050FC9D mov ecx,[esi+0x3A]      ; 單位 class
+0050FCA0 mov edx,[ecx+0xEC]      ; class 食量／存糧上限
+0050FCA6 sub edx,[esi+0x120]     ; 減掉目前存糧 = 這次要領的量
+0050FCAC push 1 / push edx / mov ecx,eax
+0050FCB1 call 0x00516F00         ; Settlement::TakeResource(amount, FOOD)
+0050FCB6 add [esi+0x120],eax
+```
+
+**這條路徑完全沒有 feeds 檢查**，所以只掛 `0x0050B3DA` 的舊版對駐軍完全無效。
+目前世代五條都掛：
+
+- `0x005A1DA7`（6 bytes）：**單位自己背的糧**唯一的扣除點，`[EAX+0x6E]` 分流。
+- `0x005A1D36`（5 bytes）：名單 tick 向聚落扣糧，`EDI+0x90` 分流。
+- `0x0050B3DA`（10 bytes）：野外覓食閘門，三態 helper，回 0 時 `0x0050B3EA`
+  直接跳到 `0x0050BAEC` 收尾。
+- `0x0050FCB1`（5 bytes）：隸屬聚落的單位向聚落領糧，接管這一次 `TakeResource` 呼叫。
+- `0x005A1B4B`（6 bytes）：飢餓名單成員資格（class `feeds`）。**實機惰性**，見上方警告。
+
+因為分流不再依賴名單成員資格，這一版對**讀舊存檔也有效**，不必開新的一局。
+唯一殘留的邊界情況：套用當下自己背的糧已經是 0 的單位會先走 `0x005A1E65`
+的餓死處理，該站點沒有接管。
+
+兩個 `TakeResource` 站點的 helper 形狀相同：「不進食」時不呼叫原函式，直接把
+`[esp+4]`（請求量）當回傳值 `ret 8`，呼叫端照樣把它當成「吃飽了」，於是部隊不餓死、
+聚落存糧分毫未動；其餘情況（0＝保持原版、2＝明確進食）以 `JMP` 尾呼叫原函式。
+
+> 🚫 **不要接管 `0x0050B9AF`**（`CVXUnit::ProcessFood` 內的 `TakeResource` 呼叫）。
+> 那裡 `this` 並不在 `[esp+0x2C]`——`0x0050B876` 起的網格迴圈已把該槽位覆寫成整數
+> `(esi+1)<<8`，把它當指標解構會立刻 `0xC0000005`。而且**根本不需要**：
+> 走到那裡的單位一定先通過 `0x0050B3DA` 的閘門。
+
 既有 `wagon_build_time` 另有缺陷（`ISSUE-050`）：`WagonBuildTime` 在 Steam EXE 與全部 VS
 腳本中沒有讀取者，四個 create-mule command 也沒有 `execdelay`。scoped 實作必須替這四個
 command 建立真實的 delay 路徑，不能沿用目前無效的 VXCONST 改寫。
@@ -366,10 +615,11 @@ GUI 修改器頁已新增「敵我／聚落分流」子分頁：只列出有 hoo
 SelfTest Group 40 覆蓋建立、三語字串、往返、fallback 略過與範圍拒絕。
 現有單值 Tweak 欄位則保留向後相容。
 
-單值的「永久規則調整」分頁另有一則多人須知（`Gui_Trainer_TweaksScopeNotice`，三語）：這些
+單值的「永久規則調整」分頁另有一則分流須知（`Gui_Trainer_TweaksScopeNotice`，三語）：這些
 ID 只要在單值頁被調成非原廠值，`ShouldRouteToScopedPatch` 一樣會把整項路由到 `.cktw`，於是
-**多人連線時會退回原版數值**，而且不再寫入共用 `data.pak`——對只用單值頁、從沒開過分流分頁的
-使用者來說，這是相對舊版的行為改變，必須在該頁講清楚。提示中的項目數是執行期以
+**不再寫入共用 `data.pak`**，且多人連線時每一端會依各自的「我方」套用不同數值而 desync
+（ISSUE-069）——對只用單值頁、從沒開過分流分頁的使用者來說，這是相對舊版的行為改變，
+必須在該頁講清楚。提示中的項目數是執行期以
 `Tweaks.All.Count(t => ScopedTweakPatch.GetSupportedScopes(t.Id).Count > 0)` 算出來的，
 `SupportedScopes` 增修後不會過期。
 
@@ -380,31 +630,73 @@ ID 只要在單值頁被調成非原廠值，`ShouldRouteToScopedPatch` 一樣�
 原廠值；支援的項目不再重複寫入共享 `data.pak`。尚未完成的 tweak 不會被假裝成 scoped 行為。
 
 - Header：magic `CKTW`、格式版本、套用前檔案長度、payload／helper／設定表位移、hook 數與旗標。
-- Flags：`single-player-only`。
+- Flags：`0`（ISSUE-069 之後不再標記 single-player-only；舊 EXE 的 bit0 仍可辨識）。
 - 第一個 hook：`0x004FB6AB` 的六位元組原始指令改為 `CALL helper; NOP`。
-- helper 先保存 EFLAGS 與除 EAX 外的暫存器，預載原版 `definition+0xF4`；缺少 game／session／
-  local-player 指標、multiplayer mask 非零、或 command 非 train/research 時直接返回原值。
-- 單人模式以 `[ESI+0x6E]` 對 `[[0x008AA6C8]+0xCD0]` 分 self/enemy，再依 definition
-  `+0xCF/+0xD0` 選擇 Q16.16 倍率；用 64-bit numerator 除法、overflow clamp 與最小 1 tick
-  防止 wrap／除零／非零指令變成零延遲。
+- helper 先保存 EFLAGS 與除 EAX 外的暫存器，預載原版 `definition+0xF4`；缺少 local-player
+  指標、或 command 非 train/research 時直接返回原值。
+- 以 `[[ESI+0x6E]+8]` 對 `[[[0x008AA6C8]+0xCD0]+8]`（**player 索引，不是指標**，見 §4.4.1）
+  分 self/enemy，再依 definition `+0xCF/+0xD0` 選擇 Q16.16 倍率；用 64-bit numerator 除法、
+  overflow clamp 與最小 1 tick 防止 wrap／除零／非零指令變成零延遲。
 - 設定表：command 6 欄、gold/food production 8 欄、人口 16 欄、容量 enable+12 欄、
   初始金錢 enable+4 欄、unit scalar enable+12 欄、英雄 max_army 2 欄、unit speed 2 欄、
   unit feeds 2 欄，共 **67 欄**（2026-08-31）。
-- 版面配置（2026-08-31）：owner-scalar helper @2176、speed helper @2688、feeds helper @3072、
-  設定表 @4096。`ConfigOffset` 與 `ConfigCount` 均寫在 payload header 且由 `IsApplied` 驗證，
-  因此舊版已套用的 `.cktw` 會被判定為不相符 —— 這是既有設計預期內的行為，沿用既有混合狀態拒絕邏輯。
+- 版面配置（2026-09-04）：owner-scalar helper @2176、speed helper @2688、feeds helper @3072、
+  cmddelay 縮放 helper @3328、聚落補糧 helper @3584、飢餓名單成員資格 helper @3712、
+  飢餓名單扣糧 helper @3904、設定表 @4096、單位自帶存糧 helper @4608（payload 長度 4800）。
+  @3200／@3840 是已退役 15 站點世代留下的保留區，目前世代不寫入也不使用。
+  新 helper 刻意排在設定表之後，既有 helper 與 `ConfigOffset` 位移一律不動；
+  `.cktw` 每個世代都是 8192 bytes（`VirtualSize`／`SizeOfRawData` 都對齊 0x1000），
+  舊世代就地升級時 @4608 一定落在已對映、可執行的範圍內。
+  `ConfigOffset` 與 `ConfigCount` 均寫在 payload header 並由 `ReadInfo` 驗證。
+- **hook 數 11 → 13 → 14 → 15 → 16（2026-09-04，ISSUE-071／ISSUE-072／ISSUE-073）**：新增
+  `0x004FB83E`（cmddelay execdelay）、`0x0050FCB1`（聚落補糧 TakeResource）、
+  `0x005A1D36`（飢餓名單 tick 的扣糧 TakeResource）、
+  `0x005A1B4B`（飢餓名單成員資格＝class `feeds`）與
+  `0x005A1DA7`（`dec [unit+0x120]`，單位自己背的糧）。
+  中間曾短暫存在會閃退的 15 站點世代（多接管 `0x004FB7E8` 與 `0x0050B9AF`），已廢棄。
 
-SelfTest 已驗證十一個 CALL 目標、command helper 多人與 owner/flag 關鍵指令、settlement helper 的
+  ⚠️ **`0x005A1B4B` 那一關在實機上是惰性的，不要再倚賴它做敵我分流**：
+  `HungerManager::Add` 只由建構期間呼叫（`0x0050AA8C` 在 `CVXUnit` 建構子尾端、
+  `0x005138D4` 在虛擬方法內），而基底建構子才剛在 `0x004F115E` 把 `[obj+0x6E]`
+  寫成 0，owner 要到 `Object::SetPlayer`（`0x004F479D`）才填上，helper 每次都
+  只能回退成原版值。真正生效的是四個扣糧點。
+
+  ⚠️ **兩個 15 站點世代的 hook 數相同**，因此世代判定
+  **不能只看 header 的數字**。`HasGenerationTwoLayout` 先檢查
+  `0x004FB7E8`／`0x0050B9AF` 是不是跳板——只有已廢棄世代會動它們——分出來之後
+  再用數字區分其餘世代；`Apply` 的「要不要就地重建」也加了同一道條件，
+  否則舊跳板會被原封留下。
+
+  `ReadInfo` 接受 header hook 數 11、13、14、15、16：
+  - 11 → 全部選配站點都是原版位元組；
+  - 13 → `0x004FB83E`／`0x0050FCB1` 是跳板，其餘選配站點是原版；
+  - 14 → 再加上 `0x005A1D36`；
+  - 15（第三版）→ 再加上 `0x005A1B4B`，`0x005A1DA7` 與兩個危險站點是原版；
+  - 15（已廢棄）→ 四個舊站點是跳板，三個進食站點是原版；
+  - 16（目前）→ 再加上 `0x005A1DA7`，兩個危險站點必須是原版。
+
+  `Apply` 會就地重建 helper、把兩個危險站點還原成原版、補上目前世代的跳板並把 header
+  改成 16；`Reverse` 六種情形都逐位元組還原。若改成只接受最新世代，使用者升級工具後
+  上一版修補過的 EXE 會被判成第三方修改而無法還原（ISSUE-069 的教訓）。
+
+SelfTest 已驗證十六個 CALL 目標、command helper 的 owner/flag 關鍵指令、
+「15 個 helper 皆不含多人偵測」與「15 個 helper 皆以 player 索引而非指標分 self/enemy」
+（含舊指標寫法必須完全消失的反向斷言）的圍籬、
+「helper 不得對唯讀 `.cktw` 節區寫入」的圍籬、settlement helper 的
 `ret 4`／`test eax,eax` 呼叫端契約、`+0x32/+0x36/+0x90` 分型與 owner 位移、人口 helper 的
 MOV flags／IMUL 契約、容量索引／enable、constructor owner stack、owner-scalar 與 67 欄設定往返及原地更新、
 Hero vtable 閘門與 max_army 絕對值寫入（且不含縮放指令）、speed helper 的被除數還原與除零 fallback、
 feeds helper 的 ZF 契約（不含 `popfd`、結尾為 `test eax,eax` + `ret`）、
 範圍拒絕、重複套用冪等、
 hook/helper 混合狀態拒絕，以及移除 raw section 後逐位元組回到合成原版。
+另有 11→16、13→16、14→16、15（第三版）→16 與「已廢棄 15」→16 五組世代相容三連測（舊世代可辨識／可逐位元還原／就地升級後等於
+全新套用，且已廢棄 15 站點世代升級後兩個危險站點確實回到原版位元組）、
+單位自帶存糧 helper 的位元組斷言（pop 順序、原版 `dec [eax+0x120]` 保留、三態 1 時零扣糧）與
+「新站點遭第三方改寫時必須拒絕」的反向圍籬。
 另有兩個回歸測試守住哨兵語意：「舊單值遷移不得把生產值外溢到另一個聚落類型」與
 「未設定 `hero_max_army` 時 scoped payload 維持 0 哨兵」。
 
-另以真實原版 Steam EXE 在記憶體中完成 Apply／Reverse（未寫磁碟，11 hooks／67 欄全部給非原廠值）：
+另以真實原版 Steam EXE 在記憶體中完成 Apply／Reverse（未寫磁碟，16 hooks／67 欄全部給非原廠值）：
 3,516,344 bytes 附加 `.cktw` 後為 3,526,656 bytes，反轉後 byte-exact，前後 SHA-256 均為
 `86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`。
 （註：先前版本此處記錄的 `E27066F8…` 被標為「原版基準」是錯的，那是套過 laa/video_fix 等
@@ -414,7 +706,7 @@ hook/helper 混合狀態拒絕，以及移除 raw section 後逐位元組回到�
 分開列出遊戲檔案實際狀態與本次期望設定。騾車 command delay 已判定引擎無路徑（見 §4.4），
 種族倍率與英雄成長常數等永久 Tweak hook 仍未完成；因此目前仍不能宣稱全部永久 Tweak 已分流。
 CLI、JSON 與 GUI「敵我／聚落分流」子分頁均已接入目前完成子集；仍待真實遊戲敵我／
-聚落／多人實機驗收。
+聚落實機驗收。
 
 ## 6. 驗證門檻
 
@@ -427,6 +719,7 @@ CLI、JSON 與 GUI「敵我／聚落分流」子分頁均已接入目前完成�
 5. 舊單值遷移後，self／enemy 行為與舊全域修改一致。
 6. `status`／`verify` 零寫入；verify 比對 scope payload。
 7. 真實遊戲至少驗證：我方與敵方同類物件數值不同、要塞與村莊生產不同、存讀檔後保持、
-   聚落佔領／單位變更 owner 後切換、全關閉回原版、多人模式全部保持原版。
+   聚落佔領／單位變更 owner 後切換、全關閉回原版。
+   （多人模式不再是驗收項目——ISSUE-069 之後 scoped hook 在多人一樣生效並會 desync。）
 
 在第 7 項完成前，最多只能標記為 ⏳ 已修碼 · 待實測。

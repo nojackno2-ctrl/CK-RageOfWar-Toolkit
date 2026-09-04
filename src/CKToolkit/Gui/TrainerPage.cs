@@ -9,6 +9,8 @@ namespace CKToolkit.Gui;
 public sealed class TrainerPage : UserControl
 {
     private readonly CheckBox _enabled = new();
+    private readonly Label _modeLabel = new();
+    private readonly ComboBox _mode = new();
     private readonly CheckBox _numpad = new();
     private readonly CheckBox _keepVanilla = new();
     private readonly Label _playerModeLabel = new();
@@ -22,6 +24,9 @@ public sealed class TrainerPage : UserControl
     private readonly DataGridView _tweaks = new();
     private readonly DataGridView _scopedSimple = new();
     private readonly DataGridView _scopedSettlement = new();
+    private readonly Button _enableAllCheats = new();
+    private readonly Button _disableAllCheats = new();
+    private readonly Button _clearAllKeys = new();
     private readonly Button _resetCheats = new();
     private readonly Button _resetTweaks = new();
     private readonly Button _resetScopedTweaks = new();
@@ -80,6 +85,14 @@ public sealed class TrainerPage : UserControl
         _enabled.AutoSize = true;
         _enabled.Font = new Font(Font, FontStyle.Bold);
         _enabled.CheckedChanged += (_, _) => { RefreshEnabledState(); UpdateRiskBanner(); };
+
+        _modeLabel.AutoSize = true;
+        _modeLabel.Margin = new Padding(12, 8, 4, 0);
+        _mode.DropDownStyle = ComboBoxStyle.DropDownList;
+        _mode.Width = 200;
+        _mode.Items.AddRange(["both", "patch", "panel"]);
+        _mode.SelectedIndexChanged += (_, _) => { RefreshEnabledState(); UpdateRiskBanner(); };
+
         _numpad.AutoSize = true;
         _numpad.CheckedChanged += (_, _) => NumpadModeChanged();
         _keepVanilla.AutoSize = true;
@@ -94,7 +107,7 @@ public sealed class TrainerPage : UserControl
         _fixedPlayer.Minimum = 1;
         _fixedPlayer.Maximum = 16;
         _fixedPlayer.Width = 64;
-        settings.Controls.AddRange([_enabled, _numpad, _keepVanilla, _playerModeLabel, _playerMode, _fixedPlayerLabel, _fixedPlayer]);
+        settings.Controls.AddRange([_enabled, _modeLabel, _mode, _numpad, _keepVanilla, _playerModeLabel, _playerMode, _fixedPlayerLabel, _fixedPlayer]);
         root.Controls.Add(settings, 0, 0);
 
         _riskBanner.AutoSize = true;
@@ -177,11 +190,35 @@ public sealed class TrainerPage : UserControl
         _cheats.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
         _cheats.KeyCaptured += OnKeyCaptured;
         _cheats.Leave += (_, _) => CancelCapture();
+
+        var btnRow = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0),
+            Padding = new Padding(2, 6, 2, 2)
+        };
+        _enableAllCheats.AutoSize = true;
+        _enableAllCheats.Margin = new Padding(2, 2, 6, 2);
+        _enableAllCheats.Click += (_, _) => EnableAllCheats();
+
+        _disableAllCheats.AutoSize = true;
+        _disableAllCheats.Margin = new Padding(2, 2, 6, 2);
+        _disableAllCheats.Click += (_, _) => DisableAllCheats();
+
+        _clearAllKeys.AutoSize = true;
+        _clearAllKeys.Margin = new Padding(2, 2, 6, 2);
+        _clearAllKeys.Click += (_, _) => ClearAllKeys();
+
         _resetCheats.AutoSize = true;
-        _resetCheats.Margin = new Padding(6);
+        _resetCheats.Margin = new Padding(2, 2, 6, 2);
         _resetCheats.Click += (_, _) => ResetCheatsToDefaults();
+
+        btnRow.Controls.AddRange([_enableAllCheats, _disableAllCheats, _clearAllKeys, _resetCheats]);
+
         panel.Controls.Add(_cheats, 0, 0);
-        panel.Controls.Add(_resetCheats, 0, 1);
+        panel.Controls.Add(btnRow, 0, 1);
         _cheatsTab.Controls.Add(panel);
     }
 
@@ -228,7 +265,7 @@ public sealed class TrainerPage : UserControl
 
         _resetTweaks.AutoSize = true;
         _resetTweaks.Margin = new Padding(2, 7, 2, 2);
-        _resetTweaks.Click += (_, _) => ResetTweaksToDefaults();
+        _resetTweaks.Click += (_, _) => ResetAllTweaks();
         panel.Controls.Add(_resetTweaks, 0, 3);
 
         // 兩個分流表格改為左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
@@ -444,6 +481,19 @@ public sealed class TrainerPage : UserControl
     {
         _loading = true;
         _enabled.Checked = config.Enabled;
+        int modeIdx = 0;
+        if (string.Equals(config.Mode, "patch", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(config.Mode, "file", StringComparison.OrdinalIgnoreCase))
+        {
+            modeIdx = 1;
+        }
+        else if (string.Equals(config.Mode, "panel", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(config.Mode, "window", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(config.Mode, "inject", StringComparison.OrdinalIgnoreCase))
+        {
+            modeIdx = 2;
+        }
+        _mode.SelectedIndex = modeIdx;
         _numpad.Checked = config.NumpadKeys;
         _keepVanilla.Checked = config.KeepVanilla;
         _playerMode.SelectedIndex = string.Equals(config.PlayerMode, "fixed", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
@@ -456,7 +506,14 @@ public sealed class TrainerPage : UserControl
             if (configured.TryGetValue(cheat.Id, out CheatConfig? selected))
             {
                 row.Cells["Enabled"].Value = selected.Enabled;
-                SetKeyCell(row, string.IsNullOrWhiteSpace(selected.Key) ? cheat.DefaultKeyFor(config.NumpadKeys) : selected.Key);
+                if (selected.Key == null)
+                {
+                    SetKeyCell(row, cheat.DefaultKeyFor(config.NumpadKeys));
+                }
+                else
+                {
+                    SetKeyCell(row, selected.Key);
+                }
                 var dict = new Dictionary<string, string>(selected.Parameters, StringComparer.Ordinal);
                 foreach (var p in cheat.Parameters.Where(p => !p.Hidden))
                 {
@@ -481,7 +538,8 @@ public sealed class TrainerPage : UserControl
         {
             var tweak = (Tweak)row.Tag!;
             decimal value = config.Tweaks.TryGetValue(tweak.Id, out decimal configuredValue) ? configuredValue : tweak.Default;
-            row.Cells["Value"].Value = FormatDecimal(value);
+            decimal clamped = Math.Clamp(value, tweak.Minimum, tweak.Maximum);
+            row.Cells["Value"].Value = FormatDecimal(clamped);
         }
         LoadScopedGrid(_scopedSimple, config);
         LoadScopedGrid(_scopedSettlement, config);
@@ -499,11 +557,19 @@ public sealed class TrainerPage : UserControl
         _scopedSimple.EndEdit();
         _scopedSettlement.EndEdit();
         config.Enabled = _enabled.Checked;
+        config.Mode = _mode.SelectedIndex switch
+        {
+            1 => "patch",
+            2 => "panel",
+            _ => "both"
+        };
         config.NumpadKeys = _numpad.Checked;
         config.KeepVanilla = _keepVanilla.Checked;
         config.PlayerMode = _playerMode.SelectedIndex == 1 ? "fixed" : "auto";
         config.FixedPlayer = (int)_fixedPlayer.Value;
         config.Cheats = [];
+
+        bool requiresKeys = config.SupportsFilePatch;
 
         foreach (DataGridViewRow row in _cheats.Rows)
         {
@@ -512,10 +578,10 @@ public sealed class TrainerPage : UserControl
             string? key = row.Cells["Key"].Tag as string;
             if (string.IsNullOrEmpty(key))
             {
-                // 按了「清除」但沒有重新指定按鍵：已啟用的作弊一定要有按鍵才能觸發，
-                // 停用的作弊按鍵欄本來就不會寫進 scdebug.xml（見 TrainerInstaller），空著沒差。
-                // 該模式沒有合法預設鍵的作弊（DefaultKey 為空）也走這條路，見 Cheats 的按鍵表不變式。
-                if (rowEnabled)
+                // 按了「清除」但沒有重新指定按鍵：
+                // 若為檔案修補模式（both / patch），已啟用的作弊一定要有按鍵才能觸發；
+                // 若為僅注入小視窗模式（panel），允許已啟用的作弊快捷鍵為空（由面板直接送腳本）。
+                if (rowEnabled && requiresKeys)
                     throw new InvalidOperationException(Strings.Get("Gui_Trainer_KeyRequired", DisplayCheatName(cheat)));
                 key = string.Empty;
             }
@@ -544,18 +610,18 @@ public sealed class TrainerPage : UserControl
         {
             var tweak = (Tweak)row.Tag!;
             string raw = Convert.ToString(row.Cells["Value"].Value, CultureInfo.InvariantCulture) ?? string.Empty;
-            if (!TryParseDecimal(raw, out decimal value) || value < tweak.Minimum || value > tweak.Maximum)
-                throw new InvalidOperationException(Strings.Get("Gui_Trainer_InvalidTweak", DisplayTweakName(tweak), raw,
-                    FormatDecimal(tweak.Minimum), FormatDecimal(tweak.Maximum)));
-            config.Tweaks[tweak.Id] = value;
+            decimal value = TryParseDecimal(raw, out decimal v) ? v : tweak.Default;
+            decimal clamped = Math.Clamp(value, tweak.Minimum, tweak.Maximum);
+            row.Cells["Value"].Value = FormatDecimal(clamped);
+            config.Tweaks[tweak.Id] = clamped;
         }
 
         config.ScopedTweaks = new Dictionary<string, Dictionary<string, decimal>>(StringComparer.Ordinal);
         SaveScopedGrid(_scopedSimple, config);
         SaveScopedGrid(_scopedSettlement, config);
 
-        // 使用核心產生器做最後驗證：重複按鍵、未知參數或不合法值都在寫檔前被擋下。
-        if (config.Cheats.Any(c => c.Enabled))
+        // 使用核心產生器做最後驗證（僅在支援檔案修補時）：重複按鍵、未知參數或不合法值都在寫檔前被擋下。
+        if (config.SupportsFilePatch && config.Cheats.Any(c => c.Enabled))
         {
             var selections = config.Cheats.Where(c => c.Enabled).Select(c => new CheatSelection
             {
@@ -569,12 +635,17 @@ public sealed class TrainerPage : UserControl
     public void ApplyLanguage()
     {
         _enabled.Text = Strings.Get("Gui_Trainer_Enable");
+        _modeLabel.Text = Strings.Get("Gui_Trainer_Mode");
+        RefreshModeItems();
         _numpad.Text = Strings.Get("Gui_Trainer_Numpad");
         _keepVanilla.Text = Strings.Get("Gui_Trainer_KeepVanilla");
         _playerModeLabel.Text = Strings.Get("Gui_Trainer_PlayerMode");
         _fixedPlayerLabel.Text = Strings.Get("Gui_Trainer_FixedPlayer");
         _cheatsTab.Text = Strings.Get("Gui_Trainer_Cheats");
         _tweaksTab.Text = Strings.Get("Gui_Trainer_Tweaks");
+        _enableAllCheats.Text = Strings.Get("Gui_Trainer_EnableAllCheats");
+        _disableAllCheats.Text = Strings.Get("Gui_Trainer_DisableAllCheats");
+        _clearAllKeys.Text = Strings.Get("Gui_Trainer_ClearAllKeys");
         _resetCheats.Text = Strings.Get("Gui_Trainer_ResetCheats");
         _resetTweaks.Text = Strings.Get("Gui_Trainer_ResetTweaks");
         _resetScopedTweaks.Text = Strings.Get("Gui_Trainer_ResetScopedTweaks");
@@ -687,27 +758,21 @@ public sealed class TrainerPage : UserControl
             foreach ((string scope, string column) in ScopeBindings(grid))
             {
                 string raw = Convert.ToString(row.Cells[column].Value, CultureInfo.InvariantCulture) ?? string.Empty;
-                if (!TryParseDecimal(raw, out decimal value) ||
-                    value < tweak.Minimum || value > tweak.Maximum)
-                {
-                    throw new InvalidOperationException(Strings.Get(
-                        "Gui_Trainer_InvalidScopedTweak",
-                        DisplayTweakName(tweak),
-                        Strings.Get(ScopeLabelKey(scope)),
-                        raw,
-                        FormatDecimal(tweak.Minimum),
-                        FormatDecimal(tweak.Maximum)));
-                }
+                decimal value = TryParseDecimal(raw, out decimal v)
+                    ? v
+                    : ScopedTweakPatch.GetScopedFallbackValue(config, tweak.Id, scope);
+                decimal clamped = Math.Clamp(value, tweak.Minimum, tweak.Maximum);
+                row.Cells[column].Value = FormatDecimal(clamped);
 
                 decimal fallback = ScopedTweakPatch.GetScopedFallbackValue(config, tweak.Id, scope);
-                if (value == fallback) continue;
+                if (clamped == fallback) continue;
 
                 if (!config.ScopedTweaks.TryGetValue(tweak.Id, out Dictionary<string, decimal>? values))
                 {
                     values = new Dictionary<string, decimal>(StringComparer.Ordinal);
                     config.ScopedTweaks[tweak.Id] = values;
                 }
-                values[scope] = value;
+                values[scope] = clamped;
             }
         }
     }
@@ -723,6 +788,16 @@ public sealed class TrainerPage : UserControl
         _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, null)
     };
 
+    private void RefreshModeItems()
+    {
+        int selected = _mode.SelectedIndex < 0 ? 0 : _mode.SelectedIndex;
+        _mode.Items.Clear();
+        _mode.Items.Add(Strings.Get("Gui_Trainer_ModeBoth"));
+        _mode.Items.Add(Strings.Get("Gui_Trainer_ModePatch"));
+        _mode.Items.Add(Strings.Get("Gui_Trainer_ModePanel"));
+        _mode.SelectedIndex = selected;
+    }
+
     private void RefreshPlayerModeItems()
     {
         int selected = _playerMode.SelectedIndex < 0 ? 0 : _playerMode.SelectedIndex;
@@ -735,11 +810,48 @@ public sealed class TrainerPage : UserControl
     private void RefreshEnabledState()
     {
         bool enabled = _enabled.Checked;
-        _numpad.Enabled = enabled;
-        _keepVanilla.Enabled = enabled;
+        _modeLabel.Enabled = enabled;
+        _mode.Enabled = enabled;
+        bool isPanelOnly = _mode.SelectedIndex == 2;
+        bool isPatchOnly = _mode.SelectedIndex == 1;
+        _numpad.Enabled = enabled && !isPanelOnly;
+        _keepVanilla.Enabled = enabled && !isPanelOnly;
+        _playerModeLabel.Enabled = enabled;
         _playerMode.Enabled = enabled;
         _fixedPlayer.Enabled = enabled && _playerMode.SelectedIndex == 1;
         _subTabs.Enabled = enabled;
+        _openPanel.Enabled = enabled && !isPatchOnly;
+    }
+
+    private void EnableAllCheats()
+    {
+        _cheats.EndEdit();
+        foreach (DataGridViewRow row in _cheats.Rows)
+        {
+            row.Cells["Enabled"].Value = true;
+        }
+        UpdateRiskBanner();
+    }
+
+    private void DisableAllCheats()
+    {
+        _cheats.EndEdit();
+        foreach (DataGridViewRow row in _cheats.Rows)
+        {
+            row.Cells["Enabled"].Value = false;
+        }
+        UpdateRiskBanner();
+    }
+
+    private void ClearAllKeys()
+    {
+        CancelCapture();
+        foreach (DataGridViewRow row in _cheats.Rows)
+        {
+            row.Cells["Key"].Tag = null;
+            row.Cells["Key"].Value = Strings.Get("Gui_Trainer_KeyUnset");
+        }
+        UpdateRiskBanner();
     }
 
     private void UpdateRiskBanner()
@@ -955,11 +1067,35 @@ public sealed class TrainerPage : UserControl
         _cheats.IsCapturing = false;
     }
 
-    private void ResetTweaksToDefaults()
+    /// <summary>
+    /// 「重設全部調整（含分流）」：本頁的全域表與兩張分流表一起還原成原始值。
+    ///
+    /// 先全域、後分流的順序是刻意的。分流欄的原始值走
+    /// <see cref="BuildCurrentLegacyTweakConfig"/> → <c>GetScopedFallbackValue</c>，
+    /// 也就是以**目前全域表的內容**為 fallback 來源。今天 ISSUE-066 之後全域表已經
+    /// 不再列出可分流的 ID，兩者實際上不相交，所以順序目前看不出差別；但只要哪天
+    /// 有 ID 同時出現在兩張表，反過來做就會把分流還原成「使用者剛剛填的全域值」
+    /// 而不是原版值。順序不要對調。
+    /// </summary>
+    private void ResetAllTweaks()
+    {
+        _loading = true;
+        try
+        {
+            ResetGlobalTweakCells();
+            ResetScopedTweakCells();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        UpdateRiskBanner();
+    }
+
+    private void ResetGlobalTweakCells()
     {
         foreach (DataGridViewRow row in _tweaks.Rows)
             if (row.Tag is Tweak tweak) row.Cells["Value"].Value = FormatDecimal(tweak.Default);
-        UpdateRiskBanner();
     }
 
     private TrainerConfig BuildCurrentLegacyTweakConfig()
@@ -989,6 +1125,19 @@ public sealed class TrainerPage : UserControl
     private void ResetAllScopedTweaks()
     {
         _loading = true;
+        try
+        {
+            ResetScopedTweakCells();
+        }
+        finally
+        {
+            _loading = false;
+        }
+        UpdateRiskBanner();
+    }
+
+    private void ResetScopedTweakCells()
+    {
         TrainerConfig legacy = BuildCurrentLegacyTweakConfig();
         foreach (DataGridView grid in new[] { _scopedSimple, _scopedSettlement })
         {
@@ -1002,8 +1151,6 @@ public sealed class TrainerPage : UserControl
                 }
             }
         }
-        _loading = false;
-        UpdateRiskBanner();
     }
 
     private void ScopedGridCellClick(object? sender, DataGridViewCellEventArgs e)

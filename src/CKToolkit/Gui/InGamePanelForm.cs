@@ -165,17 +165,15 @@ public sealed class InGamePanelForm : Form
         {
             if (!Cheats.ById.TryGetValue(selection.Id, out var cheatDef)) continue;
 
-            string id = string.IsNullOrWhiteSpace(selection.Key)
-                ? cheatDef.DefaultKeyFor(config.NumpadKeys)
-                : selection.Key;
-
-            // 綁不到鍵不再是「不列出來」的理由；只是備援路徑不可用而已。
-            uint? vk = KeyMap.VirtualKeyFor(id, config.NumpadKeys);
+            string? key = selection.Key;
+            uint? vk = !string.IsNullOrWhiteSpace(key)
+                ? KeyMap.VirtualKeyFor(key, config.NumpadKeys)
+                : null;
 
             string cheatName = TrainerStrings.GetCheatName(cheatDef.Id, cheatDef.Name);
-            string label = vk is null
+            string label = vk is null || string.IsNullOrWhiteSpace(key)
                 ? cheatName
-                : $"{cheatName}（{KeyMap.Display(id, config.NumpadKeys)}）";
+                : $"{cheatName}（{KeyMap.Display(key, config.NumpadKeys)}）";
 
             var btn = new Button
             {

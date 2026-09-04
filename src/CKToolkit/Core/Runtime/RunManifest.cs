@@ -163,7 +163,9 @@ internal static class RunManifest
                 else
                 {
                     var info = ScopedTweakPatch.ReadInfo(exeBytes);
-                    sb.AppendLine("  .cktw          實際存在（單人 fail-closed scoped hook）");
+                    sb.AppendLine(info.Flags == ScopedTweakPatch.FlagsAllModes
+                        ? "  .cktw          實際存在（scoped hook，單人與多人皆生效）"
+                        : "  .cktw          實際存在（舊世代：單人 fail-closed scoped hook，需重新套用）");
                     AppendScopedSettings(
                         sb,
                         "實際",

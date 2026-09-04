@@ -68,10 +68,12 @@ public static class Tweaks
     /// 「人口 × 生產率 ÷ 100」（0x502740），完全不看上限，人口越高收入越高。
     /// </summary>
     private const string ScopedSettlementNote =
-        "單人模式下，非原版值或明確分流值會走 .cktw，每個收入週期套用至已存在與新建聚落；多人連線退回原版值。";
+        "非原版值或明確分流值會走 .cktw，每個收入週期套用至已存在與新建聚落；單人與多人皆生效，"
+        + "多人連線時各端依各自的我方套用，會造成模擬不同步。";
 
     private const string StartGoldNote =
-        "此項仍只影響新建聚落：單人模式 .cktw hook 只在建構子收到 current-gold override -1 時執行；地圖或存檔傳入明確值時會繞過。多人連線退回原版值。";
+        "此項仍只影響新建聚落：.cktw hook 只在建構子收到 current-gold override -1 時執行；"
+        + "地圖或存檔傳入明確值時會繞過。單人與多人皆生效，多人連線會造成模擬不同步。";
 
     public static readonly IReadOnlyList<Tweak> All =
     [
@@ -153,12 +155,15 @@ public static class Tweaks
         new CommandDelayTweak("train_speed", GroupProduction, "單位生產速度倍率",
             "所有訓練指令的耗時除以這個倍率——×2 就是生產時間減半、速度加倍。"
             + "影響 commands.xml 裡 24 個訓練指令（原版 6~300 秒不等）。"
-            + "敵我共用，同陣營的電腦玩家也會一起變快。",
+            + "分流值走 .cktw，同時接管腳本取得耗時的兩條路徑（零參數的 Obj::Progress() "
+            + "與 Obj::cmddelay），因此原版兵營訓練也確實生效；單人與多人皆生效，"
+            + "多人連線時各端依各自的我方套用，會造成模擬不同步。",
             "traincommand"),
         new CommandDelayTweak("research_speed", GroupProduction, "研究速度倍率",
             "所有研究／升級指令的耗時除以這個倍率——×2 就是研究時間減半。"
             + "影響 commands.xml 裡 41 個研究指令（原版 10~200 秒不等）。"
-            + "敵我共用。",
+            + "分流值走 .cktw，與生產速度共用同一組接管點；單人與多人皆生效，"
+            + "多人連線會造成模擬不同步。",
             "researchcommand"),
 
         // --- 單位數值倍率 ---
@@ -183,13 +188,13 @@ public static class Tweaks
             "只縮放類別代號以 R 開頭的單位（羅馬）的血量與攻擊。",
             ["maxhealth", "minattack", "maxattack"], prefixes: "Rr"),
         new AttrTweak("unit_feeds", GroupUnits, "單位是否需要進食",
-            "改的是 data/classes/unit.sc.xml 的 feeds 屬性——所有一般單位（士兵、農民、英雄）"
-            + "都繼承自這個基礎類別，改這一份就整批套用。0＝不需要食物，1＝原版預設。"
-            + "動物、幽靈、貨車這些非殖民單位的類別檔本來就寫死 feeds=0，不會受這裡影響。"
-            + "地圖編輯器的物件屬性面板有一個對應的核取方塊「Unit doesn't eat」，"
-            + "但沒找到任何 VS 腳本會讀寫這個屬性，推測是引擎原生的飢餓計時器開關，"
-            + "所以只能用這種改類別檔預設值的方式套用，做不出只影響我方的熱鍵版本——"
-            + "跟這個分頁其他單位數值倍率一樣，敵我共用。",
+            "0＝該陣營的部隊不再從聚落扣糧，1＝原版預設。分流值走 .cktw，接管的是"
+            + "引擎真正扣糧的兩個 Settlement::TakeResource 呼叫點（隸屬聚落的單位與"
+            + "在野外自行補給的單位），扣糧被略過時仍照原本的量把單位餵飽，因此不會挨餓"
+            + "掉血，聚落存糧則完全不動。生產單位的食物成本與運輸車裝載不受影響。"
+            + "類別檔的 feeds 屬性（data/classes/unit.sc.xml）只是引擎飢餓行為的開關，"
+            + "不是食物經濟的開關，因此不再以改寫該屬性的方式套用（ISSUE-071）。"
+            + "單人與多人皆生效，多人連線時各端依各自的我方套用，會造成模擬不同步。",
             Classes + "UNIT.SC.XML", "feeds", 1, 0, 1),
     ];
 

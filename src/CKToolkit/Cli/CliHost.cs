@@ -248,6 +248,19 @@ public static partial class CliHost
                     return HandleTrainerExec(commands.Skip(2).ToList(), configPathOverride, isJson, stdout, stderr);
                 return OutputError("trainer", Strings.Get("Error_InvalidArgs", $"未知的 trainer 子指令 '{commands[1]}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
 
+            case "settings" or "gamesettings":
+                if (commands.Count < 2)
+                {
+                    string err = Strings.Get("Error_SettingsSubcommandRequired");
+                    return OutputError("settings", err, ExitCodes.InvalidArgs, isJson, stdout, stderr);
+                }
+                string settingsSubCmd = commands[1].ToLowerInvariant();
+                if (settingsSubCmd == "get")
+                    return HandleGameSettingsGet(gameDirOverride, configPathOverride, isJson, stdout, stderr);
+                if (settingsSubCmd == "set")
+                    return HandleGameSettingsSet(commands.Skip(2).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
+                return OutputError("settings", Strings.Get("Error_InvalidArgs", $"未知的 settings 子指令 '{commands[1]}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
+
             case "save":
                 return HandleSave(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
 
