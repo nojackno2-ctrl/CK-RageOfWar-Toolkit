@@ -256,6 +256,18 @@ public static class TrainerInstaller
                     log?.Invoke("  運糧馬／運金馬：運載上限與大容量製造按鈕提升至 10,000");
                 }
             }
+
+            if (gameSettings.InstantHeroAttach && pak.Contains(GameRulesModifier.UnitAttachScriptPath))
+            {
+                string originalVs = pak.ReadText(GameRulesModifier.UnitAttachScriptPath);
+                string modifiedVs = GameRulesModifier.ApplyInstantHeroAttach(originalVs);
+                if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                {
+                    pak.WriteText(GameRulesModifier.UnitAttachScriptPath, modifiedVs);
+                    marker.GameSettings.Add("instant_hero_attach");
+                    log?.Invoke("  部隊編入：解除視野距離限制，支援遠距／全圖瞬時編入英雄");
+                }
+            }
         }
 
         // 4. 比對快照，只記錄真的被改動的項目

@@ -174,8 +174,12 @@ public sealed class GameSettingsConfig
     [JsonPropertyName("wagonCapacity10k")]
     public bool WagonCapacity10k { get; set; }
 
+    /// <summary>允許部隊遠距／全圖瞬時編入英雄隊伍（解除 600 視野附著限制）。</summary>
+    [JsonPropertyName("instantHeroAttach")]
+    public bool InstantHeroAttach { get; set; }
+
     [JsonIgnore]
-    public bool HasAnyModifications => AllowVikingLordHeroArmy || AllowLiberatiHeroArmy || AllowMuleHeroArmy || WagonCapacity10k;
+    public bool HasAnyModifications => AllowVikingLordHeroArmy || AllowLiberatiHeroArmy || AllowMuleHeroArmy || WagonCapacity10k || InstantHeroAttach;
 }
 
 /// <summary>

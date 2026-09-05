@@ -22,6 +22,11 @@ public sealed class TrainerModule : IPatchModule
 
     public void ApplyExe(ref byte[] exeBytes, ToolkitConfig config)
     {
+        if (config.GameSettings.InstantHeroAttach)
+        {
+            InstantHeroAttachPatch.Apply(ref exeBytes, true);
+        }
+
         if (!config.Trainer.Enabled)
         {
             return;

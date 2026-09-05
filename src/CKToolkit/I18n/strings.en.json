@@ -856,6 +856,8 @@
   "GameSettings_AllowLiberatiHeroArmy_Desc": "Removes the 'Freedom' restriction from Liberati, allowing heroes to attach them into formations and share EXP while keeping trample damage.",
   "GameSettings_AllowMuleHeroArmy_Label": "Allow food mules in hero armies",
   "GameSettings_AllowMuleHeroArmy_Desc": "Removes the right-click follow restriction from pack mules and adds central formation protection, allowing heroes to attach them for marching and on-the-go feeding.",
+  "GameSettings_InstantHeroAttach_Label": "Allow instant squad attachment from any distance",
+  "GameSettings_InstantHeroAttach_Desc": "Right-clicking an allied hero immediately attaches units to their squad from anywhere on the map (bypassing sight and distance limits), automatically marching to join the formation.",
   "Error_SettingsSubcommandRequired": "The settings command requires a 'get' or 'set' subcommand.",
   "GameSettings_Group_Logistics": "Economy & Logistics Rules",
   "GameSettings_WagonCapacity10k_Label": "Increase food/gold mule capacity to 10,000",

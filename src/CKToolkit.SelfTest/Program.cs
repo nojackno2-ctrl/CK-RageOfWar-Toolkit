@@ -2012,6 +2012,62 @@ internal static class Program
         Check("RebuildHelp 第一段翻譯正確", rebuiltHelpText.Contains(">第一段說明。<"));
         Check("RebuildHelp 第三段翻譯正確", rebuiltHelpText.Contains(">第三段說明。<"));
         Check("RebuildHelp 自閉合標籤 <entry id=\"2\" self=\"true\"/> 完整保留且未被損毀", rebuiltHelpText.Contains("<entry id=\"2\" self=\"true\"/>"));
+
+        // 3. 長 Header 與長註解之 TranslationTable 識別測試 (ISSUE-078)
+        string longCommentXml =
+            "<!-- " + new string('A', 1500) + " -->\r\n" +
+            "<translationtable>\r\n" +
+            "  <translationtableentry text=\"Hello\" result=\"Hello\"/>\r\n" +
+            "</translationtable>\r\n";
+        byte[] longBytes = Encoding.UTF8.GetBytes(longCommentXml);
+        Check("LocXml.IsTranslationTable 成功辨識超過 64 位元組長註解之翻譯表 (1500+ bytes)", LocXml.IsTranslationTable(longBytes));
+
+        // 4. 引號容錯與 Mojibake 標點自動正規化測試 (ISSUE-078)
+        var transTest = new Translations();
+        transTest.ByText["You didn't choose wisely."] = "你的選擇不夠明智。";
+        transTest.ByText["Move along, peasant!"] = "走開，農民！";
+        transTest.ByText["What’s wrong with soldiers these days?"] = "現在的士兵到底是怎麼回事？";
+
+        var curlyAttrs = new Dictionary<string, string> { ["text"] = "You didn’t choose wisely." };
+        Check("Translations.Lookup 彎引號自動對應直引號", transTest.Lookup(curlyAttrs) == "你的選擇不夠明智。");
+
+        var asciiAttrs = new Dictionary<string, string> { ["text"] = "What's wrong with soldiers these days?" };
+        Check("Translations.Lookup 直引號自動對應彎引號", transTest.Lookup(asciiAttrs) == "現在的士兵到底是怎麼回事？");
+
+        var mojibakeAttrs = new Dictionary<string, string> { ["text"] = "Whatâ\u0080\u0099s wrong with soldiers these days?" };
+        Check("Translations.Lookup Mojibake 引號自動修復對應", transTest.Lookup(mojibakeAttrs) == "現在的士兵到底是怎麼回事？");
+
+        // 5. 額外戰役 118 檔模板 100% 翻譯覆蓋率驗證 (ISSUE-078)
+        var zhTwPack = PackLoader.LoadEmbeddedPack("zh-TW").Value!;
+        int extraDone = 0, extraTotal = 0;
+        bool invadersFixed = false;
+        bool throneConvFixed = false;
+
+        foreach (var (pakPrefix, relPath, templateData) in ExtraCampaignTemplates.GetTemplates())
+        {
+            if (relPath.EndsWith(".XML", StringComparison.OrdinalIgnoreCase) && LocXml.IsTranslationTable(templateData))
+            {
+                byte[] rebuiltData = LocXml.Rebuild(templateData, zhTwPack.Translations.Lookup, out int d, out int t);
+                extraDone += d;
+                extraTotal += t;
+
+                if (pakPrefix.Contains("INVADERS") && relPath.Equals("ADVENTURE.LOC.XML", StringComparison.OrdinalIgnoreCase))
+                {
+                    string xml = Encoding.UTF8.GetString(rebuiltData);
+                    invadersFixed = xml.Contains("入侵者") && !xml.Contains("Oleada tras oleada");
+                }
+                if (pakPrefix.Contains("RETURN TO THE THRONE") && relPath.Equals("CONV.XML", StringComparison.OrdinalIgnoreCase))
+                {
+                    throneConvFixed = d == 221 && t == 221;
+                }
+            }
+        }
+
+        Check("ExtraCampaignTemplates Invaders ADVENTURE.LOC.XML 成功翻譯且無殘留西文", invadersFixed);
+        Check("ExtraCampaignTemplates Return to the Throne CONV.XML 221 條對話 100% 翻譯", throneConvFixed);
+        Check("ExtraCampaignTemplates 全部 118 檔 100% 翻譯無遺漏 (997/997 條目全數翻譯)",
+            extraDone == 997 && extraTotal == 1003,
+            $"done={extraDone}, total={extraTotal}");
     }
 
     // --- 27. 合成 local.pak 語言包安裝與反轉測試 ----------------------------
@@ -6364,6 +6420,9 @@ internal static class Program
         // B. ResolutionWriteback (0x00258FAB)
         ResolutionWriteback.OrigBytes.CopyTo(pe.AsSpan(ResolutionWriteback.Offset, ResolutionWriteback.OrigBytes.Length));
 
+        // B2. InstantHeroAttach (0x0010BCF6)
+        InstantHeroAttachPatch.OrigBytes.CopyTo(pe.AsSpan(InstantHeroAttachPatch.Offset, InstantHeroAttachPatch.OrigBytes.Length));
+
         // C. ZoomTables Immediates & Rewrites
         foreach (var site in ZoomTables.Sites)
         {
@@ -7109,6 +7168,37 @@ internal static class Program
             cmdApplied.Contains("10000 food") && cmdApplied.Contains("10000 gold") && !cmdApplied.Contains("1000 food") && !cmdApplied.Contains("1000 gold"));
         Check("RemoveCommandsMule10k 精確還原回原版", GameRulesModifier.RemoveCommandsMule10k(cmdApplied) == cmdVanilla);
 
+        // InstantHeroAttach 純文字轉換與二進位修補測試
+        string vsAttachVanilla = "\tif( !.InHolder && !hero.InHolder && .posRH.Dist(hero.posRH) < 1500 )\r\n\tif(.AttachTo(hero)) break;//success\r\n";
+        Check("GameRulesModifier.HasInstantHeroAttach 初始為 false", !GameRulesModifier.HasInstantHeroAttach(vsAttachVanilla));
+        string vsAttachApplied = GameRulesModifier.ApplyInstantHeroAttach(vsAttachVanilla);
+        Check("ApplyInstantHeroAttach 成功修改為瞬時編入與自動靠攏",
+            GameRulesModifier.HasInstantHeroAttach(vsAttachApplied) &&
+            vsAttachApplied.Contains(".AttachTo(hero)") &&
+            vsAttachApplied.Contains(".Goto(hero.posRH + ptoffset") &&
+            !vsAttachApplied.Contains(".posRH.Dist(hero.posRH) < 1500"));
+        string vsAttachAppliedTwice = GameRulesModifier.ApplyInstantHeroAttach(vsAttachApplied);
+        Check("ApplyInstantHeroAttach 具備冪等性", vsAttachAppliedTwice == vsAttachApplied);
+        string vsAttachRestored = GameRulesModifier.RemoveInstantHeroAttach(vsAttachApplied);
+        Check("RemoveInstantHeroAttach 精確還原回原版（逐位元組相同）", vsAttachRestored == vsAttachVanilla);
+        string vsAttachRestoredTwice = GameRulesModifier.RemoveInstantHeroAttach(vsAttachRestored);
+        Check("RemoveInstantHeroAttach 具備冪等性", vsAttachRestoredTwice == vsAttachVanilla);
+
+        // InstantHeroAttachPatch 二進位 PE 測試
+        byte[] exeDummy = CreateSyntheticExe32();
+        Check("InstantHeroAttachPatch 初始為 Original 且非 Applied",
+            InstantHeroAttachPatch.IsOriginal(exeDummy) && !InstantHeroAttachPatch.IsApplied(exeDummy));
+        byte[] exePatchedDummy = (byte[])exeDummy.Clone();
+        InstantHeroAttachPatch.Apply(ref exePatchedDummy, true);
+        Check("InstantHeroAttachPatch.Apply(true) 成功套用 NOP",
+            InstantHeroAttachPatch.IsApplied(exePatchedDummy) && !InstantHeroAttachPatch.IsOriginal(exePatchedDummy));
+        byte[] exePatchedDummyTwice = (byte[])exePatchedDummy.Clone();
+        InstantHeroAttachPatch.Apply(ref exePatchedDummyTwice, true);
+        Check("InstantHeroAttachPatch.Apply 具備冪等性", exePatchedDummyTwice.SequenceEqual(exePatchedDummy));
+        InstantHeroAttachPatch.Apply(ref exePatchedDummy, false);
+        Check("InstantHeroAttachPatch.Apply(false) 精確還原回原版",
+            InstantHeroAttachPatch.IsOriginal(exePatchedDummy) && !InstantHeroAttachPatch.IsApplied(exePatchedDummy) && exePatchedDummy.SequenceEqual(exeDummy));
+
         // 2. data.pak 合成安裝與逐位元組精確反轉測試
         string vikingLordXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"GVikingLord\" parent=\"Military\" speciality=\"vampire, freedom\">\r\n\t<health value=\"800\"/>\r\n</class>\r\n";
         string liberatusXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"RLiberatus\" parent=\"Military\" speciality=\"trample, freedom\">\r\n\t<health value=\"600\"/>\r\n</class>\r\n";
@@ -7125,6 +7215,7 @@ internal static class Program
         pak.WriteText(GameRulesModifier.WagonLoadFoodBigScriptPath, vsLoadFoodVanilla);
         pak.WriteText(GameRulesModifier.WagonLoadGoldBigScriptPath, vsLoadGoldVanilla);
         pak.WriteText(GameRulesModifier.CommandsXmlPath, cmdVanilla);
+        pak.WriteText(GameRulesModifier.UnitAttachScriptPath, vsAttachVanilla);
         byte[] vanillaBytes = pak.ToBytes();
 
         Check("初始合成 data.pak 為原版", PatchState.Inspect(GameFile.DataPak, vanillaBytes).IsVanilla);
@@ -7234,25 +7325,68 @@ internal static class Program
         Check("PatchState.Normalise 單獨運糧馬 10k 後與原版逐位元組相同",
             normalised10k.Success && normalised10k.Value is not null && normalised10k.Value.SequenceEqual(vanillaBytes));
 
-        // 同時套用四項遊戲設定 (維京領主、自由鬥士、運糧馬編隊、運糧馬 10k 容量)
+        // 套用單獨瞬時編入英雄
+        var configAttach = ToolkitConfig.CreateDefault();
+        configAttach.GameSettings.InstantHeroAttach = true;
+
+        var patchedPakAttach = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakAttach, configAttach.Trainer, configAttach.GameSettings);
+        byte[] patchedBytesAttach = patchedPakAttach.ToBytes();
+
+        var stateAttach = PatchState.Inspect(GameFile.DataPak, patchedBytesAttach);
+        Check("套用瞬時編入英雄後 data.pak 辨識為 PatchedByUs",
+            stateAttach.IsPatched && stateAttach.AppliedPatches.Contains("trainer_marker"));
+
+        var markerAttach = TrainerInstaller.ReadMarker(patchedPakAttach);
+        Check("TrainerMarker 包含 instant_hero_attach",
+            markerAttach is not null && markerAttach.GameSettings.Contains("instant_hero_attach"));
+        Check("TrainerMarker.Originals 包含 UNIT_ATTACH.VS",
+            markerAttach is not null && markerAttach.Originals.ContainsKey(GameRulesModifier.UnitAttachScriptPath));
+
+        string currentAttachVs = patchedPakAttach.ReadText(GameRulesModifier.UnitAttachScriptPath)!;
+        Check("data.pak 內 UNIT_ATTACH.VS 已套用瞬時編入", GameRulesModifier.HasInstantHeroAttach(currentAttachVs));
+
+        var uninstalledAttach = HmmPak.FromBytes(patchedBytesAttach);
+        TrainerInstaller.Uninstall(uninstalledAttach);
+        byte[] restoredBytesAttach = uninstalledAttach.ToBytes();
+        Check("Uninstall 單獨瞬時編入英雄後與原版逐位元組相同", restoredBytesAttach.SequenceEqual(vanillaBytes));
+
+        var normalisedAttach = PatchState.Normalise(GameFile.DataPak, patchedBytesAttach);
+        Check("PatchState.Normalise 單獨瞬時編入英雄後與原版逐位元組相同",
+            normalisedAttach.Success && normalisedAttach.Value is not null && normalisedAttach.Value.SequenceEqual(vanillaBytes));
+
+        // EXE 端對端：TrainerModule.ApplyExe 與 PatchState.Normalise
+        byte[] exeForAttach = CreateSyntheticExe32();
+        var trainerMod = new TrainerModule();
+        trainerMod.ApplyExe(ref exeForAttach, configAttach);
+        var exeStateAttach = PatchState.Inspect(GameFile.Exe, exeForAttach);
+        Check("套用 InstantHeroAttach 後 Exe 辨識出 instant_hero_attach 旗標",
+            exeStateAttach.IsPatched && exeStateAttach.AppliedPatches.Contains("instant_hero_attach"));
+        var normExeAttach = PatchState.Normalise(GameFile.Exe, exeForAttach);
+        Check("PatchState.Normalise Exe 成功還原 instant_hero_attach",
+            normExeAttach.Success && normExeAttach.Value!.SequenceEqual(CreateSyntheticExe32()));
+
+        // 同時套用五項遊戲設定 (維京領主、自由鬥士、運糧馬編隊、運糧馬 10k 容量、瞬時編入英雄)
         var configAll = ToolkitConfig.CreateDefault();
         configAll.GameSettings.AllowVikingLordHeroArmy = true;
         configAll.GameSettings.AllowLiberatiHeroArmy = true;
         configAll.GameSettings.AllowMuleHeroArmy = true;
         configAll.GameSettings.WagonCapacity10k = true;
+        configAll.GameSettings.InstantHeroAttach = true;
 
         var patchedPakAll = HmmPak.FromBytes(vanillaBytes);
         TrainerInstaller.Install(patchedPakAll, configAll.Trainer, configAll.GameSettings);
         byte[] patchedBytesAll = patchedPakAll.ToBytes();
 
         var markerAll = TrainerInstaller.ReadMarker(patchedPakAll);
-        Check("TrainerMarker 包含四項遊戲設定",
+        Check("TrainerMarker 包含五項遊戲設定",
             markerAll is not null &&
             markerAll.GameSettings.Contains("allow_viking_lord_army") &&
             markerAll.GameSettings.Contains("allow_liberati_army") &&
             markerAll.GameSettings.Contains("allow_mule_army") &&
-            markerAll.GameSettings.Contains("wagon_capacity_10k"));
-        Check("TrainerMarker.Originals 包含全部九個原始檔案",
+            markerAll.GameSettings.Contains("wagon_capacity_10k") &&
+            markerAll.GameSettings.Contains("instant_hero_attach"));
+        Check("TrainerMarker.Originals 包含全部十個原始檔案",
             markerAll is not null &&
             markerAll.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
             markerAll.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath) &&
@@ -7262,15 +7396,16 @@ internal static class Program
             markerAll.Originals.ContainsKey(GameRulesModifier.CreateGoldMuleBigScriptPath) &&
             markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadFoodBigScriptPath) &&
             markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadGoldBigScriptPath) &&
-            markerAll.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath));
+            markerAll.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.UnitAttachScriptPath));
 
         var uninstalledAll = HmmPak.FromBytes(patchedBytesAll);
         TrainerInstaller.Uninstall(uninstalledAll);
         byte[] restoredBytesAll = uninstalledAll.ToBytes();
-        Check("Uninstall 四項設定後與原版逐位元組相同", restoredBytesAll.SequenceEqual(vanillaBytes));
+        Check("Uninstall 五項設定後與原版逐位元組相同", restoredBytesAll.SequenceEqual(vanillaBytes));
 
         var normalisedAll = PatchState.Normalise(GameFile.DataPak, patchedBytesAll);
-        Check("PatchState.Normalise 四項設定後與原版逐位元組相同",
+        Check("PatchState.Normalise 五項設定後與原版逐位元組相同",
             normalisedAll.Success && normalisedAll.Value is not null && normalisedAll.Value.SequenceEqual(vanillaBytes));
 
         // 3. PatchPipeline 端對端驗證 (TrainerMarkerMatchesConfig)
@@ -7282,8 +7417,18 @@ internal static class Program
         configMismatched.GameSettings.AllowLiberatiHeroArmy = true;
         configMismatched.GameSettings.AllowMuleHeroArmy = false;
         configMismatched.GameSettings.WagonCapacity10k = true;
+        configMismatched.GameSettings.InstantHeroAttach = true;
         Check("PatchPipeline.TrainerMarkerMatchesConfig: 設定不符時回報 false",
             !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configMismatched));
+
+        var configMismatchedAttach = ToolkitConfig.CreateDefault();
+        configMismatchedAttach.GameSettings.AllowVikingLordHeroArmy = true;
+        configMismatchedAttach.GameSettings.AllowLiberatiHeroArmy = true;
+        configMismatchedAttach.GameSettings.AllowMuleHeroArmy = true;
+        configMismatchedAttach.GameSettings.WagonCapacity10k = true;
+        configMismatchedAttach.GameSettings.InstantHeroAttach = false;
+        Check("PatchPipeline.TrainerMarkerMatchesConfig: InstantHeroAttach 不符時回報 false",
+            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configMismatchedAttach));
 
         // 4. CLI settings get / set 測試
         string tempConfigDir = Path.Combine(Path.GetTempPath(), "ckselftest_settings_cli_" + Guid.NewGuid().ToString("N"));
@@ -7333,6 +7478,21 @@ internal static class Program
             Check("`settings set --wagon-10k=off` 成功關閉選項", setWagon10kOff.Code == ExitCodes.Success);
             var loadedCfg6 = ToolkitConfig.Load(cliConfigFile);
             Check("設定檔已更新 WagonCapacity10k=false", !loadedCfg6.GameSettings.WagonCapacity10k);
+
+            var setAttach = RunCli("settings", "set", "--instant-attach=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --instant-attach=on` 成功執行", setAttach.Code == ExitCodes.Success && setAttach.Envelope is { Ok: true });
+
+            var loadedCfg7 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 InstantHeroAttach=true", loadedCfg7.GameSettings.InstantHeroAttach);
+
+            var getUpdatedAttach = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 instantHeroAttach 欄位且為 true",
+                getUpdatedAttach.Code == ExitCodes.Success && getUpdatedAttach.Raw.Contains("\"instantHeroAttach\": true"));
+
+            var setAttachOff = RunCli("settings", "set", "--instant-hero-attach=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --instant-hero-attach=off` 成功關閉選項", setAttachOff.Code == ExitCodes.Success);
+            var loadedCfg8 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 InstantHeroAttach=false", !loadedCfg8.GameSettings.InstantHeroAttach);
 
             var setVikingOff = RunCli("settings", "set", "--viking-army=off", "--config", cliConfigFile, "--json");
             Check("`settings set --viking-army=off` 成功修改單一項目", setVikingOff.Code == ExitCodes.Success);

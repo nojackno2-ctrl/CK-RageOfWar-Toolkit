@@ -18,6 +18,8 @@ public sealed class GameSettingsPage : UserControl
     private readonly Label _liberatiDesc = new();
     private readonly CheckBox _allowMuleHeroArmy = new();
     private readonly Label _muleDesc = new();
+    private readonly CheckBox _instantHeroAttach = new();
+    private readonly Label _instantHeroAttachDesc = new();
 
     private readonly Label _groupLogistics = new();
     private readonly CheckBox _wagonCapacity10k = new();
@@ -77,11 +79,13 @@ public sealed class GameSettingsPage : UserControl
             Dock = DockStyle.Fill,
             AutoSize = true,
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 9,
             Padding = new Padding(18),
             BackColor = Color.FromArgb(248, 250, 252),
             Margin = new Padding(0, 0, 0, 16)
         };
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -135,8 +139,22 @@ public sealed class GameSettingsPage : UserControl
         _muleDesc.AutoSize = true;
         _muleDesc.Font = new Font(Font.FontFamily, 8.5F);
         _muleDesc.ForeColor = Color.FromArgb(100, 116, 139);
-        _muleDesc.Margin = new Padding(22, 0, 0, 8);
+        _muleDesc.Margin = new Padding(22, 0, 0, 14);
         card.Controls.Add(_muleDesc, 0, 6);
+
+        // 瞬時編入英雄
+        _instantHeroAttach.AutoSize = true;
+        _instantHeroAttach.Font = new Font(Font.FontFamily, 9.5F, FontStyle.Bold);
+        _instantHeroAttach.ForeColor = Color.FromArgb(15, 23, 42);
+        _instantHeroAttach.Margin = new Padding(0, 4, 0, 2);
+        _instantHeroAttach.CheckedChanged += (_, _) => OnSettingChanged();
+        card.Controls.Add(_instantHeroAttach, 0, 7);
+
+        _instantHeroAttachDesc.AutoSize = true;
+        _instantHeroAttachDesc.Font = new Font(Font.FontFamily, 8.5F);
+        _instantHeroAttachDesc.ForeColor = Color.FromArgb(100, 116, 139);
+        _instantHeroAttachDesc.Margin = new Padding(22, 0, 0, 8);
+        card.Controls.Add(_instantHeroAttachDesc, 0, 8);
 
         root.Controls.Add(card, 0, 1);
 
@@ -211,6 +229,7 @@ public sealed class GameSettingsPage : UserControl
         _allowLiberatiHeroArmy.Checked = false;
         _allowMuleHeroArmy.Checked = false;
         _wagonCapacity10k.Checked = false;
+        _instantHeroAttach.Checked = false;
         _loading = false;
         SettingsChanged?.Invoke();
     }
@@ -222,6 +241,7 @@ public sealed class GameSettingsPage : UserControl
         _allowLiberatiHeroArmy.Checked = config.AllowLiberatiHeroArmy;
         _allowMuleHeroArmy.Checked = config.AllowMuleHeroArmy;
         _wagonCapacity10k.Checked = config.WagonCapacity10k;
+        _instantHeroAttach.Checked = config.InstantHeroAttach;
         _loading = false;
     }
 
@@ -231,6 +251,7 @@ public sealed class GameSettingsPage : UserControl
         config.AllowLiberatiHeroArmy = _allowLiberatiHeroArmy.Checked;
         config.AllowMuleHeroArmy = _allowMuleHeroArmy.Checked;
         config.WagonCapacity10k = _wagonCapacity10k.Checked;
+        config.InstantHeroAttach = _instantHeroAttach.Checked;
     }
 
     public void ApplyLanguage()
@@ -244,6 +265,8 @@ public sealed class GameSettingsPage : UserControl
         _liberatiDesc.Text = Strings.Get("GameSettings_AllowLiberatiHeroArmy_Desc");
         _allowMuleHeroArmy.Text = Strings.Get("GameSettings_AllowMuleHeroArmy_Label");
         _muleDesc.Text = Strings.Get("GameSettings_AllowMuleHeroArmy_Desc");
+        _instantHeroAttach.Text = Strings.Get("GameSettings_InstantHeroAttach_Label");
+        _instantHeroAttachDesc.Text = Strings.Get("GameSettings_InstantHeroAttach_Desc");
         _groupLogistics.Text = Strings.Get("GameSettings_Group_Logistics");
         _wagonCapacity10k.Text = Strings.Get("GameSettings_WagonCapacity10k_Label");
         _wagonCapacityDesc.Text = Strings.Get("GameSettings_WagonCapacity10k_Desc");

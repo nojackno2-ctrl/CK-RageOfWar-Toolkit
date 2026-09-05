@@ -856,6 +856,8 @@
   "GameSettings_AllowLiberatiHeroArmy_Desc": "移除自由鬥士的「自由之身 (Freedom)」限制，使其能被英雄編隊帶領，享受陣形加成與經驗分享，並保留踐踏傷害。",
   "GameSettings_AllowMuleHeroArmy_Label": "允許運糧馬／騾子編入英雄隊伍",
   "GameSettings_AllowMuleHeroArmy_Desc": "解除運糧馬的右鍵跟隨限制並加入中央陣形保護，使其能被英雄編隊帶領行軍，提供隨隊進食補給。",
+  "GameSettings_InstantHeroAttach_Label": "允許部隊遠距／全圖瞬時編入英雄",
+  "GameSettings_InstantHeroAttach_Desc": "右鍵點擊友方英雄即可在任何距離立刻編入其隊伍，解除 600 視野與 1500 腳本距離限制，部隊將自動向英雄靠攏歸隊。",
   "Error_SettingsSubcommandRequired": "settings 指令必須指定 get 或 set 子指令。",
   "GameSettings_Group_Logistics": "經濟與運輸規則",
   "GameSettings_WagonCapacity10k_Label": "運糧馬／運金馬運載上限提升至 10,000",

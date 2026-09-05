@@ -11,6 +11,38 @@
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
+## 交接事項：2026-09-05 額外戰役／劇本對話與任務說明 100% 翻譯缺漏修復（ISSUE-078）
+
+> ⏳ **已修碼 · 待實測（2026-09-05）**：
+> - 針對使用者要求「檢查戰役翻譯是不是全部都翻到」以及「立即修復」，深入掃描 415 個戰役與劇本 XML，揪出並徹底修復額外戰役 356 條對話/任務未翻之兩大技術根因。
+> - **根因分析**：
+>   1. `LocXml.cs`：`IsTranslationTable` 檢查長度寫死 64 bytes。額外戰役有 4 個 XML 檔案（包括 Return to the Throne 的 `CONV.XML` offset 1376，以及 Defenders 的 3 個 XML offset 101）帶有長作者註解，直接被誤判為非翻譯表而全數略過。
+>   2. `ExtraCampaignTemplates.cs`：歷史提取模板時將 UTF-8 引號以 CP1252 解碼產生 Mojibake（如 `â\x80\x99`、`Ã¢â\x82¬â\x84¢`），破壞鍵值致字典查表脫靶（MISS）。
+>   3. 引號風格不一致：彎引號（`’`）與直 ASCII 引號（`'`）缺乏雙向轉換容錯。
+> - **修復方案**：
+>   1. `LocXml.cs`：`IsTranslationTable` 搜尋範圍擴大至 4096 bytes。
+>   2. `ExtraCampaignTemplates.cs`：新增 `CleanMojibake` 自動還原為標準 Unicode 標點。
+>   3. `Translations.cs`：`Lookup` 支援彎直引號自動互轉與 Mojibake 標點容錯。
+>   4. 額外戰役 118 檔模板 1003 個標籤（997 個有效條目）100% 翻譯覆蓋，並同步涵蓋全部 6 種語言包。
+>   5. 透過 CLI `apply` 重新產生並寫入 Steam 正版目錄 `local.pak`，實機掃描確認除 14 個作者名/內部 ID 外，其餘 3,085 條戰役文字全數 100% 翻譯。
+> - **測試驗證**：
+>   - SelfTest Group 26 新增長 Header 翻譯表識別、引號容錯與 118 檔 100% 覆蓋測試，全套 47 組測試全數全綠通過。
+
+## 交接事項：2026-09-05 單位編入英雄隊伍附著半徑硬性限制解除（遠距／全圖瞬時編入英雄，ISSUE-077）
+
+> ⏳ **已修碼 · 待實測（2026-09-05）**：
+> - 依使用者需求「單位編入英雄的附著半徑可以改嗎」->「部隊不用走到英雄跟前，在很遠的地方右鍵點英雄就能立刻編入」，完成了 C++ 引擎視野限制解除與 VS 腳本瞬時編入聯動修復。
+> - **雙重門檻逆向分析**：
+>   1. **二進位 C++ 引擎層**：`0x0050BC60`（`CVXUnit::AttachTo`）在 `0x0050BCEF` 呼叫 `0x004F4120`（`hero->InRange(unit)`，判斷是否小於等於英雄視野 `sight`，預設 600），隨後於 `0x0050BCF6`（檔案位移 `0x0010BCF6`）執行 `je 0x50be21`（`0F 84 25 01 00 00`），超距即強制拒絕編入。
+>   2. **腳本層**：`SUBAI\UNIT_ATTACH.VS` 第 31 行限定 `.posRH.Dist(hero.posRH) < 1500` 才呼叫 `.AttachTo(hero)`，否則只能在迴圈中緩慢走向英雄。
+> - **修補方案**：
+>   1. `InstantHeroAttachPatch.cs`：將 `0x0010BCF6` 的 6 位元組跳轉替換為 NOP（`90 90 90 90 90 90`），保留帶兵數容量檢查（滿員依然正確拒絕），100% 逐位元組精確反轉。
+>   2. `GameRulesModifier.cs`：將 `UNIT_ATTACH.VS` 改寫為點擊瞬間立刻 `.AttachTo(hero)`，並在背景以 `while(!.Goto(...))` 自動靠攏英雄陣形。
+>   3. 整合至 `ToolkitConfig.GameSettings.InstantHeroAttach`、`TrainerInstaller`（快照至 `marker.Originals`）、`TrainerModule`、`PatchState` 與 `PatchPipeline`。
+>   4. GUI「遊戲設定」分頁新增「允許部隊遠距／全圖瞬時編入英雄」勾選框與說明；CLI 支援 `settings set --instant-attach=on|off` 與 `settings get --json`。
+>   5. 繁中、簡中、英文三語在地化字典 100% 同步。
+>   6. SelfTest 第 47 組測試擴充 10 項斷言，全套 47 組測試全數通過。
+
 ## 交接事項：2026-09-04 運糧馬／運金馬運載上限與出產量提升至 10,000（ISSUE-076）
 
 > ⏳ **已修碼 · 待實測（2026-09-04）**：

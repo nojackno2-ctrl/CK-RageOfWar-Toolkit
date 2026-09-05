@@ -18,10 +18,19 @@ public static class GameRulesModifier
     public const string WagonLoadFoodBigScriptPath = @"SUBAI\WAGON_LOADFOODBIG.VS";
     public const string WagonLoadGoldBigScriptPath = @"SUBAI\WAGON_LOADGOLDBIG.VS";
     public const string CommandsXmlPath = @"COMMANDS.XML";
+    public const string UnitAttachScriptPath = @"SUBAI\UNIT_ATTACH.VS";
 
     private static readonly Regex SpecialityRegex = new(
         @"\bspeciality\s*=\s*""([^""]*)""",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex UnitAttachApplyRegex = new(
+        @"\tif\(\s*!\.InHolder\s*&&\s*!hero\.InHolder\s*&&\s*\.posRH\.Dist\(hero\.posRH\)\s*<\s*1500\s*\)\r?\n\tif\(\.AttachTo\(hero\)\)\s*break;//success",
+        RegexOptions.Compiled);
+
+    private static readonly Regex UnitAttachRevertRegex = new(
+        @"\tif\(\s*!\.InHolder\s*&&\s*!hero\.InHolder\s*\)\r?\n\tif\(\.AttachTo\(hero\)\)\s*\{\r?\n\t\twhile\(!\.Goto\(hero\.posRH \+ ptoffset, 1, 150, true, 5000\) && hero\.IsAlive\(\) && !hero\.InHolder\(\)\);\r?\n\t\tbreak;//success\r?\n\t\}",
+        RegexOptions.Compiled);
 
     private static readonly Regex MuleAttachRegex = new(
         @"<defaultcmd\s+target\s*=\s*""Hero""\s*>\s*<cmd\s+name\s*=\s*""attach""\s*/>\s*</defaultcmd>",
@@ -263,4 +272,30 @@ public static class GameRulesModifier
     /// </summary>
     public static string RemoveCommandsMule10k(string xml) =>
         CommandsMuleRolloverRevertRegex.Replace(xml, "${1}1000${2}");
+
+    /// <summary>
+    /// 檢查 UNIT_ATTACH.VS 中是否已啟用遠距／全圖瞬時編入。
+    /// </summary>
+    public static bool HasInstantHeroAttach(string vs) => UnitAttachRevertRegex.IsMatch(vs);
+
+    /// <summary>
+    /// 將 UNIT_ATTACH.VS 的附著半徑檢查放寬為瞬時編入並自動向英雄靠攏。
+    /// </summary>
+    public static string ApplyInstantHeroAttach(string vs)
+    {
+        if (HasInstantHeroAttach(vs)) return vs;
+        string newline = vs.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        string replacement = $"\tif( !.InHolder && !hero.InHolder ){newline}\tif(.AttachTo(hero)) {{{newline}\t\twhile(!.Goto(hero.posRH + ptoffset, 1, 150, true, 5000) && hero.IsAlive() && !hero.InHolder());{newline}\t\tbreak;//success{newline}\t}}";
+        return UnitAttachApplyRegex.Replace(vs, replacement);
+    }
+
+    /// <summary>
+    /// 將 UNIT_ATTACH.VS 還原為原廠預設之 1500 距離檢查。
+    /// </summary>
+    public static string RemoveInstantHeroAttach(string vs)
+    {
+        string newline = vs.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        string original = $"\tif( !.InHolder && !hero.InHolder && .posRH.Dist(hero.posRH) < 1500 ){newline}\tif(.AttachTo(hero)) break;//success";
+        return UnitAttachRevertRegex.Replace(vs, original);
+    }
 }

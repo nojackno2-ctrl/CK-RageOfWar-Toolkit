@@ -19,7 +19,8 @@ public static partial class CliHost
             allowVikingLordHeroArmy = config.GameSettings.AllowVikingLordHeroArmy,
             allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy,
             allowMuleHeroArmy = config.GameSettings.AllowMuleHeroArmy,
-            wagonCapacity10k = config.GameSettings.WagonCapacity10k
+            wagonCapacity10k = config.GameSettings.WagonCapacity10k,
+            instantHeroAttach = config.GameSettings.InstantHeroAttach
         };
 
         var warnings = new List<string>(config.MigrationsApplied);
@@ -43,6 +44,7 @@ public static partial class CliHost
             stdout.WriteLine($"  - 允許自由鬥士編入英雄隊伍 (Allow Liberati in Hero Armies): {(config.GameSettings.AllowLiberatiHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 允許運糧馬編入英雄隊伍 (Allow Food Mules in Hero Armies): {(config.GameSettings.AllowMuleHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 運糧馬運載上限提升至 10,000 (Increase Mule Capacity to 10,000): {(config.GameSettings.WagonCapacity10k ? "on" : "off")}");
+            stdout.WriteLine($"  - 允許部隊遠距／全圖瞬時編入英雄 (Instant Long-Range Hero Squad Attachment): {(config.GameSettings.InstantHeroAttach ? "on" : "off")}");
             if (warnings.Count > 0)
             {
                 stdout.WriteLine();
@@ -56,7 +58,7 @@ public static partial class CliHost
     {
         if (options.Count == 0)
         {
-            string err = Strings.Get("Error_InvalidArgs", "settings set 必須提供至少一個設定選項 (--viking-army, --liberati-army, --mule-army 或 --wagon-10k)");
+            string err = Strings.Get("Error_InvalidArgs", "settings set 必須提供至少一個設定選項 (--viking-army, --liberati-army, --mule-army, --wagon-10k 或 --instant-attach)");
             return OutputError("settings set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr);
         }
 
@@ -152,6 +154,18 @@ public static partial class CliHost
                     }
                     break;
 
+                case "--instant-attach" or "--instant-hero-attach":
+                    if (TryParseOnOff(val, out bool instantAttachVal))
+                    {
+                        config.GameSettings.InstantHeroAttach = instantAttachVal;
+                    }
+                    else
+                    {
+                        string err = Strings.Get("Error_InvalidArgs", $"--instant-attach 值必須為 on 或 off，實際為 '{val}'");
+                        return OutputError("settings set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    break;
+
                 default:
                     return OutputError("settings set", Strings.Get("Error_UnknownOption", flag), ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
             }
@@ -172,7 +186,8 @@ public static partial class CliHost
             allowVikingLordHeroArmy = config.GameSettings.AllowVikingLordHeroArmy,
             allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy,
             allowMuleHeroArmy = config.GameSettings.AllowMuleHeroArmy,
-            wagonCapacity10k = config.GameSettings.WagonCapacity10k
+            wagonCapacity10k = config.GameSettings.WagonCapacity10k,
+            instantHeroAttach = config.GameSettings.InstantHeroAttach
         };
 
         if (isJson)
@@ -193,6 +208,7 @@ public static partial class CliHost
             stdout.WriteLine($"  - 允許自由鬥士編入英雄隊伍: {(config.GameSettings.AllowLiberatiHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 允許運糧馬編入英雄隊伍: {(config.GameSettings.AllowMuleHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 運糧馬運載上限提升至 10,000: {(config.GameSettings.WagonCapacity10k ? "on" : "off")}");
+            stdout.WriteLine($"  - 允許部隊遠距／全圖瞬時編入英雄: {(config.GameSettings.InstantHeroAttach ? "on" : "off")}");
             if (warnings.Count > 0)
             {
                 stdout.WriteLine();

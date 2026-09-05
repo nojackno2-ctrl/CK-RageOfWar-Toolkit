@@ -279,6 +279,7 @@ public sealed class PatchPipeline
         if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer))
             layered[GameFile.Exe].Add("scoped_tweaks");
         if (config.Trainer.Enabled && config.Trainer.SupportsFilePatch && config.Trainer.NumpadKeys) layered[GameFile.Exe].Add("key_map");
+        if (config.GameSettings.InstantHeroAttach) layered[GameFile.Exe].Add("instant_hero_attach");
         foreach (IPatchModule module in _modules)
         {
             try
@@ -872,6 +873,7 @@ public sealed class PatchPipeline
                 if (config.Perf.KeepRes) list.Add("res_writeback");
                 if (ScopedTweakPatch.HasSupportedLegacyPayload(config.Trainer)) list.Add("scoped_tweaks");
                 if (config.Trainer.Enabled && config.Trainer.SupportsFilePatch && config.Trainer.NumpadKeys) list.Add("key_map");
+                if (config.GameSettings.InstantHeroAttach) list.Add("instant_hero_attach");
                 break;
 
             case GameFile.Launcher:
@@ -972,6 +974,7 @@ public sealed class PatchPipeline
         if (config.GameSettings.AllowLiberatiHeroArmy) expectedGameSettings.Add("allow_liberati_army");
         if (config.GameSettings.AllowMuleHeroArmy) expectedGameSettings.Add("allow_mule_army");
         if (config.GameSettings.WagonCapacity10k) expectedGameSettings.Add("wagon_capacity_10k");
+        if (config.GameSettings.InstantHeroAttach) expectedGameSettings.Add("instant_hero_attach");
 
         return marker.Cheats.SequenceEqual(expectedCheats, StringComparer.Ordinal) &&
                marker.Tweaks.Count == expectedTweaks.Count &&

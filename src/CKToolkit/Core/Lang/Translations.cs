@@ -61,7 +61,37 @@ public sealed class Translations
         }
 
         string srcText = LocXml.SourceText(attrs);
-        return ByText.TryGetValue(srcText, out string? zh) ? zh : null;
+        if (string.IsNullOrEmpty(srcText)) return null;
+
+        if (ByText.TryGetValue(srcText, out string? zh) && !string.IsNullOrEmpty(zh))
+            return zh;
+
+        // 彎引號與直引號互轉容錯（' <-> ’ / ‘）
+        if (srcText.Contains('’') || srcText.Contains('‘'))
+        {
+            string ascii = srcText.Replace('’', '\'').Replace('‘', '\'');
+            if (ByText.TryGetValue(ascii, out zh) && !string.IsNullOrEmpty(zh))
+                return zh;
+        }
+        else if (srcText.Contains('\''))
+        {
+            string curly = srcText.Replace('\'', '’');
+            if (ByText.TryGetValue(curly, out zh) && !string.IsNullOrEmpty(zh))
+                return zh;
+        }
+
+        // Mojibake 標點容錯（如 â€™、â€¦、Ã¢â‚¬â„¢）
+        string clean = ExtraCampaignTemplates.CleanMojibake(srcText);
+        if (clean != srcText)
+        {
+            if (ByText.TryGetValue(clean, out zh) && !string.IsNullOrEmpty(zh))
+                return zh;
+            string cleanAscii = clean.Replace('’', '\'').Replace('‘', '\'');
+            if (ByText.TryGetValue(cleanAscii, out zh) && !string.IsNullOrEmpty(zh))
+                return zh;
+        }
+
+        return null;
     }
 
     public IEnumerable<string> AllText()

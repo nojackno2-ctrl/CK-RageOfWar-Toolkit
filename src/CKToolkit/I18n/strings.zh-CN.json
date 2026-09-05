@@ -856,6 +856,8 @@
   "GameSettings_AllowLiberatiHeroArmy_Desc": "移除自由斗士的“自由之身 (Freedom)”限制，使其能被英雄编队带领，享受阵形加成与经验分享，并保留践踏伤害。",
   "GameSettings_AllowMuleHeroArmy_Label": "允许运粮马／骡子编入英雄队伍",
   "GameSettings_AllowMuleHeroArmy_Desc": "解除运粮马的右键跟随限制并加入中央阵形保护，使其能被英雄编队带领行军，提供随队进食补给。",
+  "GameSettings_InstantHeroAttach_Label": "允许部队远距／全图瞬时编入英雄",
+  "GameSettings_InstantHeroAttach_Desc": "右键点击友方英雄即可在任何距离立刻编入其队伍，解除 600 视野与 1500 脚本距离限制，部队将自动向英雄靠拢归队。",
   "Error_SettingsSubcommandRequired": "settings 指令必须指定 get 或 set 子指令。",
   "GameSettings_Group_Logistics": "经济与运输规则",
   "GameSettings_WagonCapacity10k_Label": "运粮马／运金马运载上限提升至 10,000",
