@@ -166,8 +166,16 @@ public sealed class GameSettingsConfig
     [JsonPropertyName("allowLiberatiHeroArmy")]
     public bool AllowLiberatiHeroArmy { get; set; }
 
+    /// <summary>允許運糧馬／騾子編入英雄隊伍（注入右鍵編隊指令與中央陣形護衛）。</summary>
+    [JsonPropertyName("allowMuleHeroArmy")]
+    public bool AllowMuleHeroArmy { get; set; }
+
+    /// <summary>運糧馬／運金馬運載上限與大容量製造按鈕提升至 10,000。</summary>
+    [JsonPropertyName("wagonCapacity10k")]
+    public bool WagonCapacity10k { get; set; }
+
     [JsonIgnore]
-    public bool HasAnyModifications => AllowVikingLordHeroArmy || AllowLiberatiHeroArmy;
+    public bool HasAnyModifications => AllowVikingLordHeroArmy || AllowLiberatiHeroArmy || AllowMuleHeroArmy || WagonCapacity10k;
 }
 
 /// <summary>

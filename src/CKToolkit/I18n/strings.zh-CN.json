@@ -854,7 +854,12 @@
   "GameSettings_AllowVikingLordHeroArmy_Desc": "移除维京领主的“自由之身 (Freedom)”限制，使其能被英雄编队带领，享受阵形加成与经验分享，并保留吸血打击。",
   "GameSettings_AllowLiberatiHeroArmy_Label": "允许自由斗士编入英雄队伍",
   "GameSettings_AllowLiberatiHeroArmy_Desc": "移除自由斗士的“自由之身 (Freedom)”限制，使其能被英雄编队带领，享受阵形加成与经验分享，并保留践踏伤害。",
-  "Error_SettingsSubcommandRequired": "settings 指令必须指定 get 或 set 子指令。"
+  "GameSettings_AllowMuleHeroArmy_Label": "允许运粮马／骡子编入英雄队伍",
+  "GameSettings_AllowMuleHeroArmy_Desc": "解除运粮马的右键跟随限制并加入中央阵形保护，使其能被英雄编队带领行军，提供随队进食补给。",
+  "Error_SettingsSubcommandRequired": "settings 指令必须指定 get 或 set 子指令。",
+  "GameSettings_Group_Logistics": "经济与运输规则",
+  "GameSettings_WagonCapacity10k_Label": "运粮马／运金马运载上限提升至 10,000",
+  "GameSettings_WagonCapacity10k_Desc": "将骡车实体负载容量提升至 10,000，并同步修改聚落“制造运粮马（大）”与“制造运金马（大）”按钮之出产装载量与中途装载指令。"
 }
 
 

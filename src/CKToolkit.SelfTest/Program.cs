@@ -7046,13 +7046,85 @@ internal static class Program
         string unchanged = GameRulesModifier.RemoveFreedom(xmlNoFreedom);
         Check("RemoveFreedom 在無 freedom 時原文不變", unchanged == xmlNoFreedom);
 
+        // 1.2 運糧馬/騾子 (Wagon) defaultcmd 與 FORMATIONS.XML 陣形修改邏輯測試
+        string wagonVanillaXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"Wagon\" parent=\"Unit\">\r\n  <properties max_load=\"1000\" feeds=\"0\"/>\r\n  <nodefcmdinherit/>\r\n  <defaultcmd target=\"Unit\">\r\n    <cmd name=\"follow\"/>\r\n  </defaultcmd>\r\n</class>\r\n";
+        Check("GameRulesModifier.HasMuleHeroArmy 初始為 false", !GameRulesModifier.HasMuleHeroArmy(wagonVanillaXml));
+        string wagonApplied = GameRulesModifier.ApplyMuleHeroArmy(wagonVanillaXml);
+        Check("ApplyMuleHeroArmy 成功加入 defaultcmd target=Hero attach",
+            GameRulesModifier.HasMuleHeroArmy(wagonApplied) && wagonApplied.Contains("target=\"Hero\""));
+        string wagonAppliedTwice = GameRulesModifier.ApplyMuleHeroArmy(wagonApplied);
+        Check("ApplyMuleHeroArmy 具備冪等性", wagonAppliedTwice == wagonApplied);
+        string wagonRestored = GameRulesModifier.RemoveMuleHeroArmy(wagonApplied);
+        Check("RemoveMuleHeroArmy 精確還原回原版（逐位元組相同）", wagonRestored == wagonVanillaXml);
+        string wagonRestoredTwice = GameRulesModifier.RemoveMuleHeroArmy(wagonRestored);
+        Check("RemoveMuleHeroArmy 具備冪等性", wagonRestoredTwice == wagonVanillaXml);
+
+        string formationsVanillaXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<Formations>\r\n\t<Formation Name=\"Square\">\r\n\t\t<Class Name=\"Peasant\" CentralBlock=\"1\"/>\r\n\t\t<Class Name=\"Hero\" CentralBlock=\"1\"/>\r\n\t</Formation>\r\n</Formations>\r\n";
+        Check("GameRulesModifier.HasMuleFormation 初始為 false", !GameRulesModifier.HasMuleFormation(formationsVanillaXml));
+        string formationsApplied = GameRulesModifier.ApplyMuleFormation(formationsVanillaXml);
+        Check("ApplyMuleFormation 成功加入 Wagon CentralBlock",
+            GameRulesModifier.HasMuleFormation(formationsApplied) && formationsApplied.Contains("<Class Name=\"Wagon\" CentralBlock=\"1\"/>"));
+        string formationsAppliedTwice = GameRulesModifier.ApplyMuleFormation(formationsApplied);
+        Check("ApplyMuleFormation 具備冪等性", formationsAppliedTwice == formationsApplied);
+        string formationsRestored = GameRulesModifier.RemoveMuleFormation(formationsApplied);
+        Check("RemoveMuleFormation 精確還原回原版（逐位元組相同）", formationsRestored == formationsVanillaXml);
+        string formationsRestoredTwice = GameRulesModifier.RemoveMuleFormation(formationsRestored);
+        Check("RemoveMuleFormation 具備冪等性", formationsRestoredTwice == formationsVanillaXml);
+
+        // WagonCapacity10k 純字串轉換測試
+        Check("GameRulesModifier.HasWagonCapacity10k 初始為 false", !GameRulesModifier.HasWagonCapacity10k(wagonVanillaXml));
+        string wagon10kApplied = GameRulesModifier.ApplyWagonMaxLoad10k(wagonVanillaXml);
+        Check("ApplyWagonMaxLoad10k 成功修改 max_load 為 10000",
+            GameRulesModifier.HasWagonCapacity10k(wagon10kApplied) && wagon10kApplied.Contains("max_load=\"10000\""));
+        string wagon10kAppliedTwice = GameRulesModifier.ApplyWagonMaxLoad10k(wagon10kApplied);
+        Check("ApplyWagonMaxLoad10k 具備冪等性", wagon10kAppliedTwice == wagon10kApplied);
+        string wagon10kRestored = GameRulesModifier.RemoveWagonMaxLoad10k(wagon10kApplied);
+        Check("RemoveWagonMaxLoad10k 精確還原回原版（逐位元組相同）", wagon10kRestored == wagonVanillaXml);
+        string wagon10kRestoredTwice = GameRulesModifier.RemoveWagonMaxLoad10k(wagon10kRestored);
+        Check("RemoveWagonMaxLoad10k 具備冪等性", wagon10kRestoredTwice == wagonVanillaXml);
+
+        string vsFoodVanilla = "// void, Obj This\r\nwagon = .CreateMuleFood(1000);\r\n";
+        string vsFoodApplied = GameRulesModifier.ApplyCreateFoodMuleBig(vsFoodVanilla);
+        Check("ApplyCreateFoodMuleBig 成功修改為 10000", vsFoodApplied.Contains(".CreateMuleFood(10000)"));
+        Check("RemoveCreateFoodMuleBig 精確還原回原版", GameRulesModifier.RemoveCreateFoodMuleBig(vsFoodApplied) == vsFoodVanilla);
+
+        string vsGoldVanilla = "// void, Obj This\r\nwagon = .CreateMuleGold(1000);\r\n";
+        string vsGoldApplied = GameRulesModifier.ApplyCreateGoldMuleBig(vsGoldVanilla);
+        Check("ApplyCreateGoldMuleBig 成功修改為 10000", vsGoldApplied.Contains(".CreateMuleGold(10000)"));
+        Check("RemoveCreateGoldMuleBig 精確還原回原版", GameRulesModifier.RemoveCreateGoldMuleBig(vsGoldApplied) == vsGoldVanilla);
+
+        string vsLoadFoodVanilla = "// void, Obj This\r\nif(.IsValid()) .LoadFood(1000);\r\n";
+        string vsLoadFoodApplied = GameRulesModifier.ApplyWagonLoadFoodBig(vsLoadFoodVanilla);
+        Check("ApplyWagonLoadFoodBig 成功修改為 10000", vsLoadFoodApplied.Contains(".LoadFood(10000)"));
+        Check("RemoveWagonLoadFoodBig 精確還原回原版", GameRulesModifier.RemoveWagonLoadFoodBig(vsLoadFoodApplied) == vsLoadFoodVanilla);
+
+        string vsLoadGoldVanilla = "// void, Obj This\r\nif(.IsValid()) .LoadGold(1000);\r\n";
+        string vsLoadGoldApplied = GameRulesModifier.ApplyWagonLoadGoldBig(vsLoadGoldVanilla);
+        Check("ApplyWagonLoadGoldBig 成功修改為 10000", vsLoadGoldApplied.Contains(".LoadGold(10000)"));
+        Check("RemoveWagonLoadGoldBig 精確還原回原版", GameRulesModifier.RemoveWagonLoadGoldBig(vsLoadGoldApplied) == vsLoadGoldVanilla);
+
+        string cmdVanilla = "<commands>\r\n\t<cmd rollover=\"Create mule with 1000 food\">\r\n\t<cmd rollover=\"Create mule loaded with 1000 gold\">\r\n\t<cmd rollover=\"Load 1000 food\"\r\n\t<cmd rollover=\"Load 1000 gold\"\r\n</commands>\r\n";
+        string cmdApplied = GameRulesModifier.ApplyCommandsMule10k(cmdVanilla);
+        Check("ApplyCommandsMule10k 成功修改提示文字為 10000",
+            cmdApplied.Contains("10000 food") && cmdApplied.Contains("10000 gold") && !cmdApplied.Contains("1000 food") && !cmdApplied.Contains("1000 gold"));
+        Check("RemoveCommandsMule10k 精確還原回原版", GameRulesModifier.RemoveCommandsMule10k(cmdApplied) == cmdVanilla);
+
         // 2. data.pak 合成安裝與逐位元組精確反轉測試
         string vikingLordXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"GVikingLord\" parent=\"Military\" speciality=\"vampire, freedom\">\r\n\t<health value=\"800\"/>\r\n</class>\r\n";
         string liberatusXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"RLiberatus\" parent=\"Military\" speciality=\"trample, freedom\">\r\n\t<health value=\"600\"/>\r\n</class>\r\n";
+        string wagonXml = wagonVanillaXml;
+        string formationsXml = formationsVanillaXml;
 
         var pak = CreateSyntheticDataPak();
         pak.WriteText(GameRulesModifier.VikingLordClassPath, vikingLordXml);
         pak.WriteText(GameRulesModifier.LiberatusClassPath, liberatusXml);
+        pak.WriteText(GameRulesModifier.WagonClassPath, wagonXml);
+        pak.WriteText(GameRulesModifier.FormationsPath, formationsXml);
+        pak.WriteText(GameRulesModifier.CreateFoodMuleBigScriptPath, vsFoodVanilla);
+        pak.WriteText(GameRulesModifier.CreateGoldMuleBigScriptPath, vsGoldVanilla);
+        pak.WriteText(GameRulesModifier.WagonLoadFoodBigScriptPath, vsLoadFoodVanilla);
+        pak.WriteText(GameRulesModifier.WagonLoadGoldBigScriptPath, vsLoadGoldVanilla);
+        pak.WriteText(GameRulesModifier.CommandsXmlPath, cmdVanilla);
         byte[] vanillaBytes = pak.ToBytes();
 
         Check("初始合成 data.pak 為原版", PatchState.Inspect(GameFile.DataPak, vanillaBytes).IsVanilla);
@@ -7061,6 +7133,7 @@ internal static class Program
         var configViking = ToolkitConfig.CreateDefault();
         configViking.GameSettings.AllowVikingLordHeroArmy = true;
         configViking.GameSettings.AllowLiberatiHeroArmy = false;
+        configViking.GameSettings.AllowMuleHeroArmy = false;
 
         var patchedPak1 = HmmPak.FromBytes(vanillaBytes);
         TrainerInstaller.Install(patchedPak1, configViking.Trainer, configViking.GameSettings);
@@ -7072,9 +7145,9 @@ internal static class Program
 
         var marker1 = TrainerInstaller.ReadMarker(patchedPak1);
         Check("TrainerMarker 包含 allow_viking_lord_army",
-            marker1 is not null && marker1.GameSettings.Contains("allow_viking_lord_army") && !marker1.GameSettings.Contains("allow_liberati_army"));
+            marker1 is not null && marker1.GameSettings.Contains("allow_viking_lord_army") && !marker1.GameSettings.Contains("allow_liberati_army") && !marker1.GameSettings.Contains("allow_mule_army"));
         Check("TrainerMarker.Originals 只記錄有變動的檔案",
-            marker1 is not null && marker1.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+            marker1 is not null && marker1.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.WagonClassPath));
 
         string currentVikingXml = patchedPak1.ReadText(GameRulesModifier.VikingLordClassPath)!;
         string currentLiberatusXml = patchedPak1.ReadText(GameRulesModifier.LiberatusClassPath)!;
@@ -7091,43 +7164,126 @@ internal static class Program
         Check("PatchState.Normalise 單獨維京領主後與原版逐位元組相同",
             normalised1.Success && normalised1.Value is not null && normalised1.Value.SequenceEqual(vanillaBytes));
 
-        // 同時套用維京領主與自由鬥士
-        var configBoth = ToolkitConfig.CreateDefault();
-        configBoth.GameSettings.AllowVikingLordHeroArmy = true;
-        configBoth.GameSettings.AllowLiberatiHeroArmy = true;
+        // 套用單獨運糧馬編隊
+        var configMule = ToolkitConfig.CreateDefault();
+        configMule.GameSettings.AllowMuleHeroArmy = true;
 
-        var patchedPakBoth = HmmPak.FromBytes(vanillaBytes);
-        TrainerInstaller.Install(patchedPakBoth, configBoth.Trainer, configBoth.GameSettings);
-        byte[] patchedBytesBoth = patchedPakBoth.ToBytes();
+        var patchedPakMule = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakMule, configMule.Trainer, configMule.GameSettings);
+        byte[] patchedBytesMule = patchedPakMule.ToBytes();
 
-        var markerBoth = TrainerInstaller.ReadMarker(patchedPakBoth);
-        Check("TrainerMarker 包含兩項遊戲設定",
-            markerBoth is not null &&
-            markerBoth.GameSettings.Contains("allow_viking_lord_army") &&
-            markerBoth.GameSettings.Contains("allow_liberati_army"));
-        Check("TrainerMarker.Originals 包含兩個原始檔案",
-            markerBoth is not null &&
-            markerBoth.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
-            markerBoth.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+        var stateMule = PatchState.Inspect(GameFile.DataPak, patchedBytesMule);
+        Check("套用運糧馬後 data.pak 辨識為 PatchedByUs",
+            stateMule.IsPatched && stateMule.AppliedPatches.Contains("trainer_marker"));
 
-        var uninstalledBoth = HmmPak.FromBytes(patchedBytesBoth);
-        TrainerInstaller.Uninstall(uninstalledBoth);
-        byte[] restoredBytesBoth = uninstalledBoth.ToBytes();
-        Check("Uninstall 兩項設定後與原版逐位元組相同", restoredBytesBoth.SequenceEqual(vanillaBytes));
+        var markerMule = TrainerInstaller.ReadMarker(patchedPakMule);
+        Check("TrainerMarker 包含 allow_mule_army",
+            markerMule is not null && markerMule.GameSettings.Contains("allow_mule_army"));
+        Check("TrainerMarker.Originals 包含 Wagon 與 Formations 原始檔案",
+            markerMule is not null &&
+            markerMule.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            markerMule.Originals.ContainsKey(GameRulesModifier.FormationsPath));
 
-        var normalisedBoth = PatchState.Normalise(GameFile.DataPak, patchedBytesBoth);
-        Check("PatchState.Normalise 兩項設定後與原版逐位元組相同",
-            normalisedBoth.Success && normalisedBoth.Value is not null && normalisedBoth.Value.SequenceEqual(vanillaBytes));
+        string currentWagonXml = patchedPakMule.ReadText(GameRulesModifier.WagonClassPath)!;
+        string currentFormationsXml = patchedPakMule.ReadText(GameRulesModifier.FormationsPath)!;
+        Check("data.pak 內 Wagon 已加入 attach 預設指令", GameRulesModifier.HasMuleHeroArmy(currentWagonXml));
+        Check("data.pak 內 FORMATIONS.XML 已加入 Wagon CentralBlock", GameRulesModifier.HasMuleFormation(currentFormationsXml));
+
+        var uninstalledMule = HmmPak.FromBytes(patchedBytesMule);
+        TrainerInstaller.Uninstall(uninstalledMule);
+        byte[] restoredBytesMule = uninstalledMule.ToBytes();
+        Check("Uninstall 單獨運糧馬後與原版逐位元組相同", restoredBytesMule.SequenceEqual(vanillaBytes));
+
+        var normalisedMule = PatchState.Normalise(GameFile.DataPak, patchedBytesMule);
+        Check("PatchState.Normalise 單獨運糧馬後與原版逐位元組相同",
+            normalisedMule.Success && normalisedMule.Value is not null && normalisedMule.Value.SequenceEqual(vanillaBytes));
+
+        // 套用單獨運糧馬 10k 容量
+        var configWagon10k = ToolkitConfig.CreateDefault();
+        configWagon10k.GameSettings.WagonCapacity10k = true;
+
+        var patchedPak10k = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPak10k, configWagon10k.Trainer, configWagon10k.GameSettings);
+        byte[] patchedBytes10k = patchedPak10k.ToBytes();
+
+        var state10k = PatchState.Inspect(GameFile.DataPak, patchedBytes10k);
+        Check("套用運糧馬 10k 容量後 data.pak 辨識為 PatchedByUs",
+            state10k.IsPatched && state10k.AppliedPatches.Contains("trainer_marker"));
+
+        var marker10k = TrainerInstaller.ReadMarker(patchedPak10k);
+        Check("TrainerMarker 包含 wagon_capacity_10k",
+            marker10k is not null && marker10k.GameSettings.Contains("wagon_capacity_10k"));
+        Check("TrainerMarker.Originals 包含 6 個相關檔案",
+            marker10k is not null &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CreateFoodMuleBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CreateGoldMuleBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonLoadFoodBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonLoadGoldBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath));
+
+        string currentWagon10kXml = patchedPak10k.ReadText(GameRulesModifier.WagonClassPath)!;
+        Check("data.pak 內 Wagon max_load 已為 10000", GameRulesModifier.HasWagonCapacity10k(currentWagon10kXml));
+
+        var uninstalled10k = HmmPak.FromBytes(patchedBytes10k);
+        TrainerInstaller.Uninstall(uninstalled10k);
+        byte[] restoredBytes10k = uninstalled10k.ToBytes();
+        Check("Uninstall 單獨運糧馬 10k 後與原版逐位元組相同", restoredBytes10k.SequenceEqual(vanillaBytes));
+
+        var normalised10k = PatchState.Normalise(GameFile.DataPak, patchedBytes10k);
+        Check("PatchState.Normalise 單獨運糧馬 10k 後與原版逐位元組相同",
+            normalised10k.Success && normalised10k.Value is not null && normalised10k.Value.SequenceEqual(vanillaBytes));
+
+        // 同時套用四項遊戲設定 (維京領主、自由鬥士、運糧馬編隊、運糧馬 10k 容量)
+        var configAll = ToolkitConfig.CreateDefault();
+        configAll.GameSettings.AllowVikingLordHeroArmy = true;
+        configAll.GameSettings.AllowLiberatiHeroArmy = true;
+        configAll.GameSettings.AllowMuleHeroArmy = true;
+        configAll.GameSettings.WagonCapacity10k = true;
+
+        var patchedPakAll = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakAll, configAll.Trainer, configAll.GameSettings);
+        byte[] patchedBytesAll = patchedPakAll.ToBytes();
+
+        var markerAll = TrainerInstaller.ReadMarker(patchedPakAll);
+        Check("TrainerMarker 包含四項遊戲設定",
+            markerAll is not null &&
+            markerAll.GameSettings.Contains("allow_viking_lord_army") &&
+            markerAll.GameSettings.Contains("allow_liberati_army") &&
+            markerAll.GameSettings.Contains("allow_mule_army") &&
+            markerAll.GameSettings.Contains("wagon_capacity_10k"));
+        Check("TrainerMarker.Originals 包含全部九個原始檔案",
+            markerAll is not null &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.FormationsPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CreateFoodMuleBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CreateGoldMuleBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadFoodBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadGoldBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath));
+
+        var uninstalledAll = HmmPak.FromBytes(patchedBytesAll);
+        TrainerInstaller.Uninstall(uninstalledAll);
+        byte[] restoredBytesAll = uninstalledAll.ToBytes();
+        Check("Uninstall 四項設定後與原版逐位元組相同", restoredBytesAll.SequenceEqual(vanillaBytes));
+
+        var normalisedAll = PatchState.Normalise(GameFile.DataPak, patchedBytesAll);
+        Check("PatchState.Normalise 四項設定後與原版逐位元組相同",
+            normalisedAll.Success && normalisedAll.Value is not null && normalisedAll.Value.SequenceEqual(vanillaBytes));
 
         // 3. PatchPipeline 端對端驗證 (TrainerMarkerMatchesConfig)
         Check("PatchPipeline.TrainerMarkerMatchesConfig: 正確比對符合的設定",
-            PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configBoth));
+            PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configAll));
 
         var configMismatched = ToolkitConfig.CreateDefault();
         configMismatched.GameSettings.AllowVikingLordHeroArmy = true;
-        configMismatched.GameSettings.AllowLiberatiHeroArmy = false;
+        configMismatched.GameSettings.AllowLiberatiHeroArmy = true;
+        configMismatched.GameSettings.AllowMuleHeroArmy = false;
+        configMismatched.GameSettings.WagonCapacity10k = true;
         Check("PatchPipeline.TrainerMarkerMatchesConfig: 設定不符時回報 false",
-            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configMismatched));
+            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configMismatched));
 
         // 4. CLI settings get / set 測試
         string tempConfigDir = Path.Combine(Path.GetTempPath(), "ckselftest_settings_cli_" + Guid.NewGuid().ToString("N"));
@@ -7147,6 +7303,36 @@ internal static class Program
             var loadedCfg = ToolkitConfig.Load(cliConfigFile);
             Check("CLI settings set 成功寫入設定檔",
                 loadedCfg.GameSettings.AllowVikingLordHeroArmy && loadedCfg.GameSettings.AllowLiberatiHeroArmy);
+
+            var setMule = RunCli("settings", "set", "--mule-army=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --mule-army=on` 成功執行", setMule.Code == ExitCodes.Success && setMule.Envelope is { Ok: true });
+
+            var loadedCfg3 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 AllowMuleHeroArmy=true", loadedCfg3.GameSettings.AllowMuleHeroArmy);
+
+            var getUpdated = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 allowMuleHeroArmy 欄位",
+                getUpdated.Code == ExitCodes.Success && getUpdated.Raw.Contains("\"allowMuleHeroArmy\": true"));
+
+            var setMuleOff = RunCli("settings", "set", "--mule-army=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --mule-army=off` 成功關閉選項", setMuleOff.Code == ExitCodes.Success);
+            var loadedCfg4 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 AllowMuleHeroArmy=false", !loadedCfg4.GameSettings.AllowMuleHeroArmy);
+
+            var setWagon10k = RunCli("settings", "set", "--wagon-10k=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --wagon-10k=on` 成功執行", setWagon10k.Code == ExitCodes.Success && setWagon10k.Envelope is { Ok: true });
+
+            var loadedCfg5 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 WagonCapacity10k=true", loadedCfg5.GameSettings.WagonCapacity10k);
+
+            var getUpdated10k = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 wagonCapacity10k 欄位",
+                getUpdated10k.Code == ExitCodes.Success && getUpdated10k.Raw.Contains("\"wagonCapacity10k\": true"));
+
+            var setWagon10kOff = RunCli("settings", "set", "--wagon-10k=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --wagon-10k=off` 成功關閉選項", setWagon10kOff.Code == ExitCodes.Success);
+            var loadedCfg6 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 WagonCapacity10k=false", !loadedCfg6.GameSettings.WagonCapacity10k);
 
             var setVikingOff = RunCli("settings", "set", "--viking-army=off", "--config", cliConfigFile, "--json");
             Check("`settings set --viking-army=off` 成功修改單一項目", setVikingOff.Code == ExitCodes.Success);

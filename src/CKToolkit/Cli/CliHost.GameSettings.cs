@@ -17,7 +17,9 @@ public static partial class CliHost
         var data = new
         {
             allowVikingLordHeroArmy = config.GameSettings.AllowVikingLordHeroArmy,
-            allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy
+            allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy,
+            allowMuleHeroArmy = config.GameSettings.AllowMuleHeroArmy,
+            wagonCapacity10k = config.GameSettings.WagonCapacity10k
         };
 
         var warnings = new List<string>(config.MigrationsApplied);
@@ -39,6 +41,8 @@ public static partial class CliHost
             stdout.WriteLine("遊戲設定 (Game Settings):");
             stdout.WriteLine($"  - 允許維京領主編入英雄隊伍 (Allow Viking Lords in Hero Armies): {(config.GameSettings.AllowVikingLordHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 允許自由鬥士編入英雄隊伍 (Allow Liberati in Hero Armies): {(config.GameSettings.AllowLiberatiHeroArmy ? "on" : "off")}");
+            stdout.WriteLine($"  - 允許運糧馬編入英雄隊伍 (Allow Food Mules in Hero Armies): {(config.GameSettings.AllowMuleHeroArmy ? "on" : "off")}");
+            stdout.WriteLine($"  - 運糧馬運載上限提升至 10,000 (Increase Mule Capacity to 10,000): {(config.GameSettings.WagonCapacity10k ? "on" : "off")}");
             if (warnings.Count > 0)
             {
                 stdout.WriteLine();
@@ -52,7 +56,7 @@ public static partial class CliHost
     {
         if (options.Count == 0)
         {
-            string err = Strings.Get("Error_InvalidArgs", "settings set 必須提供至少一個設定選項 (--viking-army 或 --liberati-army)");
+            string err = Strings.Get("Error_InvalidArgs", "settings set 必須提供至少一個設定選項 (--viking-army, --liberati-army, --mule-army 或 --wagon-10k)");
             return OutputError("settings set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr);
         }
 
@@ -124,6 +128,30 @@ public static partial class CliHost
                     }
                     break;
 
+                case "--mule-army":
+                    if (TryParseOnOff(val, out bool muleVal))
+                    {
+                        config.GameSettings.AllowMuleHeroArmy = muleVal;
+                    }
+                    else
+                    {
+                        string err = Strings.Get("Error_InvalidArgs", $"--mule-army 值必須為 on 或 off，實際為 '{val}'");
+                        return OutputError("settings set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    break;
+
+                case "--wagon-10k":
+                    if (TryParseOnOff(val, out bool wagon10kVal))
+                    {
+                        config.GameSettings.WagonCapacity10k = wagon10kVal;
+                    }
+                    else
+                    {
+                        string err = Strings.Get("Error_InvalidArgs", $"--wagon-10k 值必須為 on 或 off，實際為 '{val}'");
+                        return OutputError("settings set", err, ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
+                    }
+                    break;
+
                 default:
                     return OutputError("settings set", Strings.Get("Error_UnknownOption", flag), ExitCodes.InvalidArgs, isJson, stdout, stderr, warnings);
             }
@@ -142,7 +170,9 @@ public static partial class CliHost
         var data = new
         {
             allowVikingLordHeroArmy = config.GameSettings.AllowVikingLordHeroArmy,
-            allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy
+            allowLiberatiHeroArmy = config.GameSettings.AllowLiberatiHeroArmy,
+            allowMuleHeroArmy = config.GameSettings.AllowMuleHeroArmy,
+            wagonCapacity10k = config.GameSettings.WagonCapacity10k
         };
 
         if (isJson)
@@ -161,6 +191,8 @@ public static partial class CliHost
             stdout.WriteLine("遊戲設定已更新：");
             stdout.WriteLine($"  - 允許維京領主編入英雄隊伍: {(config.GameSettings.AllowVikingLordHeroArmy ? "on" : "off")}");
             stdout.WriteLine($"  - 允許自由鬥士編入英雄隊伍: {(config.GameSettings.AllowLiberatiHeroArmy ? "on" : "off")}");
+            stdout.WriteLine($"  - 允許運糧馬編入英雄隊伍: {(config.GameSettings.AllowMuleHeroArmy ? "on" : "off")}");
+            stdout.WriteLine($"  - 運糧馬運載上限提升至 10,000: {(config.GameSettings.WagonCapacity10k ? "on" : "off")}");
             if (warnings.Count > 0)
             {
                 stdout.WriteLine();

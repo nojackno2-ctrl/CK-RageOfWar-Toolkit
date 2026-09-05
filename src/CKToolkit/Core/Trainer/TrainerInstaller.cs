@@ -48,8 +48,11 @@ public static class TrainerInstaller
             n.Equals(Cheats.ScDebugPath, StringComparison.OrdinalIgnoreCase) ||
             n.Equals(Tweaks.VxConst, StringComparison.OrdinalIgnoreCase) ||
             n.Equals(Tweaks.Commands, StringComparison.OrdinalIgnoreCase) ||
+            n.Equals(GameRulesModifier.FormationsPath, StringComparison.OrdinalIgnoreCase) ||
             (n.StartsWith(Tweaks.Classes, StringComparison.OrdinalIgnoreCase) &&
-             n.EndsWith(".SC.XML", StringComparison.OrdinalIgnoreCase)));
+             n.EndsWith(".SC.XML", StringComparison.OrdinalIgnoreCase)) ||
+            (n.StartsWith(@"SUBAI\", StringComparison.OrdinalIgnoreCase) &&
+             n.EndsWith(".VS", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// 依設定把修改器與遊戲設定安裝進 data.pak。呼叫端必須先確保 pak 已正規化為原版狀態。
@@ -143,6 +146,114 @@ public static class TrainerInstaller
                     pak.WriteText(GameRulesModifier.LiberatusClassPath, modifiedXml);
                     marker.GameSettings.Add("allow_liberati_army");
                     log?.Invoke("  自由鬥士：解除自由之身限制（可編入英雄隊伍）");
+                }
+            }
+
+            if (gameSettings.AllowMuleHeroArmy)
+            {
+                bool muleModified = false;
+                if (pak.Contains(GameRulesModifier.WagonClassPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.WagonClassPath);
+                    string modifiedXml = GameRulesModifier.ApplyMuleHeroArmy(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonClassPath, modifiedXml);
+                        muleModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.FormationsPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.FormationsPath);
+                    string modifiedXml = GameRulesModifier.ApplyMuleFormation(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.FormationsPath, modifiedXml);
+                        muleModified = true;
+                    }
+                }
+
+                if (muleModified)
+                {
+                    marker.GameSettings.Add("allow_mule_army");
+                    log?.Invoke("  運糧馬／騾子：解除跟隨限制並加入陣形護衛（可編入英雄隊伍）");
+                }
+            }
+
+            if (gameSettings.WagonCapacity10k)
+            {
+                bool wagonCapModified = false;
+                if (pak.Contains(GameRulesModifier.WagonClassPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.WagonClassPath);
+                    string modifiedXml = GameRulesModifier.ApplyWagonMaxLoad10k(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonClassPath, modifiedXml);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CreateFoodMuleBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.CreateFoodMuleBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyCreateFoodMuleBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CreateFoodMuleBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CreateGoldMuleBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.CreateGoldMuleBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyCreateGoldMuleBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CreateGoldMuleBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.WagonLoadFoodBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.WagonLoadFoodBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyWagonLoadFoodBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonLoadFoodBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.WagonLoadGoldBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.WagonLoadGoldBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyWagonLoadGoldBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonLoadGoldBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CommandsXmlPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.CommandsXmlPath);
+                    string modifiedXml = GameRulesModifier.ApplyCommandsMule10k(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CommandsXmlPath, modifiedXml);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (wagonCapModified)
+                {
+                    marker.GameSettings.Add("wagon_capacity_10k");
+                    log?.Invoke("  運糧馬／運金馬：運載上限與大容量製造按鈕提升至 10,000");
                 }
             }
         }

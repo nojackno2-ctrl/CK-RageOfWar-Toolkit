@@ -29,6 +29,8 @@
 
 | Issue 編號 | 問題標題 | 狀態 | 觸發／實機測試方式 | 預期結果 / 驗收標準 |
 |---|---|:---:|---|---|
+| [ISSUE-076](#issue-076-運糧馬運載上限與出產量提升至-10000修改大容量生產按鈕與裝載指令新增遊戲設定選項) | **運糧馬／運金馬運載上限與出產量提升至 10,000（修改大容量生產按鈕與裝載指令，新增「遊戲設定」選項）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「運糧馬／運金馬運載上限提升至 10,000」，按「一鍵套用」。②進入遊戲，在城鎮或要塞點擊「製造運糧馬（大）」，確認初始扣糧與出產運糧馬身上直接攜帶 10,000 食物（若城鎮糧不足則全扣）。③中途對村莊或糧倉執行裝載指令，確認可裝載至 10,000。④取消勾選後套用，`verify` 回報原版狀態，按鈕與上限恢復為 1,000。 | ②③運糧馬容量與生產按鈕裝載量提升至 10,000。④取消勾選後 data.pak 逐位元組還原原版。 |
+| [ISSUE-075](#issue-075-運糧馬騾子無法編入英雄編隊解除右鍵跟隨限制並加入中央陣形護衛新增遊戲設定選項) | **運糧馬／騾子無法編入英雄編隊（解除右鍵跟隨限制並加入中央陣形護衛，新增「遊戲設定」選項）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許運糧馬編入英雄隊伍」，按「一鍵套用」。②進入遊戲，在村莊或要塞購買或生產運糧馬（或商隊騾子）與一名英雄。③將運糧馬選取後對英雄按右鍵（或全選後按 F 鍵編隊）。④觀察運糧馬是否成功加入英雄部隊、跟隨英雄移動並排入陣形內部受護衛，且英雄軍隊可行進間進食運糧馬攜帶之糧草。⑤取消勾選後套用，`verify` 回報原版狀態。 | ②③運糧馬成功編入英雄隊伍，置於 CentralBlock 受保護，部隊可行走進食。④取消勾選後 data.pak 逐位元組還原原版。 |
 | [ISSUE-074](#issue-074-維京領主與自由鬥士無法編入英雄隊伍解除自由之身限制新增遊戲設定分頁) | **維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許維京領主編入英雄隊伍」與「允許自由鬥士編入英雄隊伍」，按「一鍵套用」。②進入遊戲，招募或生成維京領主／自由鬥士與一名英雄。③將英雄與維京領主／自由鬥士框選，按 F 鍵或右鍵點擊英雄編隊。④觀察單位是否成功進入英雄陣形，且保留吸血打擊／踐踏傷害。⑤在遊戲設定頁取消勾選再套用，`verify` 回報原版狀態。 | ②③單位成功編入英雄隊伍，享受陣形防禦與經驗分享，並保留專屬攻擊特性。④取消勾選後 data.pak 逐位元組還原原版。 |
 | [ISSUE-073](#issue-073-13-個-scoped-hook-用-player-指標比對本機玩家我方物件永遠被判成敵方) | **敵我分流比錯欄位，我方永遠被判成敵方（所有 scoped 調整只會套到敵方值）** | ⏳ 待實測 | ①修改器頁重新「套用」一次。②把任一項的「我方」與「敵方」設成明顯不同的值（例如我方聚落金錢產量 100000、敵方保持原值）。③進入單人戰役觀察我方是否真的套到我方數值。④`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方數值確實生效且與敵方互不影響（這是 ISSUE-069／071／072 共同的最後一關）。④verify 全綠。 |
 | [ISSUE-072](#issue-072-train_speedresearch_speed-掛在原版腳本用不到的-objprogress-多載上生產與研究倍率完全沒有效果) | **生產與研究倍率掛錯腳本入口，原版兵營訓練完全不受影響** | ⏳ 待實測 | ①修改器頁重新「套用」一次（必要：EXE 內是舊世代 helper）。②進入單人戰役，在兵營／神殿下單訓練一個單位，比對進度條秒數（自 20× 時 15000ms 的訓練應約 750ms）。③在有研究的建築下單研究，同樣比對。④把「敵方」設成 1× 再套用，觀察敵方 AI 出兵速度沒有變快。⑤`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方訓練與研究確實依倍率加速（不再毫無變化）。④敵我互不影響。⑤verify 全綠。全程單人戰役不得閃退。 |
@@ -184,6 +186,55 @@
 ## 4. ⏳ 已修碼 · 待實測清冊 (Fixed - Pending Field Test)
 
 > 說明：以下項目之程式碼已修復完成，且經自動化測試套件（SelfTest）驗證通過，**等待使用者在真實遊戲中進行實機驗證**。
+
+---
+
+### ISSUE-076: 運糧馬／運金馬運載上限與出產量提升至 10,000（修改大容量生產按鈕與裝載指令，新增「遊戲設定」選項）
+
+- **問題編號**: `ISSUE-076`
+- **提出日期**: 2026-09-04
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **來源**: 使用者需求：「不要這麼麻煩，直接改原版的按鈕就好，加入遊戲設定（Game Settings）中，然後上限改成10000」
+
+- **逆向分析與根因**:
+  1. 運糧馬（`Wagon` / `CVXWagon`）的底層負載上限由 `CLASSES\WAGON.SC.XML` 的 `<properties max_load="1000" feeds="0"/>` 定義。引擎啟動時於 `0x005C23F6` 讀取 `max_load` 字串並存入 `[class+0x3C4]`。
+  2. 生成運糧馬函式 `Settlement::CreateMuleFood`（`0x00517010`）於 `0x00517029` 讀取 `[class+0x3C4]`，計算 $\min(\text{請求量}, \text{max\_load}, \text{聚落存糧})$ 後立即扣除存糧並注入至運糧馬實體；若單純提高 `max_load` 而不修改按鈕，出產時依然只會裝載 1,000。
+  3. 大容量運糧馬／運金馬製造按鈕綁定之腳本為 `SUBAI\CREATE_FOOD_MULE_BIG.VS` 與 `SUBAI\CREATE_GOLD_MULE_BIG.VS`，內部硬編碼 `.CreateMuleFood(1000)` 與 `.CreateMuleGold(1000)`。
+  4. 騾車中途裝載指令 `SUBAI\WAGON_LOADFOODBIG.VS` 與 `SUBAI\WAGON_LOADGOLDBIG.VS` 亦硬編碼 `.LoadFood(1000)` 與 `.LoadGold(1000)`；對應之 UI 提示定義於 `COMMANDS.XML` 的 `rollover` 屬性。
+
+- **修復方案**:
+  - **核心轉換**：`GameRulesModifier` 新增 `ApplyWagonMaxLoad10k` / `RemoveWagonMaxLoad10k`、`ApplyCreateFoodMuleBig` / `RemoveCreateFoodMuleBig`、`ApplyCreateGoldMuleBig` / `RemoveCreateGoldMuleBig`、`ApplyWagonLoadFoodBig` / `RemoveWagonLoadFoodBig`、`ApplyWagonLoadGoldBig` / `RemoveWagonLoadGoldBig` 與 `ApplyCommandsMule10k` / `RemoveCommandsMule10k`，支援單一選項聯動改寫實體容量上限與大容量生產／裝載按鈕，並保證 100% 精確反轉原版。
+  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 納入 `SUBAI\*.VS` 候選快照；套用時自動快照 6 個原始檔案至 `marker.Originals`，並記錄 `wagon_capacity_10k` 標記。反安裝時逐位元組還原原版 `data.pak`（合規 AGENTS.md §2.1 / §2.3）。
+  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `WagonCapacity10k`；`PatchPipeline` 納入 `wagon_capacity_10k` 標記檢查，`verify` 零假警報。
+  - **使用者介面**：GUI「遊戲設定」分頁新增「經濟與運輸規則」卡片與「運糧馬／運金馬運載上限提升至 10,000」選項，支援三語在地化。
+  - **命令列支援**：CLI 支援 `settings set --wagon-10k=on|off` 與 `settings get --json`。
+  - **自我驗證測試**：SelfTest 第 47 組測試擴充 10k 容量字串轉換、6 個檔案合成 pak 安裝、逐位元組原版還原與 CLI 驗證。
+
+---
+
+### ISSUE-075: 運糧馬／騾子無法編入英雄編隊（解除右鍵跟隨限制並加入中央陣形護衛，新增「遊戲設定」選項）
+
+- **問題編號**: `ISSUE-075`
+- **提出日期**: 2026-09-04
+- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **來源**: 使用者需求：「用反編譯的方式找出讓馬可以編入英雄編隊」、「加入這個修改功能」
+
+- **逆向分析與根因**:
+  1. 遊戲中的運糧馬／商隊騾子（`Wagon` / `CVXWagon`）在引擎中繼承自 `CVXUnit`，底層 C++ 函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有針對 Wagon 的任何限制。
+  2. 英雄編隊腳本 `SUBAI\UNIT_ATTACH_VERIFY.VS` 會先呼叫 `.AsUnit()` 並檢查 `!IsEnemy()` 與 `!.HasFreedom`，Wagon 均完全符合條件。
+  3. 關鍵阻礙在於 `CLASSES\WAGON.SC.XML`：
+     - 它設定了 `<nodefcmdinherit/>`（取消一般單位的預設指令繼承，在 C++ 引擎 `0x00553510` 讀取並將 `[class+0xCA]` 設為 1，使 `0x00553B13` 跳過父類別 `Unit` 的預設指令）。
+     - 同時其預設指令僅定義了 `<defaultcmd target="Unit"><cmd name="follow"/></defaultcmd>`。
+     - 由於 `Hero` 繼承自 `Unit`，玩家選取運糧馬對英雄按右鍵時，引擎依類別繼承匹配到 `Unit` 的 `follow`，造成運糧馬永遠只會「跟隨（follow）」英雄，而不會觸發 `attach`（編隊）！
+  4. 此外，`FORMATIONS.XML` 原版未為 `Wagon` 類別定義位置，預設會套用 `Unit` 的 `FrontLine="1"`（排在陣形最前線），若直接編入會衝在最前線送死。而在原版中，農民（`Peasant`）與英雄（`Hero`）均被配置為 `CentralBlock="1"`（受部隊護衛的中央核心位置）。
+
+- **修復方案**:
+  - **核心邏輯**：`GameRulesModifier` 新增 `ApplyMuleHeroArmy` / `RemoveMuleHeroArmy`（在 `WAGON.SC.XML` 的 `target="Unit"` 之前精準插入 `target="Hero"` 的 `attach` 預設指令），以及 `ApplyMuleFormation` / `RemoveMuleFormation`（在 `FORMATIONS.XML` 各陣形的 `Peasant CentralBlock="1"` 旁加入 `Wagon CentralBlock="1"` 護衛位置）。兩者皆提供冪等性與精確反轉保證。
+  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 擴充納入 `FORMATIONS.XML`；安裝時當 `AllowMuleHeroArmy` 啟用，自動快照原始檔案至 `marker.Originals`，並記錄 `allow_mule_army` 標記。反安裝時 100% 逐位元組還原原版 `data.pak`，不留下任何 backup 目錄（合規 AGENTS.md §2.1 / §2.3）。
+  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `AllowMuleHeroArmy`；`PatchPipeline` 支援比對 `allow_mule_army` 標記，`verify` 零假警報。
+  - **使用者介面**：GUI「遊戲設定」分頁（`GameSettingsPage`）新增「允許運糧馬編入英雄隊伍」勾選框與說明文字，支援即時切換與繁中/簡中/英文三語在地化。
+  - **命令列支援**：CLI `settings set --mule-army=on|off` 與 `settings get` 完整支援該項目。
+  - **自我驗證測試**：SelfTest 第 47 組測試擴充覆蓋運糧馬 XML 修改、陣形位置注入、逐位元組原版還原與 CLI 讀寫驗證。
 
 ---
 

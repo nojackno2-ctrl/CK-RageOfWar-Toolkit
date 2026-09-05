@@ -11,8 +11,45 @@
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
-> 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
-> 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
+## 交接事項：2026-09-04 運糧馬／運金馬運載上限與出產量提升至 10,000（ISSUE-076）
+
+> ⏳ **已修碼 · 待實測（2026-09-04）**：
+> - 依使用者需求「不要這麼麻煩，直接改原版的按鈕就好，加入遊戲設定（Game Settings）中，然後上限改成10000」，將運糧馬與運金馬的容量上限改為 10,000，並同步改寫原廠大容量生產按鈕與裝載指令。
+> - 經二進位逆向分析，Wagon 的底層負載上限由 `CLASSES\WAGON.SC.XML` 的 `max_load` 決定，存於 `[class+0x3C4]`；生成函式 `Settlement::CreateMuleFood`（`0x00517010`）於 `0x00517029` 讀取並以 `min(請求量, max_load, 聚落存糧)` 裝載。
+> - 修改包含：
+>   1. `CLASSES\WAGON.SC.XML`：`max_load="1000"` -> `10000`
+>   2. `SUBAI\CREATE_FOOD_MULE_BIG.VS`：`.CreateMuleFood(1000)` -> `10000`
+>   3. `SUBAI\CREATE_GOLD_MULE_BIG.VS`：`.CreateMuleGold(1000)` -> `10000`
+>   4. `SUBAI\WAGON_LOADFOODBIG.VS`：`.LoadFood(1000)` -> `10000`
+>   5. `SUBAI\WAGON_LOADGOLDBIG.VS`：`.LoadGold(1000)` -> `10000`
+>   6. `COMMANDS.XML`：按鈕 rollover 提示由 1000 改為 10000
+> - 遵守無備份目錄、100% 精確反轉（`marker.Originals` 快照還原）與三語在地化原則。
+> - SelfTest 47 組測試（1014+ 斷言）全數全綠通過。
+
+## 交接事項：2026-09-04 運糧馬／騾子編入英雄編隊與護衛陣形功能（ISSUE-075）
+
+> ⏳ **已修碼 · 待實測（2026-09-04）**：
+> - 經逆向分析 `Celtic kings.exe` 與 VS 腳本，找出運糧馬無法編隊的根因並非引擎或腳本阻擋，而是 `CLASSES\WAGON.SC.XML` 的 `<nodefcmdinherit/>` 與 `<defaultcmd target="Unit"><cmd name="follow"/></defaultcmd>` 將右鍵點擊英雄吃成跟隨（follow）。
+> - 陣形護衛：`FORMATIONS.XML` 原版未為 `Wagon` 定位而預設排在 `FrontLine="1"` 最前線送死，修復將其置於陣形核心 `CentralBlock="1"`（與 `Peasant` 同列），受大軍護衛並供軍隊行進間就近進食補糧。
+> - 完整實作「遊戲設定」分頁勾選框、CLI `--mule-army=on|off`、`data.pak` 原始檔案快照與 100% 逐位元組精確反轉。
+> - 擴充 SelfTest 第 47 組測試，47 組測試全綠通過，CLI smoke test 驗證合規。
+
+### 1. 逆向定位與根因
+- `CVXUnit::AttachTo`（`0x0050BC60`）：底層引擎純檢查 Unit 物件指標，Wagon（`0x00515A60` 虛擬函式表）完全合規。
+- `SUBAI\UNIT_ATTACH_VERIFY.VS`：檢查 `.AsUnit()`、`!IsEnemy()`、`!.HasFreedom`，Wagon 均通過。
+- `CLASSES\WAGON.SC.XML`：因 `<nodefcmdinherit/>`（`[class+0xCA]=1`），C++ 引擎跳過父類別 `Unit` 的預設指令表；而自身又僅定義 `target="Unit"` 為 `follow`。英雄也是 `Unit`，右鍵派送直接解析為跟隨。
+- **解法**：在 `WAGON.SC.XML` 的 `target="Unit"` 前注入 `<defaultcmd target="Hero"><cmd name="attach"/></defaultcmd>`；並在 `FORMATIONS.XML` 各陣形中加入 `<Class Name="Wagon" CentralBlock="1"/>`。
+
+### 2. 實作變更清冊
+- **核心轉換**：`src/CKToolkit/Core/Trainer/GameRulesModifier.cs` 新增 `ApplyMuleHeroArmy` / `RemoveMuleHeroArmy` 及 `ApplyMuleFormation` / `RemoveMuleFormation`。
+- **快照與反轉**：`TrainerInstaller.CandidateEntries` 納入 `FORMATIONS.XML`；安裝時當 `AllowMuleHeroArmy` 啟用，自動快照至 `marker.Originals`，在 `Uninstall` 與 `Normalise` 時 100% 逐位元組還原。
+- **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `AllowMuleHeroArmy`；`PatchPipeline.TrainerMarkerMatchesConfig` 比對 `allow_mule_army` 標記。
+- **GUI 頁面**：`src/CKToolkit/Gui/GameSettingsPage.cs` 新增「允許運糧馬編入英雄隊伍」勾選框與說明。
+- **CLI 指令**：`src/CKToolkit/Cli/CliHost.GameSettings.cs` 支援 `settings set --mule-army=on|off` 與 `settings get` 顯示。
+- **I18n**：`strings.zh-TW.json`、`strings.zh-CN.json`、`strings.en.json` 新增對應標籤與說明（繁中、簡中、英文），鍵集 100% 一致。
+- **測試**：`src/CKToolkit.SelfTest/Program.cs` Group 47 全面覆蓋，全套測試全綠。
+
+---
 
 ## 交接事項：2026-09-04 版本升級至 v1.0.5 與發布作業
 

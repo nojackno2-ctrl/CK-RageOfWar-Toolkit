@@ -970,6 +970,8 @@ public sealed class PatchPipeline
         var expectedGameSettings = new List<string>();
         if (config.GameSettings.AllowVikingLordHeroArmy) expectedGameSettings.Add("allow_viking_lord_army");
         if (config.GameSettings.AllowLiberatiHeroArmy) expectedGameSettings.Add("allow_liberati_army");
+        if (config.GameSettings.AllowMuleHeroArmy) expectedGameSettings.Add("allow_mule_army");
+        if (config.GameSettings.WagonCapacity10k) expectedGameSettings.Add("wagon_capacity_10k");
 
         return marker.Cheats.SequenceEqual(expectedCheats, StringComparer.Ordinal) &&
                marker.Tweaks.Count == expectedTweaks.Count &&
