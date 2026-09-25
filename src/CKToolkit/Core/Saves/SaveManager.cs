@@ -412,6 +412,16 @@ public static class SaveManager
             return Result<PlayerProfileData>.Fail(Strings.Get("Save_Error_PlayerColor"), ExitCodes.InvalidArgs);
         if (update.Race is < 0 or > 2)
             return Result<PlayerProfileData>.Fail(Strings.Get("Save_Error_PlayerRace"), ExitCodes.InvalidArgs);
+        try
+        {
+            Encoding strictEncoding = Encoding.GetEncoding(
+                1252, EncoderFallback.ExceptionFallback, DecoderFallback.ReplacementFallback);
+            _ = strictEncoding.GetBytes(displayName);
+        }
+        catch (EncoderFallbackException)
+        {
+            return Result<PlayerProfileData>.Fail(Strings.Get("Save_Error_PlayerNameEncoding"), ExitCodes.InvalidArgs);
+        }
 
         Result<PlayerProfileData> currentResult = GetPlayerProfile(gameDir, profile);
         if (!currentResult.Success || currentResult.Value is null)
@@ -426,6 +436,7 @@ public static class SaveManager
         try
         {
             Encoding encoding = Encoding.GetEncoding(1252);
+            using IDisposable operationLock = PlayerIniLock.Acquire(playerIniPath);
             IniFile ini = IniFile.FromText(encoding.GetString(File.ReadAllBytes(playerIniPath)));
             string color = update.Color.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string race = update.Race.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -530,7 +541,7 @@ public static class SaveManager
             {
                 manifest = JsonSerializer.Deserialize<SaveArchiveManifest>(manifestStream, ManifestJsonOptions);
             }
-            if (manifest is null || manifest.Files is null ||
+            if (manifest is null || manifest.Files is null || manifest.Files.Any(file => file is null) ||
                 manifest.FormatVersion != ArchiveFormatVersion || manifest.Product != ArchiveProduct)
                 return Result<ArchivePayload>.Fail(Strings.Get("Save_Error_ArchiveInvalid"));
             if (!IsSimpleName(manifest.SourceProfile) || !IsSimpleName(manifest.SaveFileName) ||
@@ -573,7 +584,7 @@ public static class SaveManager
         SaveArchiveManifest manifest,
         long maximumLength)
     {
-        SaveArchiveFile? descriptor = manifest.Files.SingleOrDefault(file => file.Entry == entry.FullName);
+        SaveArchiveFile? descriptor = manifest.Files.SingleOrDefault(file => file is not null && file.Entry == entry.FullName);
         if (descriptor is null || entry.Length < 0 || entry.Length > maximumLength || descriptor.Length != entry.Length)
             throw new InvalidDataException(Strings.Get("Save_Error_ArchiveInvalid"));
 
@@ -611,13 +622,16 @@ public static class SaveManager
     private static string ChooseAvailableSaveFileName(string profileDirectory, string preferredName)
     {
         string preferredPath = Path.Combine(profileDirectory, preferredName);
-        if (!File.Exists(preferredPath)) return preferredName;
+        if (!File.Exists(preferredPath) && !File.Exists(preferredPath + ".bmp")) return preferredName;
 
         var usedNumbers = new HashSet<int>();
         foreach (string path in Directory.EnumerateFiles(profileDirectory))
         {
-            if (!Path.GetExtension(path).Equals(".adv", StringComparison.OrdinalIgnoreCase)) continue;
-            if (int.TryParse(Path.GetFileNameWithoutExtension(path), out int number) && number > 0)
+            string name = Path.GetFileName(path);
+            if (name.EndsWith(".adv.bmp", StringComparison.OrdinalIgnoreCase))
+                name = name[..^4];
+            if (!Path.GetExtension(name).Equals(".adv", StringComparison.OrdinalIgnoreCase)) continue;
+            if (int.TryParse(Path.GetFileNameWithoutExtension(name), out int number) && number > 0)
                 usedNumbers.Add(number);
         }
         int slot = 1;

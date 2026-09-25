@@ -476,7 +476,23 @@ public sealed class ProfilerPage : UserControl
     {
         if (_cancellation is not null) return;
 
-        string gameDir = GameDirProvider?.Invoke().Trim() ?? string.Empty;
+        string gameDir;
+        string output;
+        ToolkitConfig? config;
+        try
+        {
+            gameDir = GameDirProvider?.Invoke().Trim() ?? string.Empty;
+            output = EnsureOutputDirectory();
+            config = ConfigProvider?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            string error = Strings.Get("Error_GeneralFailure", ex.Message);
+            AppendReport(error + Environment.NewLine);
+            LogMessage?.Invoke(error);
+            MessageBox.Show(this, error, Strings.Get("Gui_ErrorTitle"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
         // 只有「由工具啟動遊戲」非要有效的遊戲目錄不可；另外兩種模式是掛到別人開的
         // 行程上，沒有目錄照樣記錄得到（只是執行清單會少一份，不影響證據本身）。
         if (mode == DiagnosticSession.AttachMode.LaunchGame && !GamePaths.IsGameDir(gameDir))
@@ -496,9 +512,6 @@ public sealed class ProfilerPage : UserControl
         bool fullDump = _fullDump.Checked && catchCrash;
         int speedMultiplier = CurrentSpeedMultiplier();
         var speedMethod = _speedMethod.SelectedIndex == 1 ? GameSpeed.Method.Console : GameSpeed.Method.Hotkey;
-        string output = EnsureOutputDirectory();
-        ToolkitConfig? config = ConfigProvider?.Invoke();
-
         _cancellation = new CancellationTokenSource();
         CancellationTokenSource cancellation = _cancellation;
         SetBusy(true);

@@ -233,6 +233,14 @@ public sealed class ToolkitConfig
     public static ToolkitConfig FromJson(string json)
     {
         var config = JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+        config.Perf ??= new();
+        config.Lang ??= new();
+        config.Trainer ??= new();
+        config.GameSettings ??= new();
+        config.Trainer.Cheats ??= [];
+        config.Trainer.Tweaks ??= [];
+        config.Trainer.ScopedTweaks ??= [];
+        config.MigrationsApplied ??= [];
         CleanRetiredTweaks(config);
         ClampTweakValues(config);
         ResolveConflictingTrainerBindings(config);

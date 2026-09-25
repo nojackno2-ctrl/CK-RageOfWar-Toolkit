@@ -298,6 +298,7 @@ public static partial class CliHost
             ("perf", "get") => 2,
             ("lang", "list" or "uninstall") => 2,
             ("trainer", "list-cheats" or "list-tweaks" or "apply") => 2,
+            ("settings" or "gamesettings", "get") => 2,
             _ => 0,
         };
     }

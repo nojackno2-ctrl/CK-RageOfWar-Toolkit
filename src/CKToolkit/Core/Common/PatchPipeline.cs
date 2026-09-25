@@ -426,6 +426,7 @@ public sealed class PatchPipeline
         stagedFiles[GameFile.VxSettings] = IniEncoding.GetBytes(ini.ToText());
 
         var report = new ApplyReport { GameDir = gameDir, GameBuild = build };
+        var changedFiles = new List<GameFile>();
         foreach (GameFile file in Enum.GetValues<GameFile>())
         {
             string fileName = PatchState.GetFileName(file);
@@ -437,17 +438,15 @@ public sealed class PatchPipeline
                 Layered = layered[file]
             };
 
-            if (!changed) continue;
+            if (changed) changedFiles.Add(file);
+        }
 
-            Result writeResult = WriteAtomic(Path.Combine(gameDir, fileName), stagedFiles[file], fileName);
-            if (!writeResult.Success)
-            {
-                string error = report.FilesWritten.Count == 0
-                    ? writeResult.ErrorMessage!
-                    : Strings.Get("Error_ApplyPartialFailure", fileName, string.Join(", ", report.FilesWritten));
-                return Result<ApplyReport>.Fail(error, writeResult.ExitCode);
-            }
-
+        Result batchWrite = WriteBatchAtomic(gameDir, changedFiles, stagedFiles, rawFiles);
+        if (!batchWrite.Success)
+            return Result<ApplyReport>.Fail(batchWrite.ErrorMessage!, batchWrite.ExitCode);
+        foreach (GameFile file in changedFiles)
+        {
+            string fileName = PatchState.GetFileName(file);
             report.Files[fileName].Written = true;
             report.FilesWritten.Add(fileName);
         }
@@ -698,6 +697,7 @@ public sealed class PatchPipeline
         }
 
         var report = new RestoreReport { GameDir = gameDir };
+        var changedFiles = new List<GameFile>();
         foreach (GameFile file in Enum.GetValues<GameFile>())
         {
             string fileName = PatchState.GetFileName(file);
@@ -709,12 +709,15 @@ public sealed class PatchPipeline
                 State = "vanilla"
             };
 
-            if (!changed) continue;
+            if (changed) changedFiles.Add(file);
+        }
 
-            Result writeResult = WriteAtomic(Path.Combine(gameDir, fileName), stagedFiles[file], fileName);
-            if (!writeResult.Success)
-                return Result<RestoreReport>.Fail(writeResult.ErrorMessage!, writeResult.ExitCode);
-
+        Result batchWrite = WriteBatchAtomic(gameDir, changedFiles, stagedFiles, rawFiles);
+        if (!batchWrite.Success)
+            return Result<RestoreReport>.Fail(batchWrite.ErrorMessage!, batchWrite.ExitCode);
+        foreach (GameFile file in changedFiles)
+        {
+            string fileName = PatchState.GetFileName(file);
             report.Files[fileName].Restored = true;
             report.RestoredFiles.Add(fileName);
         }
@@ -821,6 +824,10 @@ public sealed class PatchPipeline
             {
                 matchesConfig = TrainerMarkerMatchesConfig(liveBytes, effectiveConfig);
             }
+            if (matchesConfig)
+            {
+                matchesConfig = MatchesExpectedPayload(f, liveBytes, effectiveConfig, gameDir);
+            }
 
             string stateStr = fileState.Kind switch
             {
@@ -852,6 +859,64 @@ public sealed class PatchPipeline
         }
 
         return Result<VerificationReport>.Ok(report, warnings);
+    }
+
+    private bool MatchesExpectedPayload(
+        GameFile file, byte[] liveBytes, ToolkitConfig config, string gameDir)
+    {
+        try
+        {
+            Result<byte[]> normalised = PatchState.Normalise(file, liveBytes);
+            if (!normalised.Success || normalised.Value is null) return false;
+            byte[] expected = normalised.Value;
+
+            switch (file)
+            {
+                case GameFile.Exe:
+                    foreach (IPatchModule module in _modules) module.ApplyExe(ref expected, config);
+                    break;
+
+                case GameFile.Launcher:
+                    foreach (IPatchModule module in _modules) module.ApplyLauncher(ref expected, config);
+                    break;
+
+                case GameFile.DataPak:
+                {
+                    HmmPak pak = HmmPak.FromBytes(expected);
+                    foreach (IPatchModule module in _modules) module.ApplyDataPak(pak, config);
+                    expected = pak.ToBytes();
+                    break;
+                }
+
+                case GameFile.VxSettings:
+                {
+                    IniFile ini = IniFile.FromText(IniEncoding.GetString(expected));
+                    IReadOnlyList<string>? resolutions = null;
+                    string dataPath = Path.Combine(gameDir, GamePaths.DataPakFileName);
+                    if (File.Exists(dataPath))
+                    {
+                        resolutions = Resolutions.GetAvailableResolutionsList(
+                            HmmPak.FromBytes(File.ReadAllBytes(dataPath)));
+                    }
+                    foreach (IPatchModule module in _modules)
+                        module.ApplyVxSettings(ini, config, resolutions);
+                    expected = IniEncoding.GetBytes(ini.ToText());
+                    break;
+                }
+
+                // Language-pack payloads include locally rasterised font bytes. Their
+                // manifest is already value-aware and re-rasterising during verify
+                // would make a read-only check depend on installed fonts.
+                case GameFile.LocalPak:
+                    return true;
+            }
+
+            return liveBytes.AsSpan().SequenceEqual(expected);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static List<string> GetExpectedPatchesForFile(GameFile file, ToolkitConfig config)
@@ -985,28 +1050,72 @@ public sealed class PatchPipeline
 
     // ---- 先寫 .cktmp 再取代之安全寫檔輔助 ----------------------------------
 
-    private static Result WriteAtomic(string targetPath, byte[] data, string fileName)
+    internal static Func<string, bool>? BatchWriteFailureForTests { get; set; }
+
+    private static Result WriteBatchAtomic(
+        string gameDir,
+        IReadOnlyList<GameFile> changedFiles,
+        IReadOnlyDictionary<GameFile, byte[]> stagedFiles,
+        IReadOnlyDictionary<GameFile, byte[]> originals)
     {
-        string tempPath = targetPath + ".cktmp";
+        if (changedFiles.Count == 0) return Result.Ok();
+
+        string transaction = Guid.NewGuid().ToString("N");
+        var tempPaths = new Dictionary<GameFile, string>();
+        var committed = new List<GameFile>();
         try
         {
-            File.WriteAllBytes(tempPath, data);
-            File.Move(tempPath, targetPath, overwrite: true);
+            // Prepare every complete replacement before touching any live file.
+            foreach (GameFile file in changedFiles)
+            {
+                string target = Path.Combine(gameDir, PatchState.GetFileName(file));
+                string temp = target + ".cktmp-" + transaction;
+                File.WriteAllBytes(temp, stagedFiles[file]);
+                tempPaths[file] = temp;
+            }
+
+            foreach (GameFile file in changedFiles)
+            {
+                string target = Path.Combine(gameDir, PatchState.GetFileName(file));
+                if (BatchWriteFailureForTests?.Invoke(PatchState.GetFileName(file)) == true)
+                    throw new IOException("Injected batch-write failure.");
+                File.Move(tempPaths[file], target, overwrite: true);
+                committed.Add(file);
+            }
             return Result.Ok();
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-            return Result.Fail(
-                Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
-                ExitCodes.FileLocked);
+            var rollbackFailures = new List<string>();
+            foreach (GameFile file in committed.AsEnumerable().Reverse())
+            {
+                string fileName = PatchState.GetFileName(file);
+                string target = Path.Combine(gameDir, fileName);
+                string rollback = target + ".cktmp-rollback-" + transaction;
+                try
+                {
+                    File.WriteAllBytes(rollback, originals[file]);
+                    File.Move(rollback, target, overwrite: true);
+                }
+                catch (Exception rollbackError)
+                {
+                    rollbackFailures.Add($"{fileName}: {rollbackError.Message}");
+                    try { if (File.Exists(rollback)) File.Delete(rollback); } catch { }
+                }
+            }
+
+            string detail = rollbackFailures.Count == 0
+                ? Strings.Get("Error_BatchWriteFailedRolledBack", ex.Message)
+                : Strings.Get("Error_BatchWriteRollbackFailed", ex.Message, string.Join("; ", rollbackFailures));
+            return Result.Fail(detail, ExitCodes.FileLocked);
         }
-        catch (UnauthorizedAccessException ex)
+        finally
         {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-            return Result.Fail(
-                Strings.Get("Error_FileLocked", fileName) + $" ({ex.Message})",
-                ExitCodes.FileLocked);
+            foreach (string temp in tempPaths.Values)
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch { }
+            }
         }
     }
+
 }

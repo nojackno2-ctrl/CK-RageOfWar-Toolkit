@@ -227,9 +227,15 @@ public sealed class LanguagePage : UserControl
                 _font.Items.Add(face);
             }
 
-            if (string.IsNullOrWhiteSpace(_font.Text) || !_font.Items.Contains(_font.Text))
+            if (string.IsNullOrWhiteSpace(_font.Text))
             {
                 _font.Text = string.IsNullOrWhiteSpace(languagePack.Meta.Font.Face) ? "微軟正黑體" : languagePack.Meta.Font.Face;
+            }
+            else if (!fontFaces.Contains(_font.Text, StringComparer.OrdinalIgnoreCase))
+            {
+                // The list is only a set of suggestions. Preserve an explicitly configured
+                // system font even when the current language pack did not advertise it.
+                _font.Items.Add(_font.Text);
             }
         }
         else _details.Text = Strings.Get("Gui_Lang_NoPack");

@@ -22,6 +22,7 @@ namespace ckperf {
 
 static PVOID         g_veh = nullptr;
 static volatile LONG g_reportCount = 0;
+static volatile LONG g_repairedReportCount = 0;
 static volatile LONG g_inHandler = 0;
 
 // Counters for the exceptions we deliberately do not report, so the log can still
@@ -389,9 +390,9 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
         if (firstAtSite) {
             char where[160];
             DescribeAddress(faultEip, where, sizeof(where));
-            LONG idx = InterlockedIncrement(&g_reportCount);
+            LONG idx = InterlockedIncrement(&g_repairedReportCount);
             EXCEPTION_POINTERS* reportEp = ep->ContextRecord ? &s_preRepairEp : ep;
-            if (idx <= g_cfg.maxReports) WriteReport(reportEp, idx, /*withDump=*/false);
+            if (idx <= g_cfg.maxReports) WriteReport(reportEp, g_cfg.maxReports + idx, /*withDump=*/false);
             Logf("REPAIRED an invalid VM lvalue assignment: eip 0x%08X %s -- "
                  "faulting store suppressed, normal epilogue resumed.",
                  (unsigned)faultEip, where);
@@ -408,9 +409,9 @@ static LONG CALLBACK VehHandler(EXCEPTION_POINTERS* ep) {
         if (firstAtSite) {
             char where[160];
             DescribeAddress(faultEip, where, sizeof(where));
-            LONG idx = InterlockedIncrement(&g_reportCount);
+            LONG idx = InterlockedIncrement(&g_repairedReportCount);
             EXCEPTION_POINTERS* reportEp = ep->ContextRecord ? &s_preRepairEp : ep;
-            if (idx <= g_cfg.maxReports) WriteReport(reportEp, idx, /*withDump=*/false);
+            if (idx <= g_cfg.maxReports) WriteReport(reportEp, g_cfg.maxReports + idx, /*withDump=*/false);
             Logf("REPAIRED a new null-access site: eip 0x%08X %s -- supported recovery selected, execution resumed.",
                  (unsigned)faultEip, where);
         }
@@ -468,8 +469,8 @@ void CrashUninstall() {
         RemoveVectoredExceptionHandler(g_veh);
         g_veh = nullptr;
     }
-    Logf("crash handler removed. fatal reports=%d, non-fatal exceptions seen=%d",
-         (int)g_reportCount, (int)g_benignCount);
+    Logf("crash handler removed. fatal reports=%d, repaired-site reports=%d, non-fatal exceptions seen=%d",
+         (int)g_reportCount, (int)g_repairedReportCount, (int)g_benignCount);
 }
 
 } // namespace ckperf

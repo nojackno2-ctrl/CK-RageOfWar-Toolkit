@@ -29,17 +29,27 @@
 
 | Issue 編號 | 問題標題 | 狀態 | 觸發／實機測試方式 | 預期結果 / 驗收標準 |
 |---|---|:---:|---|---|
+| [ISSUE-098](#issue-098-語言分頁會靜默覆寫已儲存的自訂字型) | 自訂字型保存 | ⏳ 待實測 | 選自訂字型、切換 UI 語系、關閉重開。 | FontFace 全程保持。 |
+| [ISSUE-097](#issue-097-新增的-settings-cli-未納入嚴格選項檢查與三語說明) | settings CLI 嚴格解析與 help | ⏳ 待實測 | 執行 `settings get --typo --json` 與三語 `--help`。 | typo 拒絕；help 含 get/set。 |
+| [ISSUE-096](#issue-096-分析器開始前的設定快照例外位於錯誤處理之外) | 分析器前置例外處理 | ⏳ 待實測 | 留下非法效能設定後按開始分析。 | 顯示錯誤、不啟動、不閃退。 |
+| [ISSUE-095](#issue-095-合法-json-內的-null-子設定會使-gui-啟動失敗) | null 子設定安全載入 | ⏳ 待實測 | 以四個子設定為 null 的 JSON 啟動 GUI。 | GUI 可啟動並安全正規化。 |
+| [ISSUE-094](#issue-094-匯入存檔選槽忽略孤立的同名預覽圖) | 孤立預覽圖槽位 | ⏳ 待實測 | 留 `3.adv.bmp`、匯入有／無預覽封存。 | 改選完整空槽且不覆寫舊圖。 |
+| [ISSUE-093](#issue-093-玩家名稱無法以-windows-1252-表示時會靜默寫成問號) | 玩家名稱無損編碼 | ⏳ 待實測 | 將名稱設為 Windows-1252 無法表示的字。 | 明確拒絕，player.ini 不變。 |
+| [ISSUE-092](#issue-092-cksave-manifest-含-null-檔案描述時拋出未處理例外) | 畸形 cksave 防護 | ⏳ 待實測 | 匯入 `files:[null]` 封存。 | 回可處理錯誤，profile 零寫入。 |
+| [ISSUE-091](#issue-091-外部語言包自動探索繞過匯入安全驗證) | 外部語言包探索安全 | ⏳ 待實測 | 手放 traversal／缺檔／reparse 語言包。 | 壞包不列出、不讀包外檔案。 |
+| [ISSUE-090](#issue-090-腳本通道-probe-把拒絕與故障狀態當成可用) | Probe 狀態判定 | ⏳ 待實測 | 令通道回 Rejected／Faulted／TimedOut。 | 面板不標 ready，仍可安全備援。 |
+| [ISSUE-089](#issue-089-注入失敗後忽略進入點還原失敗可能留下無限空轉行程) | 注入失敗回復 | ⏳ 待實測 | 故障注入及入口還原。 | 不留下 EB FE 空轉程序。 |
+| [ISSUE-088](#issue-088-非-ascii-使用者目錄會使-loadlibrarya-注入路徑編碼錯誤) | Unicode DLL 注入 | ⏳ 待實測 | 中文 Windows 使用者路徑下 launch／attach。 | `LoadLibraryW` 注入成功。 |
+| [ISSUE-087](#issue-087-腳本管線兩端缺少完整-io-deadline單一連線可永久阻塞) | 管線完整 deadline | ⏳ 待實測 | 部分 header/body、不讀回覆、關面板。 | 限時返回且下一請求可用。 |
+| [ISSUE-086](#issue-086-遠端-loadlibrarya-逾時後仍釋放其參數記憶體) | 遠端載入逾時生命週期 | ⏳ 待實測 | 人為延遲 LoadLibraryW 超過 15 秒。 | 無遠端 UAF，結果明確不確定。 |
+| [ISSUE-085](#issue-085-腳本通道權杖被持久寫入-ckperfini) | 權杖零落盤 | ⏳ 待實測 | launch／attach 後檢查 runtime、log、manifest。 | 無 token，通道仍可用。 |
+| [ISSUE-084](#issue-084-腳本-mailbox-逾時競爭會錯配漏執行或永久-busy) | mailbox 逾時競爭 | ⏳ 待實測 | 快速連按並製造超過五秒腳本。 | 不錯配、不重跑、不永久 Busy。 |
+| [ISSUE-083](#issue-083-修改器-marker-缺乏語意驗證還原可遺留修改或刪除原廠-pak-項目) | trainer marker fail-closed | ⏳ 待實測 | 使用空／壞／含刪除清單 marker 還原。 | 明確拒絕且 data.pak 零寫入。 |
+| [ISSUE-082](#issue-082-gui-套用繞過損毀設定檔的-fail-closed-保護) | GUI 損毀設定保護 | ⏳ 待實測 | 損毀 JSON 後按套用。 | 設定與五檔零寫入。 |
+| [ISSUE-081](#issue-081-原生報告額度被啟動修復例外耗盡後續故障現場無法保存) | 原生報告配額分離 | ⏳ 待實測 | 先產生大量可恢復例外，再觸發未修復 fault。 | 真正 fault 仍有報告額度。 |
+| [ISSUE-080](#issue-080-腳本通道啟動自測在初始化執行緒過早呼叫引擎產生例外後永久停用) | 主執行緒延後自測 | ⏳ 待實測 | 入口前注入及對局後 attach。 | 啟動無自測 AV，進對局後通道啟用。 |
+| [ISSUE-039](#issue-039-玩家統計-gui-會截掉未滿一小時時間兩個-writer-可互相覆蓋) | player.ini 跨程序共同鎖 | ⏳ 待實測 | GUI 與 CLI 同時改個資／統計。 | 寫入序列化，兩邊更新不互蓋。 |
 | [ISSUE-078](#issue-078-額外戰役劇本對話與任務翻譯缺漏修復長註解略過與-mojibake-查表失敗達成-100-中文化) | **額外戰役／劇本對話與任務翻譯缺漏（修復長註解略過與 Mojibake 查表失敗，達成 100% 中文化）** | ⏳ 待實測 | ①於語言分頁套用繁體中文或簡體中文語言包。②進入自訂戰役或劇本（例如 Return to the Throne、Invaders、Defenders、The Fall of Avalon、Ascendency）。③檢視戰役開場與對話（如 Return to the Throne 祭司與國王對話）、任務目標提示、以及事件訊息。④確認先前顯示為英文或西班牙文之 350+ 條對話已 100% 呈現為中文字幕。⑤檢查各語言包之額外戰役均正確在地化。⑥反安裝語言包後，local.pak 逐位元組還原原版。 | ②③④戰役全部 415 個 XML 檔案共 3,085 條文字 100% 完整中文化，不再出現英文或西班牙文未翻譯語句。⑤全語言包 118 個模板 997 條目全數翻譯。⑥反安裝後 local.pak 逐位元組還原。 |
-| [ISSUE-077](#issue-077-單位編入英雄隊伍之附著半徑硬性限制支援部隊遠距全圖瞬時編入英雄新增遊戲設定選項) | **單位編入英雄隊伍之附著半徑硬性限制（支援部隊遠距／全圖瞬時編入英雄，新增「遊戲設定」選項）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許部隊遠距／全圖瞬時編入英雄」，按「一鍵套用」。②進入遊戲，選取距離英雄極遠（超出視野 600 像素與腳本 1500 像素，甚至全圖任意角落）之友方單位，對英雄點擊右鍵。③觀察部隊是否在右鍵點擊瞬間立即編入英雄隊伍（英雄頭像下方立即出現兵種計數與加成），並自動開始向英雄位置移動靠攏。④確認當英雄隊伍帶兵數達上限時，遠距點擊依然正確拒絕編入。⑤取消勾選後套用，`verify` 回報原版狀態。 | ②③部隊無須先跑到英雄跟前，右鍵瞬間立即編入英雄隊伍並自動移動歸隊。④隊伍滿員時正確拒絕。⑤取消勾選後 EXE 與 data.pak 逐位元組還原原版。 |
-| [ISSUE-076](#issue-076-運糧馬運載上限與出產量提升至-10000修改大容量生產按鈕與裝載指令新增遊戲設定選項) | **運糧馬／運金馬運載上限與出產量提升至 10,000（修改大容量生產按鈕與裝載指令，新增「遊戲設定」選項）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「運糧馬／運金馬運載上限提升至 10,000」，按「一鍵套用」。②進入遊戲，在城鎮或要塞點擊「製造運糧馬（大）」，確認初始扣糧與出產運糧馬身上直接攜帶 10,000 食物（若城鎮糧不足則全扣）。③中途對村莊或糧倉執行裝載指令，確認可裝載至 10,000。④取消勾選後套用，`verify` 回報原版狀態，按鈕與上限恢復為 1,000。 | ②③運糧馬容量與生產按鈕裝載量提升至 10,000。④取消勾選後 data.pak 逐位元組還原原版。 |
-| [ISSUE-075](#issue-075-運糧馬騾子無法編入英雄編隊解除右鍵跟隨限制並加入中央陣形護衛新增遊戲設定選項) | **運糧馬／騾子無法編入英雄編隊（解除右鍵跟隨限制並加入中央陣形護衛，新增「遊戲設定」選項）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許運糧馬編入英雄隊伍」，按「一鍵套用」。②進入遊戲，在村莊或要塞購買或生產運糧馬（或商隊騾子）與一名英雄。③將運糧馬選取後對英雄按右鍵（或全選後按 F 鍵編隊）。④觀察運糧馬是否成功加入英雄部隊、跟隨英雄移動並排入陣形內部受護衛，且英雄軍隊可行進間進食運糧馬攜帶之糧草。⑤取消勾選後套用，`verify` 回報原版狀態。 | ②③運糧馬成功編入英雄隊伍，置於 CentralBlock 受保護，部隊可行走進食。④取消勾選後 data.pak 逐位元組還原原版。 |
-| [ISSUE-074](#issue-074-維京領主與自由鬥士無法編入英雄隊伍解除自由之身限制新增遊戲設定分頁) | **維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）** | ⏳ 待實測 | ①在「遊戲設定」分頁勾選「允許維京領主編入英雄隊伍」與「允許自由鬥士編入英雄隊伍」，按「一鍵套用」。②進入遊戲，招募或生成維京領主／自由鬥士與一名英雄。③將英雄與維京領主／自由鬥士框選，按 F 鍵或右鍵點擊英雄編隊。④觀察單位是否成功進入英雄陣形，且保留吸血打擊／踐踏傷害。⑤在遊戲設定頁取消勾選再套用，`verify` 回報原版狀態。 | ②③單位成功編入英雄隊伍，享受陣形防禦與經驗分享，並保留專屬攻擊特性。④取消勾選後 data.pak 逐位元組還原原版。 |
-| [ISSUE-073](#issue-073-13-個-scoped-hook-用-player-指標比對本機玩家我方物件永遠被判成敵方) | **敵我分流比錯欄位，我方永遠被判成敵方（所有 scoped 調整只會套到敵方值）** | ⏳ 待實測 | ①修改器頁重新「套用」一次。②把任一項的「我方」與「敵方」設成明顯不同的值（例如我方聚落金錢產量 100000、敵方保持原值）。③進入單人戰役觀察我方是否真的套到我方數值。④`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方數值確實生效且與敵方互不影響（這是 ISSUE-069／071／072 共同的最後一關）。④verify 全綠。 |
-| [ISSUE-072](#issue-072-train_speedresearch_speed-掛在原版腳本用不到的-objprogress-多載上生產與研究倍率完全沒有效果) | **生產與研究倍率掛錯腳本入口，原版兵營訓練完全不受影響** | ⏳ 待實測 | ①修改器頁重新「套用」一次（必要：EXE 內是舊世代 helper）。②進入單人戰役，在兵營／神殿下單訓練一個單位，比對進度條秒數（自 20× 時 15000ms 的訓練應約 750ms）。③在有研究的建築下單研究，同樣比對。④把「敵方」設成 1× 再套用，觀察敵方 AI 出兵速度沒有變快。⑤`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ②③我方訓練與研究確實依倍率加速（不再毫無變化）。④敵我互不影響。⑤verify 全綠。全程單人戰役不得閃退。 |
-| ISSUE-070 | **「永久規則調整」的重設按鈕沒有清掉分流值** | ⏳ 待實測 | 在分流表填幾個非原版值（含要塞／村莊四欄），按「重設全部調整（含分流）」，然後套用並 `verify`。 | 全域表與兩張分流表同時回到原始值；套用後 `.cktw` 被移除、EXE 逐位元組回原版。下方「分流全部重設為單一值」仍只動分流表、不碰全域欄。 |
-| [ISSUE-069](#issue-069-cktw-的多人守衛在單人模式恆為-false永久規則調整完全不生效) | **`.cktw` 的多人守衛讓 11 個 hook 在任何模式都不生效（永久規則調整完全沒有作用）** | ⏳ 待實測 | ①在修改器頁重新「套用」一次（必要：舊 EXE 的 helper 是上一版）。②進入單人戰役，觀察已設定的分流值：生產速度、我方聚落金錢／食物產量、人口成長、英雄帶兵上限、我方單位是否不進食。③把同一項的「敵方」設成明顯不同的值再套用，比較敵我。④佔領一座敵方聚落，看下一個收入週期是否切換到我方數值。⑤在修改器頁把分流全部清成原始值再套用，確認回到原版。⑥`verify` 應回報 `scoped_tweaks` 且 `matchesConfig=True`。 | ①②我方設定確實生效（不再毫無變化）。③敵我數值互不影響。④佔領後下一個收入週期改用我方 scope。⑤`.cktw` 移除、EXE 逐位元組回原版。⑥verify 全綠；若忘記重套，verify 會因 helper 世代不符而回報不相符。 |
-| [ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) | **修改器改用執行期腳本通道，徹底繞開引擎 20 個硬編按鍵的上限** | ⏳ 待實測 | ①修改器頁「啟動遊戲」，看最新的 `ckperf-*.log`（`%LocalAppData%\CKToolkit\stability`）是否出現 `script channel: entry points verified and self-test passed` 與 `listening on \\.\pipe\ckperf-script-<pid>`。②進入單人戰役後開「遊戲中面板」，逐一點擊每一顆按鈕。③把地圖捲到目標位於畫面中央，游標停在目標上再點「在滑鼠位置生成單位」。④退到主選單再點任一按鈕。⑤改從 Steam 開遊戲，再開面板。 | ①兩行都出現；簽章不符時要有明確的停用原因而不是靜默。②面板列出全部 18 顆按鈕，狀態列顯示「已連線（腳本通道，全部作弊可用）」，每顆都出現 `[修改器] …` 回饋且數值確實改變。③單位生成在畫面中央而非面板邊緣，面板顯示「已生成於 (x, y)」。④回報「尚未進入對局」且遊戲不當機。⑤面板自動掛載並同樣可用。⑥全程結束後 `data.pak` 的 `SCDEBUG.XML` 與 `verify` 結果不因為使用面板而改變。 |
-| [ISSUE-004](#issue-004-第三方自製語言包匯出與匯入上手機制) | **第三方自製語言包匯出與匯入上手機制** | ⏳ 待實測 | 於語言分頁點擊「匯出翻譯範本」，修改一筆字串後透過「匯入語言包」匯入。 | 正確識別新語言包、安裝至 `local.pak` 並在遊戲中顯示。 |
 | [ISSUE-017](#issue-017-腳本-vm-指派運算子用殘留左值寫穿記憶體本場致命) | **腳本 VM 指派運算子用殘留左值寫穿記憶體（本場致命）** | ⏳ 待實測 | 再次把物件數推到約 3.5 萬，觀察腳本指派運算子處置。 | 8-site 與 return-code-2 自測通過；有 REPAIRED、沒有 `0x005D98BF RUNAWAY`，遊戲繼續正常操作。 |
 | [ISSUE-020](#issue-020-cli-run-的執行配置清單沒有寫在設定的輸出路徑) | **CLI `run` 的執行配置清單沒有寫在設定的輸出路徑** | ⏳ 待實測 | 用 CLI `run` 指定自訂輸出資料夾啟動遊戲。 | `ckrun-config.txt` 與 `ckperf-*.log`、`ckcrash-*.txt` 完整落在同一個資料夾。 |
 | [ISSUE-021](#issue-021-設定的輸出資料夾在真正開跑之前不存在gui-會默默退回桌面) | **設定的輸出資料夾在真正開跑之前不存在，GUI 會默默退回桌面** | ⏳ 待實測 | 在分析器分頁把輸出資料夾填成一個還不存在的路徑並離開輸入框。 | 資料夾立刻被建立；「開啟資料夾」與「瀏覽」都指向該路徑而非桌面。 |
@@ -52,13 +62,6 @@
 | [ISSUE-031](#issue-031-release-provenance-未證明正式-exe-內嵌的-ckperfdll-出自原始碼) | **Release provenance 未證明正式 EXE 內嵌的 ckperf.dll 出自原始碼** | ⏳ 待實測 | 核對正式發布 EXE 內嵌之 `ckperf.dll` 與來源組建 SHA-256 雜湊。 | 二進位雜湊與簽入資產 100% 精確一致，發布流水線具備硬性校驗門檻。 |
 | [ISSUE-032](#issue-032-日文戰役翻譯把遊戲換行控制序列改成-xml-屬性實際換行) | **日文戰役翻譯把遊戲換行控制序列改成 XML 屬性實際換行** | ⏳ 待實測 | 安裝日文語言包後進入主戰役與教學關卡。 | 對話框多行換行排版正確，XML 屬性無 raw linefeeds 遺失現象。 |
 | [ISSUE-033](#issue-033-現有-selftest-對新資料與安全契約存在關鍵漏測) | **現有 SelfTest 對新資料與安全契約存在關鍵漏測** | ⏳ 待實測 | 執行 `dotnet run --project src/CKToolkit.SelfTest` 完整測試套件。 | 39 組測試群組、593+ 檢查點 100% 全綠通過，覆蓋所有資料與安全性邊界。 |
-| [ISSUE-034](#issue-034-手改或舊版設定可繞過-4096x2400-解析度硬上限) | **手改或舊版設定可繞過 4096x2400 解析度硬上限** | ⏳ 待實測 | 手動修改設定為 5K (5120x2880) 或 >4096x2400 後執行 apply。 | Pipeline 核心層嚴格拒絕，5 個目標檔案零磁碟寫入。 |
-| [ISSUE-035](#issue-035-restoreall-後段失敗時前段檔案已被部分還原) | **RestoreAll 後段失敗時前段檔案已被部分還原** | ⏳ 待實測 | 模擬後段檔案被佔用或損壞時執行 apply 或 restore。 | 前段檔案在記憶體驗證失敗後零寫入，無半套用或半還原狀態。 |
-| [ISSUE-036](#issue-036-損壞設定檔-fail-open修改命令仍用預設值寫入) | **損壞設定檔 fail-open，修改命令仍用預設值寫入** | ⏳ 待實測 | 在損壞的 JSON 設定檔下執行 CLI 或 GUI 修改命令。 | Fail-closed 拒絕寫入並回傳錯誤代碼，不抹除既有設定檔。 |
-| [ISSUE-037](#issue-037-第三方語言包-metadata-可造成-ini-注入與資源耗盡) | **第三方語言包 metadata 可造成 INI 注入與資源耗盡** | ⏳ 待實測 | 匯入含 CRLF 的語言包中繼資料或超限 font ranges。 | 嚴格拒絕非法識別字與巨量碼位，避免 INI 注入與 DoS 耗盡。 |
-| [ISSUE-038](#issue-038-語言包-marker-可解析但內容不完整時會被錯判為可安全反轉) | **語言包 marker 可解析但內容不完整時會被錯判為可安全反轉** | ⏳ 待實測 | 對帶有空或損壞 marker 的 local.pak 執行 inspect / uninstall。 | 判定為 Unrecognised 並拒絕猜測卸載，保障原廠檔案零寫入。 |
-| [ISSUE-039](#issue-039-玩家統計-gui-會截掉未滿一小時時間兩個-writer-可互相覆蓋) | **玩家統計 GUI 會截掉未滿一小時時間，兩個 writer 可互相覆蓋** | ⏳ 待實測 | 修改軍事評價並儲存玩家 profile 統計資料。 | 未滿 1 小時之精確毫秒完整保留，檔案寫入使用獨佔鎖保護。 |
-| [ISSUE-040](#issue-040-設定指向不存在語言包時-apply-仍成功並解除現有翻譯) | **設定指向不存在語言包時 apply 仍成功並解除現有翻譯** | ⏳ 待實測 | 設定指向不存在的語言包並執行 apply。 | 事前拒絕套用，不卸載既有語言包，5 個目標檔案零寫入。 |
 | [ISSUE-041](#issue-041-run-watch-json-輸出純文字而非穩定-json-封套) | **`run --watch --json` 輸出純文字而非穩定 JSON 封套** | ⏳ 待實測 | 執行 `run --watch --json` 監控遊戲程序運作。 | 輸出合規結構化 JSON 事件串流，可被 AI 代理穩定解析。 |
 | [ISSUE-042](#issue-042-修改器簡體中文介面退回英文且仍有可見硬編字串) | **修改器簡體中文介面退回英文且仍有可見硬編字串** | ⏳ 待實測 | 切換至 zh-CN / zh-TW / en 檢視修改器與各參數對話框。 | 作弊、數值微調與參數對話框完整在地化，無中文字串殘留或退回英文。 |
 | [ISSUE-043](#issue-043-公開發布版本個資排除與文件狀態不一致) | **公開發布版本、個資排除與文件狀態不一致** | ⏳ 待實測 | 檢查 `.gitignore` 規則與發布版本識別常數。 | `.cksave` 已被排除，程式版本統一，無個人環境資訊洩漏。 |
@@ -70,25 +73,146 @@
 | [ISSUE-050](#issue-050-wagon_build_time-只改寫無任何讀取者的-vxconst-常數已安全廢棄並移除) | **`wagon_build_time` 已判定無引擎路徑並移除** | ⏳ 待實測 | 用含舊 `wagon_build_time` 的既有設定檔升級後執行 apply／修改器頁操作。 | apply 不因殘留舊鍵失敗、設定檔自動移除該鍵；修改器清單不再出現「運輸車建造時間」。 |
 | [ISSUE-054](#issue-054-筆電無小鍵盤又不使用-f1f12-時修改器幾乎無鍵可綁) | **筆電無小鍵盤又不使用 F1~F12 時，修改器幾乎無鍵可綁** | ⏳ 待實測 | 點擊修改器頁「遊戲中面板」或開啟置頂面板，在遊戲中點擊面板作弊按鈕。 | 遊戲視窗接收到對應鍵碼並觸發作弊，視窗不搶焦點，關閉後無殘留常駐。 |
 | [ISSUE-055](#issue-055-面板代按熱鍵時-mouseptm-快取已被游標移動蓋掉生成位置錯誤) | **面板代按熱鍵時生成位置錯誤** | ⏳ 待實測 | 把地圖捲到目標位於畫面中央，開啟面板點「在滑鼠位置生成單位」；另測數量設為 1000。 | 單位生成在畫面中央而不是面板邊緣，面板顯示「已生成於 (x, y)」；游標瞬間歸位；面板可縮放。 |
-| [ISSUE-056](#issue-056-修改器缺少遊戲速度調整) | **修改器加入遊戲速度調整** | ⏳ 待實測 | 面板速度欄填 5 按「套用」；另啟用「循環切換遊戲速度」作弊後連按其熱鍵。 | 速度即時變化，面板顯示結果訊息；循環作弊依序切換 1/2/5/10 倍並在畫面印出目前倍率。 |
 | [ISSUE-047](#issue-047-外部快照配額被可修復例外耗盡真正致命現場沒有外部-json完整-dump) | **外部快照配額被耗盡時滾動保存最後崩潰候選快照** | ⏳ 待實測 | 模擬 800+ 筆可修復 first-chance 例外後程序退出。 | 超過 20 筆上限後滾動更新 `-crash-latest.json`，最新致命現場完整寫出。 |
 | [ISSUE-048](#issue-048-ckrun-configtxt-與-verify-只比較設定修補名稱會錯報遊戲實際修改內容) | **`ckrun-config.txt` 與 `verify` 只比較設定修補名稱，會錯報遊戲實際修改內容** | ⏳ 待實測 | 核對 `ckrun-config.txt` 與實際遊戲檔案 `CKTRAINER.TXT` 內容。 | 檔案唯讀解析實際 marker payload，不將期望物件冒充實際狀態。 |
 | [ISSUE-053](#issue-053-遊戲保留按鍵表漏列-f2f3delins原版模式預設綁定直接撞到存讀檔) | **遊戲保留按鍵表漏列 F2／F3／Del／Ins，原版模式預設綁定撞到存讀檔** | ⏳ 待實測 | 於原版按鍵模式下按下 F2（存檔）或 F3（讀檔），並測試自由鍵設定。 | F2/F3/Ins/Del 被標記為保留鍵，不撞作弊；原版模式僅綁定安全鍵且存讀檔正常。 |
-| [ISSUE-057](#issue-057-未設定的-unit_feeds-與-hero_max_army-仍被寫進-cktw-並強制單位進食) | **未設定的 `unit_feeds`／`hero_max_army` 仍被寫進 `.cktw` 並強制單位進食** | ⏳ 待實測 | 開啟修改器但不調任何數值，用 GUI 存檔後 apply；再進遊戲觀察狼／熊等動物與運輸車。 | EXE 不含 `.cktw` 節區（`verify` 判定 vanilla）；動物與運輸車不會挨餓或掉血，行為與原版一致。 |
 | [ISSUE-058](#issue-058-聚落容量與初始金錢-tweak-走-scoped-路徑後不再只影響新建聚落) | **聚落容量與初始金錢 tweak 說明與分流路徑行為同步** | ⏳ 待實測 | 於修改器調整城鎮／村莊容量與人口上限並套用，進入戰役或劇本地圖。 | 核心定義、三語說明與 CLI 完全一致，單人 .cktw 作用於已存在與新建聚落，多人退回原版。 |
 | [ISSUE-059](#issue-059-遊戲中面板生成座標取樣同步阻塞-ui-執行緒) | **遊戲中面板生成座標非同步取樣不凍結 UI 訊息幫浦** | ⏳ 待實測 | 開啟遊戲中面板並連續快速點擊「生成單位」，或於取樣時關閉視窗。 | UI 視窗流暢不凍結，快速點擊安全防重入，關閉視窗安全取消等待並恢復游標。 |
 | [ISSUE-060](#issue-060-trainer-定義繞過-i18n簡中顯示繁中且英文說明退回-id) | **Trainer 定義繞過 I18n，簡中顯示繁中且英文說明退回 ID** | ⏳ 待實測 | 切換 zh-TW / zh-CN / en，檢查修改器各作弊／數值調整名稱、說明、參數、117 個 Option 標籤、對話框與 CLI `list-cheats` / `list-tweaks` 輸出。 | 三語 100% 完整在地化、簡繁獨立翻譯、英文無 raw ID 暴露、CLI 與 GUI 契約完全一致。 |
 | [ISSUE-061](#issue-061-game_speed-多選倍率在參數對話框誤建為-00-numericupdown) | **`game_speed.speeds` 通用對話框誤用 0..0 NumericUpDown 致倍率完全無法選取** | ⏳ 待實測 | 於修改器頁面點擊「循環切換遊戲速度」的「⚙ 設定」，勾選倍率並儲存。 | 對話框顯示 CheckBox 多選清單且有三語倍率名稱，儲存後可正常循環切換。 |
-| [ISSUE-062](#issue-062-18-個作弊有-6-個在兩種按鍵模式下都無鍵可綁而被靜默停用) | **18 個作弊有 6 個在兩種按鍵模式下都無鍵可綁而被靜默停用** | ⏳ 待實測 | 以既有設定檔啟動，確認 spawn_unit 自動改綁至 Backspace 且遊戲中面板出現「在滑鼠位置生成單位」按鈕；再取消勾選「保留原版功能」確認其餘作弊可綁定。 | 既有設定檔的衝突綁定能改綁就改綁、改不了才停用並附上解法提示；遊戲中面板保有游標生成按鈕；關閉保留原版後可綁定更多作弊。 |
-| [ISSUE-063](#issue-063-修改器按鍵擷取只擋格線內重複不檢查遊戲與原版保留鍵) | **修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵** | ⏳ 待實測 | 於修改器頁點選任一作弊的按鍵欄進入擷取狀態，分別按下 Del、Ins，以及勾選／取消「保留原版功能」後按下 Add。 | 當場顯示三語正確的「已被佔用」訊息且不寫入該鍵，改按自由鍵可正常設定；套用時不再出現延後爆出的按鍵衝突例外。 |
-| [ISSUE-064](#issue-064-關閉主視窗時設定儲存失敗會被空-catch-靜默吞掉) | **關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉** | ⏳ 待實測 | 在修改器頁把某個 tweak 填成超出範圍的值或清空已啟用作弊的按鍵，然後直接關閉主視窗並重新開啟。 | 關閉前記錄區出現未儲存的原因訊息，關窗流程不被阻擋，重開後設定維持上一次成功儲存的狀態。 |
-| [ISSUE-065](#issue-065-cli-靜默接受未知選項--game---config-會吞掉下一個選項) | **CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項** | ⏳ 待實測 | 以 AI 代理程式驅動 CLI 時故意打錯選項名稱（如 `--gam`），或在 `--game` / `--config` 後面直接接 `--json`。 | 未知選項一律以 InvalidArgs 拒絕並回傳合規 JSON 封套；`--game` / `--config` 缺少值或值本身是另一個選項時明確報錯，`--json` 永不遺失。 |
-| [ISSUE-066](#issue-066-修改器兩個分頁重複列出同一批-tweak可分流項目仍提供誤導性全域值) | **修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值** | ⏳ 待實測 | 開啟修改器的「永久規則調整」分頁，確認已無「敵我／聚落分流」分頁、可分流項目只在下方分流表格出現且沒有全域欄，調整後套用並進單人遊戲確認生效。 | 單一分頁內同一個 tweak 只出現一次；21 個可分流項目只能設分流值；7 個尚無 hook 的項目仍有全域值且多人生效。 |
-| [ISSUE-067](#issue-067-core-與-cli-有-92-處硬編繁體中文錯誤訊息英文與簡中使用者會看到繁中) | **Core 與 Cli 有 92 處硬編繁體中文錯誤訊息，英文與簡中使用者會看到繁中** | ⏳ 待實測 | 將 UI 語言切換為 English 或 简体中文，然後觸發任一錯誤路徑（例如指向損毀的 data.pak、匯入格式錯誤的語言包、CLI 指定不存在的遊戲目錄）。 | 錯誤訊息以當前 UI 語言顯示，不再出現繁體中文；四處內部不變式訊息以 `Internal:` 前綴的英文呈現。 |
 
 ---
 
 ## 3. 🔴 未修復／進行中調查清冊 (Open Issues)
+
+### ISSUE-098: 語言分頁會靜默覆寫已儲存的自訂字型
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Gui/LanguagePage.cs:169-171` 先載入 `FontFace` 再呼叫 `ShowPackDetails`；`:230-232` 若字型不在內建候選清單便直接改成語言包預設。切換 UI 語系亦由 `ApplyLanguage():200` 重走此路徑，之後關窗儲存便永久覆寫設定。
+- **2026-09-14 修復**：候選字型改為純建議清單；已設定的自訂字型會加入下拉選單並保持原值，新增 UI 語系切換往返測試。
+- **影響／驗收**：使用者已選且系統可用的自訂字型（例如 Noto Sans CJK TC）會無提示消失。候選清單可提供建議，但不得改寫現值；載入、切語系、關窗及 apply 往返後字型須保持一致。
+
+### ISSUE-097: 新增的 `settings` CLI 未納入嚴格選項檢查與三語說明
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2；屬 ISSUE-065 後新增命令的回歸缺口。
+- **程式／實跑證據**：`Cli/CliHost.cs:287-303` 的無選項命令表漏掉 `settings get`，路由於 `:258` 執行後忽略剩餘 token。Release CLI 實跑 `settings get --typo --json` 仍以 exit 0、`ok=true` 成功。三個 `I18n/strings.*.json:34` 的 `Cli_HelpText` 亦完全未列 `settings get/set`。
+- **2026-09-14 修復**：`settings`／`gamesettings get` 納入多餘 token 拒絕表，三語 help 新增完整命令；SelfTest 鎖住 typo 的 `InvalidArgs` JSON。
+- **影響／驗收**：AI 打錯選項不會察覺，且無法從 `--help` 發現五項遊戲規則設定。未知選項必須回 `InvalidArgs` JSON；三語 help 必須列完整語法並有回歸測試。
+
+### ISSUE-096: 分析器開始前的設定快照例外位於錯誤處理之外
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Gui/ProfilerPage.cs:499-500` 在 `try` 之前呼叫 `EnsureOutputDirectory()` 與 `ConfigProvider.Invoke()`；主視窗把後者連到可能因無效 UI 值丟例外的 `SnapshotConfiguration`。按鈕事件是 `async void`，例外可直接逃出 UI 訊息幫浦。
+- **2026-09-14 修復**：遊戲路徑、輸出目錄與設定快照全部移入前置 try/catch，失敗顯示三語錯誤並在建立 cancellation／啟動背景工作前返回。
+- **影響／驗收**：例如效能頁留下非法解析度後按「開始分析」可能造成未處理例外。所有準備、快照與背景啟動例外皆須轉為三語錯誤結果，UI 保持可操作且不啟動遊戲。
+
+### ISSUE-095: 合法 JSON 內的 null 子設定會使 GUI 啟動失敗
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1。
+- **程式證據與觸發**：`Core/Common/ToolkitConfig.cs:235-240` 反序列化後未補回 `Perf`／`Lang`／`Trainer`／`GameSettings` 的 null；`Program.cs:20-25` 建立 `MainForm` 不在例外處理內。`{"perf":null}` 等可解析設定會在頁面 `LoadConfig` 解參考時中止啟動。
+- **2026-09-14 修復**：`FromJson` 正規化四個子設定及 Trainer 三個集合與 migration 集合，新增四區同時為 null 的回歸測試。
+- **影響／驗收**：非語法損毀但結構缺值的設定可讓 GUI 完全打不開。載入須 fail-closed 顯示明確錯誤或安全正規化，任何讀取操作零寫入，四個 null 組合皆需測試。
+
+### ISSUE-094: 匯入存檔選槽忽略孤立的同名預覽圖
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Core/Saves/SaveManager.cs:611-625` 尋找空槽只檢查 `.adv`，未檢查同名 `.adv.bmp`；`:294-300` 才依序搬移存檔與截圖。目標只有孤立截圖時，有截圖封存會失敗回滾，無截圖封存則會錯配舊圖。
+- **2026-09-14 修復**：槽位掃描同時統計 `.adv` 與 `.adv.bmp`，孤立預覽圖會保留並迫使匯入選下一個完整空槽。
+- **影響／驗收**：槽位必須將 `.adv` 與 `.adv.bmp` 視為一組；兩種封存都應選完整空槽，既有孤立預覽不可覆寫或錯配。
+
+### ISSUE-093: 玩家名稱無法以 Windows-1252 表示時會靜默寫成問號
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Core/Saves/SaveManager.cs:408-410` 接受 Unicode 名稱，`:428,439` 用帶替代 fallback 的 Windows-1252 編碼寫回；例如「玩家」會成功回報但落盤成 `??`。
+- **2026-09-14 修復**：寫入前使用例外型 EncoderFallback 驗證名稱可無損表示；失敗以新增三語錯誤拒絕並保持 `player.ini` 零寫入。
+- **影響／驗收**：寫入前須驗證可無損 round-trip，不可表示時明確拒絕並保持 `player.ini` 不變；若改用其他編碼，必須先取得遊戲實機相容證據。
+
+### ISSUE-092: `.cksave` manifest 含 null 檔案描述時拋出未處理例外
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Core/Saves/SaveManager.cs:550` 對 `manifest.Files` 元素直接取 `file.Entry`；`files:[null]` 造成 `NullReferenceException`，`:565` 的 catch 白名單不接此例外，而 `ImportSave` 又在自身 try 外呼叫 `ReadArchive`。
+- **2026-09-14 修復**：解讀 manifest 時先拒絕 null 描述元素，後續 descriptor 查找亦防 null；新增真實 ZIP 畸形封存與 profile 零寫入測試。
+- **影響／驗收**：畸形封存可令 GUI 操作向上拋錯。null 集合、null 元素與缺欄位均須回 `Result.Fail`，profiles 保持零寫入且 UI 不失效。
+
+### ISSUE-091: 外部語言包自動探索繞過匯入安全驗證
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2；是 ISSUE-004 匯入流程以外的入口。
+- **程式證據與觸發**：`Core/Lang/PackLoader.cs:285-304` 對 `langpacks` 內容直接 `LoadFromDirectory`；`:141-180` 依 metadata `Path.Combine`／`ReadAllText`，未共用 `LangPackService.ValidatePackDirectory`。`../../outside.json`、reparse point 或不存在的必備 UI 檔仍可能被探索為可用包，且同 ID 可覆蓋內嵌包。
+- **2026-09-14 修復**：外部探索改為一律呼叫 `ValidatePackDirectory`，共用路徑邊界、reparse 與必備檔驗證；新增手動放入 traversal 包的探索測試。
+- **影響／驗收**：探索與匯入須共用路徑邊界、reparse、必備檔與 metadata 驗證；壞包不得讀取包外資料或覆蓋內嵌包，其他合法包仍應正常列出。
+
+### ISSUE-090: 腳本通道 Probe 把拒絕與故障狀態當成可用
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Core/Runtime/ScriptChannel.cs:178-182` 只看外層 `Result.IsOk`；協定正常回傳的 `Rejected`、`CompileError`、`Faulted`、`TimedOut` 也都是 Ok outcome。`Gui/InGamePanelForm.cs:751-759` 因此可錯設 `_channelReady=true`。
+- **2026-09-14 修復**：Probe 僅接受 `Ok`、`Scheduled`、`NotInGame`，所有狀態加入表格測試。
+- **影響／驗收**：通道實際不可用時會取消按鍵備援並誤導面板。逐一測試所有 `ScriptStatus`，只允許明確可用狀態通過 Probe。
+
+### ISSUE-089: 注入失敗後忽略進入點還原失敗，可能留下無限空轉行程
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1。
+- **程式證據與觸發**：`Core/Runtime/ProcessInjector.cs:281-288` 在 DLL 注入失敗時忽略 `RestoreEntryPoint` 回傳值，仍記錄「已還原」並回有效 PID；此前寫入的 `EB FE` 可能仍在入口無限迴圈。成功注入路徑 `:297-301` 反而有正確檢查與終止處理。
+- **2026-09-14 修復**：失敗分支現在核對還原結果；還原失敗會終止目標並回 PID 0，不再輸出成功訊息。
+- **影響／驗收**：故障注入再故障還原時必須回報失敗並確保不留下 spinning process，不得輸出錯誤成功紀錄。
+
+### ISSUE-088: 非 ASCII 使用者目錄會使 `LoadLibraryA` 注入路徑編碼錯誤
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P2。
+- **程式證據與觸發**：`Core/Runtime/ProcessInjector.cs:335-338` 用 .NET `Encoding.Default`（UTF-8）產生 `LoadLibraryA` 參數；`GameRunner.cs:188-190,455-466` 把 DLL 放在可含中文使用者名稱的 LocalAppData，並錯誤假定路徑純 ASCII。目標 x86 程序的 ANSI code page 未必是 UTF-8。
+- **2026-09-14 修復**：跨行程載入改解析 `LoadLibraryW` 並傳 UTF-16 路徑，移除 LocalAppData 必為 ASCII 的假設；原生 Win32 Release 已重建。
+- **影響／驗收**：診斷層與腳本通道可能無法注入。應以寬字元載入鏈或等價無損方案，在中文使用者目錄及 ACP 950／1252 動態驗證。
+
+### ISSUE-087: 腳本管線兩端缺少完整 I/O deadline，單一連線可永久阻塞
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1。
+- **程式證據與觸發**：managed `Core/Runtime/ScriptChannel.cs:148-157,205-227` 的 timeout 只涵蓋 Connect，後續同步 Write／ReadExactly 無期限。native `CKPerf/script.cpp:430-435,466-525` 在驗證 token 前同步讀完整 header，唯一 pipe instance 亦可被不送資料、不送完整 body 或不讀 response 的 client 佔住。
+- **2026-09-14 修復**：managed 端改用同一 cancellation deadline 涵蓋 connect/write/read；native 端以 PeekNamedPipe deadline 讀取，flush 由可取消 worker 限時執行。部分 response 測試證明 Run 會按時返回。
+- **影響／驗收**：Run／Probe、關閉面板或整條 server 可永久卡住。以假 server/client 測試不回覆、部分 header/body、不讀 response，雙方都須在期限內清理並恢復接受正常請求。
+
+### ISSUE-086: 遠端 `LoadLibraryA` 逾時後仍釋放其參數記憶體
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1。
+- **程式證據與觸發**：`Core/Runtime/ProcessInjector.cs:355-372` 等十五秒逾時不代表遠端執行緒已結束，但 finally 仍 `VirtualFreeEx(remote)`；稍後排程或仍等待 loader lock 的執行緒可能讀取已釋放路徑，形成目標行程 use-after-free。
+- **2026-09-14 修復**：只有遠端 thread 已確定結束才釋放參數；逾時時讓小型配置隨目標行程回收，並明確回報結果不確定。
+- **影響／驗收**：以可控延遲 child 超過十五秒重現；參數必須保留到執行緒確定結束，逾時結果亦不可冒充「確定未注入」。
+
+### ISSUE-085: 腳本通道權杖被持久寫入 `ckperf.ini`
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1；直接違反 AGENTS.md §2.9「權杖不寫檔」。
+- **程式證據與觸發**：`Core/Runtime/GameRunner.cs:63-77` 的 `ToOptionString` 含 `scripttoken`，`:210,383,433-443` 在 launch／attach 都將它寫入 `%LOCALAPPDATA%\CKToolkit\runtime\ckperf.ini`，且未清除。持有該 token 的本機程序可向原生端提交任意 VS 原文。
+- **2026-09-14 修復**：落盤選項永不含 token；launch 仍走子程序環境，attach 新增 current-user-only bootstrap pipe，在 `LoadLibraryW` 期間一次性傳遞 32 字元權杖。
+- **影響／驗收**：launch／attach 的設定、日誌、manifest 與退出後檔案均不得含 token；合法通道仍需可用。待辦與測試不可抄錄真實 token 值。
+
+### ISSUE-084: 腳本 mailbox 逾時競爭會錯配、漏執行或永久 Busy
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1。
+- **程式證據與觸發**：`CKPerf/script.cpp:336-354,383-397` 的 Pump 只觀察 Pending，未原子 claim Running 且不持有 Submit 鎖；Submit 五秒逾時後無條件把 slot 設 Empty。舊 Pump 尚在執行時下一筆可覆寫共用 script/status，舊完成又把新請求標 Done；無下一筆時也可能把 Empty 改回 Done 而永久 Busy。
+- **2026-09-14 修復**：mailbox 新增原子 `Running`／`Abandoned` 狀態；Pump 必須 claim 才執行，timeout 只取消尚未執行請求，已開始者完成後自行清空且不能被新請求覆寫。
+- **影響／驗收**：建立可控暫停點，強制「Pump 取得 Pending → Submit timeout → 下一筆 Submit → 舊 Pump 完成」交錯；每筆結果須保持身分、至多執行一次且通道可恢復。
+
+### ISSUE-083: 修改器 marker 缺乏語意驗證，還原可遺留修改或刪除原廠 PAK 項目
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1；與 ISSUE-038 的語言包 marker 為不同格式。
+- **程式證據與觸發**：`Core/Trainer/TrainerInstaller.cs:349-355` 僅反序列化 marker；空集合預設令 `{}` 合法。`PatchState.cs:319-324` 只判 null，`TrainerInstaller.cs:327-342` 完全信任 `AddedEntries`／`Originals`，最後刪 marker。空清冊會留下已修改內容，錯誤 AddedEntries 可刪原廠項目。
+- **2026-09-14 修復**：marker 必須具版本、工具版本、非 null 集合與候選原始項目；目前格式不接受任何刪除清單。Uninstall 遇無效 marker 丟三語錯誤並完整保留 PAK。
+- **影響／驗收**：`{}`、未知版本、null 集合、缺原始項目及 AddedEntries 含原廠項目均須 fail-closed，五個遊戲檔案零寫入；正常 marker 仍需逐位元組精確反轉。
+
+### ISSUE-082: GUI 套用繞過損毀設定檔的 fail-closed 保護
+- **發現日期／狀態／優先級**：2026-09-13；2026-09-14 ⏳ **已修碼 · 待實測**，P1；是 ISSUE-036 已驗收後仍存在的 GUI 專用入口。
+- **程式證據與觸發**：`Gui/MainForm.cs:317-326` 的 `SnapshotConfiguration` 主動清除 `LoadError`；`:330-345` 的 Apply 準備未先檢查原 `_config.LoadError`，便以畫面／預設值覆寫設定並繼續套用。`:565` 的靜默關窗路徑雖有拒絕，Apply 路徑未共用。
+- **2026-09-14 修復**：任何 Apply 前先檢查原始 `_config.LoadError`，損毀設定直接顯示錯誤並在快照、Save 與遊戲檔案寫入前返回。
+- **影響／驗收**：損毀 `cktoolkit.json` 後從 GUI 按套用，必須明確拒絕且設定與五個遊戲檔案全部零寫入；不得用新預設覆蓋損毀檔。
+
+### ISSUE-079: 9/4～9/5 遊戲停止回應，缺少卡死時執行緒現場
+
+- **發現日期／狀態**：2026-09-05，🔴 **未修復／調查中**。
+- **實機證據**：Windows Application 1002／WER AppHangB1：2026-09-05 08:47:33，PID `0x79d0`（31184），ReportId `75c1d487-78c0-4a7c-89f5-e2dbd67d7d83`；2026-09-04 20:38:22，PID `0x8e54`（36436），ReportId `4a4655fa-62c2-43e4-b0a3-ab074e108382`。
+- **最後線索**：`%LOCALAPPDATA%\CKToolkit\stability\ckperf-20260905-081351-pid31184.log:36` 與 `:37`，08:47:05.251／.253 在 `0x004F3026`／`0x004F3DE5` 記錄 REPAIRED，之後無退出行。前一天 `ckperf-20260904-195111-pid36436.log` 也無退出行。
+- **判定邊界**：確認停止回應，未找到相應 hang dump；缺少寄存器、執行緒堆疊與取樣資料。最後兩個 EIP 是線索，不能據此斷定死鎖、無窮迴圈、物件規模或既有修補為根因。
+- **下一步／驗收**：再次停止回應時取得完整執行緒 Dump 與同場取樣，確認阻塞／熱點路徑後才修碼，並以相同實機操作驗收。
+
+### ISSUE-080: 腳本通道啟動自測在初始化執行緒過早呼叫引擎，產生例外後永久停用
+
+- **發現日期／狀態**：2026-09-05；2026-09-14 ⏳ **已修碼 · 待實測**；不覆寫 ISSUE-068 既有使用者功能驗收。
+- **程式證據**：`src/CKPerf/dllmain.cpp:52` 從 `InitThread` 呼叫 `ScriptChannelInstall`；`src/CKPerf/script.cpp:614` 直接進行自測，`:566` 呼叫編譯器，缺少引擎就緒門檻。失敗即設 `g_refused=true`，該場不重試。
+- **實機證據**：`%LOCALAPPDATA%\CKToolkit\stability\ckperf-20260905-101558-pid13460.log:16` 起依序記錄 `005D3799`、`005E4CBB`、`005E58C4`、`005E55F3`、`005E5600` 的低位址寫入 AV 與 REPAIRED；`:31` 記錄 self-test compiler returned null、channel DISABLED。首份報告堆疊掃描包含遊戲編譯器返回位址 `005E0397` 及 ckperf 位址；此為掃描候選，不是完整 unwind。
+- **範圍／判定**：9/3～9/5 的 22 批 110 份報告均集中在相同五個 EIP。最新場次仍到 10:25:35 才退出，故這批報告不是五次致命閃退。高度懷疑編譯器初始化時序；不能推翻其他啟動／掛載／按鍵備援路徑的使用者成功經驗，也不能認定它導致 ISSUE-079。
+- **最小修法方向／驗收**：初始化執行緒僅驗簽與準備；在引擎就緒後的主執行緒 hook 進行編譯及釋放自測，保留簽章失敗的永久拒絕。實測入口前注入與對局後掛載，確認無啟動 AV、通道可用及作弊回應。
+- **2026-09-14 修復**：安裝階段只驗簽、綁定函式並掛起自測；`SetDIBitsToDevice` 主執行緒 Pump 確認三個 live-session 指標後才編譯／釋放探針，通過才開 pipe。簽章或正式自測失敗仍永久 fail-closed。
+
+### ISSUE-081: 原生報告額度被啟動修復例外耗盡，後續故障現場無法保存
+
+- **發現日期／狀態**：2026-09-05；2026-09-14 ⏳ **已修碼 · 待實測**；與 ISSUE-047 的 managed `CrashCatcher` 是不同層。
+- **程式證據**：`src/CKPerf/crash.cpp:411` 修復後第一次出現的站點仍遞增 `g_reportCount`；`:423` 未修復例外共用計數，超過 `maxReports` 不寫報告。`:429` 僅於計數恰等於上限加一時警告；若該值被修復分支消耗，後續未修復例外連這次警告也沒有。
+- **實機證據**：9/5 08:13:51 與 10:15:58 兩場 options 均為 `maxreports=5 dump=0 telemetry=0 frames=0`；啟動自測已記錄十個不同 REPAIRED 站點，只有五份 txt。今日十個 `diag\CKToolkit 分析紀錄\2026-09-05\*_attach` 目錄僅有設定清單，沒有同目錄的外部 JSON／Dump／取樣產物；設定清單不能代替啟動成功證據。
+- **最小修法方向／驗收**：未修復例外與修復站點分開計數，保留末次故障輸出並明確記錄超限；驗證大量可恢復例外後仍能保存真正故障。卡死可能不產生例外，仍需 ISSUE-079 的 hang dump。不得僅提高上限就宣稱已解決。
+- **2026-09-14 修復**：新增獨立 `g_repairedReportCount`；已修復站點使用另一段報告編號與配額，未修復 fault 的 `g_reportCount` 保留完整 `maxreports` 額度，退出摘要分開列出兩類數量。
+
+---
 
 > 說明：以下為目前已知、尚未完全修復或正在進行深入逆向工程調查之問題項目。
 
@@ -121,21 +245,6 @@
     - **2026-08-23 新證據（pid 27096）**：同一站點 `0x0069305D` 再次出現，但這次 `eax = 0x102E8AB0` 解析成功後，內部欄位 `[eax+4]` 是 `NULL`，所以 `ecx = 0` 並讀取 `0x00000004`。同一欄位已經分別觀察到「指向已釋放區塊」與「直接為 NULL」兩種失效狀態，更支持物件生命週期／初始化失配，而非單純位址空間壓力。
 - **驗證狀態與實測指引**:
   - 待取得更多該位址存取前後的堆疊快照，分析是哪個物件生命週期管理提早釋放。
-
----
-
-### ISSUE-007: 遊戲主選單固定 21 FPS 節流現象
-- **問題編號**: `ISSUE-007`
-- **發現日期**: 2026-08-19
-- **狀態**: 🔴 **未修復／調查中** (`Open / Investigating`)
-- **問題現象**:
-  - 遊戲在選單狀態下每秒約 21 幀，其中 10~11 幀耗時超過 50ms（雙峰分佈落於 63ms），呈現規律節流。
-- **逆向分析與根因**:
-  - `Celtic kings.exe` 唯一呼叫 `Sleep` 的位置為 `0x006C8805`（由 `0x006C6380` 呼叫）。
-- **驗證狀態與實測指引**:
-  - 評估是否需要對選單節流進行解鎖或維持原廠節能行為。
-
-
 
 ---
 
@@ -222,481 +331,6 @@
      - 重新套用寫入遊戲 `local.pak`，實機掃描全 415 個 XML，除 14 個作者簽名/內部識別代號外，其餘 3,085 條文字 100% 中文化。
   5. **測試套件覆蓋 (`Program.cs`)**:
      - Group 26 新增長 Header 翻譯表識別、彎直引號容錯、Mojibake 標點自動正規化、以及 118 檔 997/997 條目 100% 翻譯斷言，全套 47 組測試全數全綠通過。
-
----
-
-### ISSUE-077: 單位編入英雄隊伍之附著半徑硬性限制（支援部隊遠距／全圖瞬時編入英雄，新增「遊戲設定」選項）
-
-- **問題編號**: `ISSUE-077`
-- **提出日期**: 2026-09-05
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **來源**: 使用者需求：「單位編入英雄的附著半徑可以改嗎」->「部隊不用走到英雄跟前，在很遠的地方右鍵點英雄就能立刻編入」
-
-- **逆向分析與根因**:
-  1. **二進位 C++ 引擎層阻擋**:
-     - `Celtic kings.exe` 的實體部隊編入常式 `CVXUnit::AttachTo` 位於 `0x0050BC60`。
-     - 在將單位指標加入英雄編隊清單前，於 `0x0050BCEF` 呼叫 `0x004F4120`（`hero->InRange(unit)`，計算有效距離是否小於等於英雄視野 `hero.sight`，預設為 600 像素）。
-     - 隨後於 `0x0050BCF4: test eax, eax`，並於 `0x0050BCF6: 0F 84 25 01 00 00`（`je 0x50be21`，檔案位移 `0x0010BCF6`）跳轉至失敗返回點。只要單位與英雄距離超過 600 像素，C++ 引擎底層直接拒絕編入。
-  2. **腳本層阻擋與移動邏輯**:
-     - 玩家在遊戲中右鍵點擊友方英雄時，派送執行腳本 `SUBAI\UNIT_ATTACH.VS`。
-     - 原版腳本第 31 行硬性限制：
-       `if( !.InHolder && !hero.InHolder && .posRH.Dist(hero.posRH) < 1500 ) if(.AttachTo(hero)) break;//success`
-       腳本限定距離必須小於 1500 才嘗試呼叫 `.AttachTo(hero)`；否則只能在 `while` 迴圈中呼叫 `.Goto(hero.posRH + ptoffset, ...)` 緩慢移動過去。
-     - **雙重門檻**：若僅修改腳本解除 1500 限制，呼叫 `.AttachTo(hero)` 時會被 C++ 引擎的 600 視野檢查拒絕；若僅修改 C++ 引擎，腳本層的 `.posRH.Dist < 1500` 仍會阻止遠距附著。兩者必須聯動修補。
-
-- **修復方案**:
-  - **二進位修補 (`InstantHeroAttachPatch.cs`)**:
-    - 將 `Celtic kings.exe` 檔案位移 `0x0010BCF6`（VA `0x0050BCF6`）處的 6 位元組條件跳轉 `0F 84 25 01 00 00` 替換為 6 個 NOP（`90 90 90 90 90 90`）。
-    - 徹底解除 600 像素視野硬性限制，使部隊在任何距離都能透過 `.AttachTo` 成功被英雄吸納。
-    - **安全性與邊界維護**：完全保留緊接著的英雄帶兵數容量檢查（`0x0050BD01: cmp edx, eax; je 0x50be21`），部隊滿員時依然正確拒絕，絕無陣列越界或死結。支援 100% 逐位元組精確反轉回 Steam 原廠指令。
-  - **腳本修補 (`GameRulesModifier.cs`)**:
-    - 將 `UNIT_ATTACH.VS` 的條件檢查改寫為瞬時編入並自動向英雄靠攏：
-      ```c
-      if( !.InHolder && !hero.InHolder )
-      if(.AttachTo(hero)) {
-          while(!.Goto(hero.posRH + ptoffset, 1, 150, true, 5000) && hero.IsAlive() && !hero.InHolder());
-          break;//success
-      }
-      ```
-    - 右鍵點擊瞬間，部隊立刻在底層編入英雄隊伍（英雄頭像立刻計入部隊數、即時享受隊伍經驗分享與陣形屬性），隨後自動向英雄陣形坐標移動靠攏；若英雄下達移動指令，英雄的 `FormSetupAndMoveTo` 自動接管部隊隊列。
-  - **模組與管線整合**:
-    - `TrainerInstaller`: 安裝時將 `UNIT_ATTACH.VS` 原始文字存入 `marker.Originals`，並在標記中記錄 `instant_hero_attach`；反安裝與正規化時 100% 逐位元組還原。
-    - `TrainerModule`: 在 EXE 寫入管線中套用 `InstantHeroAttachPatch.Apply(ref exeBytes, true)`。
-    - `PatchState`: 於 `InspectExe` 註冊簽章檢查，並於 `NormaliseExe` 中還原原廠位元組。
-    - `PatchPipeline`: 納入 `instant_hero_attach` 期望標記，`verify` 零假警報。
-  - **使用者介面與多語系**:
-    - GUI「遊戲設定」分頁（`GameSettingsPage`）新增「允許部隊遠距／全圖瞬時編入英雄」勾選框與說明。
-    - 繁中、簡中、英文三語字典同步新增 `GameSettings_InstantHeroAttach_Label` 與 `GameSettings_InstantHeroAttach_Desc`。
-  - **命令列支援**:
-    - CLI 支援 `settings set --instant-attach=on|off`（支援 `--instant-hero-attach` 別名）與 `settings get --json`。
-  - **測試套件覆蓋**:
-    - SelfTest 第 47 組測試擴充 10 項斷言：包含字串正則轉換與精確反轉、PE NOP 套用與還原冪等性、合成 pak 與 EXE 安裝反安裝、`PatchPipeline` 驗證與 CLI 測試，全套 47 組測試全數通過。
-
----
-
-### ISSUE-076: 運糧馬／運金馬運載上限與出產量提升至 10,000（修改大容量生產按鈕與裝載指令，新增「遊戲設定」選項）
-
-- **問題編號**: `ISSUE-076`
-- **提出日期**: 2026-09-04
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **來源**: 使用者需求：「不要這麼麻煩，直接改原版的按鈕就好，加入遊戲設定（Game Settings）中，然後上限改成10000」
-
-- **逆向分析與根因**:
-  1. 運糧馬（`Wagon` / `CVXWagon`）的底層負載上限由 `CLASSES\WAGON.SC.XML` 的 `<properties max_load="1000" feeds="0"/>` 定義。引擎啟動時於 `0x005C23F6` 讀取 `max_load` 字串並存入 `[class+0x3C4]`。
-  2. 生成運糧馬函式 `Settlement::CreateMuleFood`（`0x00517010`）於 `0x00517029` 讀取 `[class+0x3C4]`，計算 $\min(\text{請求量}, \text{max\_load}, \text{聚落存糧})$ 後立即扣除存糧並注入至運糧馬實體；若單純提高 `max_load` 而不修改按鈕，出產時依然只會裝載 1,000。
-  3. 大容量運糧馬／運金馬製造按鈕綁定之腳本為 `SUBAI\CREATE_FOOD_MULE_BIG.VS` 與 `SUBAI\CREATE_GOLD_MULE_BIG.VS`，內部硬編碼 `.CreateMuleFood(1000)` 與 `.CreateMuleGold(1000)`。
-  4. 騾車中途裝載指令 `SUBAI\WAGON_LOADFOODBIG.VS` 與 `SUBAI\WAGON_LOADGOLDBIG.VS` 亦硬編碼 `.LoadFood(1000)` 與 `.LoadGold(1000)`；對應之 UI 提示定義於 `COMMANDS.XML` 的 `rollover` 屬性。
-
-- **修復方案**:
-  - **核心轉換**：`GameRulesModifier` 新增 `ApplyWagonMaxLoad10k` / `RemoveWagonMaxLoad10k`、`ApplyCreateFoodMuleBig` / `RemoveCreateFoodMuleBig`、`ApplyCreateGoldMuleBig` / `RemoveCreateGoldMuleBig`、`ApplyWagonLoadFoodBig` / `RemoveWagonLoadFoodBig`、`ApplyWagonLoadGoldBig` / `RemoveWagonLoadGoldBig` 與 `ApplyCommandsMule10k` / `RemoveCommandsMule10k`，支援單一選項聯動改寫實體容量上限與大容量生產／裝載按鈕，並保證 100% 精確反轉原版。
-  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 納入 `SUBAI\*.VS` 候選快照；套用時自動快照 6 個原始檔案至 `marker.Originals`，並記錄 `wagon_capacity_10k` 標記。反安裝時逐位元組還原原版 `data.pak`（合規 AGENTS.md §2.1 / §2.3）。
-  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `WagonCapacity10k`；`PatchPipeline` 納入 `wagon_capacity_10k` 標記檢查，`verify` 零假警報。
-  - **使用者介面**：GUI「遊戲設定」分頁新增「經濟與運輸規則」卡片與「運糧馬／運金馬運載上限提升至 10,000」選項，支援三語在地化。
-  - **命令列支援**：CLI 支援 `settings set --wagon-10k=on|off` 與 `settings get --json`。
-  - **自我驗證測試**：SelfTest 第 47 組測試擴充 10k 容量字串轉換、6 個檔案合成 pak 安裝、逐位元組原版還原與 CLI 驗證。
-
----
-
-### ISSUE-075: 運糧馬／騾子無法編入英雄編隊（解除右鍵跟隨限制並加入中央陣形護衛，新增「遊戲設定」選項）
-
-- **問題編號**: `ISSUE-075`
-- **提出日期**: 2026-09-04
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **來源**: 使用者需求：「用反編譯的方式找出讓馬可以編入英雄編隊」、「加入這個修改功能」
-
-- **逆向分析與根因**:
-  1. 遊戲中的運糧馬／商隊騾子（`Wagon` / `CVXWagon`）在引擎中繼承自 `CVXUnit`，底層 C++ 函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有針對 Wagon 的任何限制。
-  2. 英雄編隊腳本 `SUBAI\UNIT_ATTACH_VERIFY.VS` 會先呼叫 `.AsUnit()` 並檢查 `!IsEnemy()` 與 `!.HasFreedom`，Wagon 均完全符合條件。
-  3. 關鍵阻礙在於 `CLASSES\WAGON.SC.XML`：
-     - 它設定了 `<nodefcmdinherit/>`（取消一般單位的預設指令繼承，在 C++ 引擎 `0x00553510` 讀取並將 `[class+0xCA]` 設為 1，使 `0x00553B13` 跳過父類別 `Unit` 的預設指令）。
-     - 同時其預設指令僅定義了 `<defaultcmd target="Unit"><cmd name="follow"/></defaultcmd>`。
-     - 由於 `Hero` 繼承自 `Unit`，玩家選取運糧馬對英雄按右鍵時，引擎依類別繼承匹配到 `Unit` 的 `follow`，造成運糧馬永遠只會「跟隨（follow）」英雄，而不會觸發 `attach`（編隊）！
-  4. 此外，`FORMATIONS.XML` 原版未為 `Wagon` 類別定義位置，預設會套用 `Unit` 的 `FrontLine="1"`（排在陣形最前線），若直接編入會衝在最前線送死。而在原版中，農民（`Peasant`）與英雄（`Hero`）均被配置為 `CentralBlock="1"`（受部隊護衛的中央核心位置）。
-
-- **修復方案**:
-  - **核心邏輯**：`GameRulesModifier` 新增 `ApplyMuleHeroArmy` / `RemoveMuleHeroArmy`（在 `WAGON.SC.XML` 的 `target="Unit"` 之前精準插入 `target="Hero"` 的 `attach` 預設指令），以及 `ApplyMuleFormation` / `RemoveMuleFormation`（在 `FORMATIONS.XML` 各陣形的 `Peasant CentralBlock="1"` 旁加入 `Wagon CentralBlock="1"` 護衛位置）。兩者皆提供冪等性與精確反轉保證。
-  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 擴充納入 `FORMATIONS.XML`；安裝時當 `AllowMuleHeroArmy` 啟用，自動快照原始檔案至 `marker.Originals`，並記錄 `allow_mule_army` 標記。反安裝時 100% 逐位元組還原原版 `data.pak`，不留下任何 backup 目錄（合規 AGENTS.md §2.1 / §2.3）。
-  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `AllowMuleHeroArmy`；`PatchPipeline` 支援比對 `allow_mule_army` 標記，`verify` 零假警報。
-  - **使用者介面**：GUI「遊戲設定」分頁（`GameSettingsPage`）新增「允許運糧馬編入英雄隊伍」勾選框與說明文字，支援即時切換與繁中/簡中/英文三語在地化。
-  - **命令列支援**：CLI `settings set --mule-army=on|off` 與 `settings get` 完整支援該項目。
-  - **自我驗證測試**：SelfTest 第 47 組測試擴充覆蓋運糧馬 XML 修改、陣形位置注入、逐位元組原版還原與 CLI 讀寫驗證。
-
----
-
-### ISSUE-074: 維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）
-
-- **問題編號**: `ISSUE-074`
-- **提出日期**: 2026-09-04
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **來源**: 使用者需求：「找出把惟經領主跟自由鬥士變成一般士兵可以編入英雄隊伍的方法，用反編譯的方式，用方法一，加入修改器功能，新增一個頁面，你來命名來放這些修改遊戲設定的功能」
-
-- **逆向分析與根因**:
-  - `Celtic kings.exe` 字串表 `0x0073D710` 第 12 位為 `freedom`（bit 12: `0x00001000`）。
-  - `0x005C31EE` 解析 Class XML `speciality` 屬性並存入 `[class+0xF0]`；單位建構時由 `0x0050A7E0` 寫入 `[unit+0x138]`。
-  - `0x00513B00 Unit::HasFreedom` 導出給 VS 腳本；`SUBAI\UNIT_ATTACH_VERIFY.VS` 與 `SUBAI\UNIT_ATTACH.VS` 因 `if(.HasFreedom)` 阻擋編入英雄隊伍。
-  - 引擎底層 C++ 陣形與附著函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有檢查 `freedom`，因此只要移除 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML` 中的 `freedom` 特性標記，單位便能完全正常享受英雄陣形防禦、經驗分享，並完整保留其原有特性（維京領主保留吸血 `vampire`、自由鬥士保留踐踏 `trample`）。
-
-- **修復方案**:
-  - **核心邏輯**：新增 `GameRulesModifier` 提供 `HasFreedom` 判斷與 `RemoveFreedom` 安全精準 XML 轉換，並具備冪等性保證。
-  - **設定模型**：`ToolkitConfig` 新增 `GameSettingsConfig`（包含 `AllowVikingLordHeroArmy`, `AllowLiberatiHeroArmy`, `HasAnyModifications`），並掛載於 `ToolkitConfig.GameSettings`。
-  - **安裝管線**：`TrainerInstaller.Install` 支援傳入 `GameSettingsConfig`，當選項啟用時修改 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML`，並自動由既有快照機制納入 `marker.Originals` 實現 100% 精確逐位元組反轉（不留 backup 目錄，合規 AGENTS.md §2.1 / §2.3）。
-  - **標記檔與驗證**：`TrainerMarker` 擴充 `GameSettings` 屬性供診斷與 `verify` 比對；`PatchPipeline` 同步更新 `TrainerHasDataPakPayload` 與 `TrainerMarkerMatchesConfig`，保證 `verify` 零假警報。
-  - **使用者介面**：GUI 新增「遊戲設定」獨立頂層分頁（`GameSettingsPage`，置於修改器分頁旁），支援即時套用、三語在地化切換與配置持久化。
-  - **命令列支援**：CLI 新增 `settings get` 與 `settings set --viking-army=on|off --liberati-army=on|off`（支援 `settings` 與 `gamesettings` 指令別名）。
-  - **自我驗證測試**：SelfTest 新增第 47 組測試（`TestGameRulesModifierAndHeroArmyReversal`），全面覆蓋 XML 轉換、往返還原一致性、逐位元組原版還原與 CLI 指令。
-
----
-
-### ISSUE-073: 13 個 scoped hook 用 player 指標比對本機玩家，我方物件永遠被判成敵方
-
-- **問題編號**: `ISSUE-073`
-- **提出日期**: 2026-09-04
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **來源**: 追查 [ISSUE-071](#issue-071-unit_feeds-掛在一條人類玩家單位不會執行的常式上我方設-0-仍然消耗食物)
-  與 [ISSUE-072](#issue-072-train_speedresearch_speed-掛在原版腳本用不到的-objprogress-多載上生產與研究倍率完全沒有效果)
-  時發現的共通成因。
-
-- **症狀**: `.cktw` 套用正確、設定表正確、hook 確實被大量執行，但**每一項 scoped 調整都只會
-  套到「敵方」那一欄**。使用者只改我方時看起來就是「完全沒有效果」。
-  ISSUE-071 在 helper 內埋計數器的實機量測是最直接的證據：20 秒內 `entry = 32322`、
-  `enemy = 32322`、`self = **0**`——我方單位一次都沒有被判成 self。
-
-- **根因**: 所有 helper 的分流判定都寫成「比較 **player 指標**」：
-
-  ```
-  mov ecx,[0x008AA6C8]        ; engine
-  mov ecx,[ecx+0xCD0]         ; localPlayer
-  cmp [obj+0x6E],ecx          ; ← 指標比較
-  setne bl
-  ```
-
-  引擎自己**不是這樣判的**。`CVXUnit::ProcessFood` 在送出「army starving」通知前，
-  用的是 player 結構裡的**索引**：
-
-  ```
-  0050BA9B mov eax,[0x008AA6C8]
-  0050BAA0 mov edx,[ebp+0x6E]      ; 單位的 owner
-  0050BAA3 mov ecx,[eax+0xCD0]     ; 本機玩家
-  0050BAA9 mov eax,[edx+8]         ; owner 索引
-  0050BAAC cmp eax,[ecx+8]         ; ← 索引比較
-  0050BAAF jne ...
-  ```
-
-  `[player+8]` 是玩家索引，`Obj::GetPlayer`（`0x004F8630`）在 `0x004F868D` 讀的也是它
-  （回傳時 +1）。指標相等一定索引相等，反之不然——引擎既然在這種比對上選了索引，
-  就代表同一個玩家在執行期可能有不只一個 player 結構位址。
-
-- **修復**: 新增共用的 `EmitPlayerScope`／`EmitObjectScope` 產生器，
-  **13 個 helper 全部改成比較 `[owner+8]` 與 `[localPlayer+8]`**，
-  與引擎 `0x0050BA9B..0x0050BAAF` 的寫法逐條一致。
-  `BuildInitialGoldHelper` 更直接：它手上本來就是 constructor 的 slot 編號，
-  現在直接與 `[localPlayer+8]` 比，不必再用 `imul ebx,0x254` + `lea ...+0xCD4`
-  把索引還原成指標。
-
-- **測試與證據**:
-  - SelfTest 新增「所有 helper 以 player 索引而非指標分 self/enemy」正反雙向斷言：
-    每個 helper 都必須含有 `cmp <reg>,[<localPlayer>+8]`，且舊的
-    `cmp [esi+0x6E],ecx` ／ `cmp [ebp+0x6E],eax` ／ `cmp eax,edx` 寫法必須完全消失。
-  - 13 個 helper 全數以 `rz-asm` 自實際產物反組譯複驗，指令邊界與跳轉目標全部收斂。
-  - 對真實原版 EXE 做純記憶體 Apply／Reverse：3,516,344 → 3,526,656 bytes，
-    反轉後逐位元組相同、SHA-256 仍為
-    `86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`，
-    套用兩次與一次結果完全相同。
-
-- **待實機驗收**: 見第 2 節看板該列。**使用者必須先重新「套用」一次**。
-
----
-
-### ISSUE-072: `train_speed`／`research_speed` 掛在原版腳本用不到的 `Obj::Progress()` 多載上，生產與研究倍率完全沒有效果
-
-- **問題編號**: `ISSUE-072`
-- **提出日期**: 2026-09-04
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **使用者回報**: 「生產跟研究倍率都沒有效果。」（設定為我方 20×）
-
-- **先排除的無辜嫌疑（已對使用者的實際安裝逐項查核，不要再重查）**:
-  - **設定值正確**：`cktoolkit.json` 內 `train_speed.self = 20`、`research_speed.self = 20`。
-  - **EXE 確實已套用且是 ISSUE-069 世代**：`verify` 五個檔案全部 `matchesConfig=true`。
-  - **設定表寫對了**：`.cktw` 設定表 `cfg+0 = 0x00140000`（自 20.000×）、`cfg+4 = 0x00010000`、
-    `cfg+8 = 0x00140000`、`cfg+12 = 0x00010000`。
-  - **helper 數學正確**：`execdelay × 65536 ÷ Q16`，`execdelay=15000`／`Q16=0x140000` 得 750ms。
-  - **owner 欄位正確**：`Obj::player`（`0x004F8630`，尾段 `0x004F868A mov eax,[eax+0x6E]` →
-    `[player+8]+1`）證實 `+0x6E` 是所有 `Obj`（含 `Building`）的擁有者欄位；
-    `[engine+0xCD0]` 也確實是**本機玩家指標**而不是玩家陣列基底——寫入點
-    `0x00571FD0`／`0x00572535`／`0x00573F34` 都是 `lea ecx,[base + idx*0x254 + 0xCD4]`
-    後再存進 `+0xCD0`，`0x0056F211` 則在初始化時填 0。分流判定本身沒有問題。
-
-- **根因（靜態逆向，2026-09-04）**: hook 掛錯函式。`0x004FB6AB` 位於**零參數的
-  `Obj::Progress()`**（本體 `0x004FB5C0`，註冊於 `0x004FF964`）。引擎另外註冊了兩個相鄰入口：
-
-  | VA | 註冊名稱 | 舊版是否接管 |
-  |---|---|---|
-  | `0x004FB5C0` | `Obj::Progress`（0 參數） | ✅ 唯一被接管的 |
-  | `0x004FB4F0` | `Obj::Progress`（1 參數） | ❌ |
-  | `0x004FB790` | `Obj::cmddelay`（`0x004FB83E` 讀 `definition+0xF4`） | ❌ |
-
-  而原版 `data.pak` 的 barrack 訓練腳本（`COMMANDS.XML` 的 `method="train"`）寫的是
-  `.Progress((.cmddelay * perc) / 100)`——先用 `Obj::cmddelay` 取得 execdelay，
-  自己算完再呼叫一參數版本，兩個讀取點都不是 `0x004FB6AB`。研究（`method="research"`）
-  與英雄訓練、建築修復、造船才走零參數版本。
-
-- **實機測試崩潰與回退記錄 (2026-09-04)**:
-  - 先前嘗試引入 15 站點（於 `0x004FB7E8` 與 `0x004FB83E` 插入暫存槽與 cmddelay getter hook）。
-  - 使用者實機測試回報：「修改後進入單人遊戲閃退」。
-  - 當時把成因記成「`0x004FB790` 內 `eax` 是堆疊區域或子物件指標」。**這條記載是錯的**，
-    見下方 2026-09-04 第二輪的靜態證據；`0x004FB7E8` 的 `eax` 確實就是發令物件。
-  - **處置措施**：先回退為 11 站點世代，兩個站點 100% 還原為 Steam 原廠位元組。
-
-- **崩潰的真正成因（靜態逆向，2026-09-04 第二輪）**:
-
-  `.cktw` 是以 `IMAGE_SCN_CNT_CODE | IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_EXECUTE |
-  IMAGE_SCN_MEM_READ` 建立的節區——**沒有 `IMAGE_SCN_MEM_WRITE`**。15 站點世代的
-  `BuildCommandObjectHelper` 第一條指令就是 `mov [section+3840], eax`，也就是**對唯讀節區
-  寫入**，Windows 載入器把該節區映射成唯讀頁面，於是兵營第一次下訓練指令就
-  `0xC0000005` 當場閃退。與 `0x004FB790` 的暫存器語意完全無關。
-
-  `0x004FB7E8` 的 `eax` 是不是物件，引擎自己就給了證據：同一個 handle 解析樣板在
-  `Obj::GetPlayer`（`0x004F8630`）也出現一次，那裡在 `0x004F868A` 直接用
-  `mov eax,[eax+0x6E]` 取 owner；`Obj::cmddelay` 則在 `0x004FB7E8` 用
-  `add eax,0x7C` 取命令佇列，與零參數 `Obj::Progress` 的 `lea edi,[esi+0x7C]`（`esi`
-  百分之百是物件）是同一個欄位。
-
-- **修復（2026-09-04，13 站點世代）**:
-  - **改掛 `0x004FB83E`（`Obj::cmddelay` 的 execdelay 讀取點，原始 6 bytes
-    `8B 80 F4 00 00 00`），且完全不需要 scratch slot。** 進場時 `EAX` 是 command
-    definition（`+0xCF` traincommand／`+0xD0` researchcommand 由
-    `0x00552852`／`0x00552876` 的 `mov byte [edx+0xCF/0xD0], cl` 寫入，已逐條複驗），
-    發令物件則從**腳本 VM 堆疊頂端的 handle** 重新查表取得：
-    `mov ecx,[esi]` → `movzx ecx,word [ecx]` → `mov ecx,[ecx*4+0x00798CB8]`，
-    這正是引擎 `0x00481A20` 自己做的 `objects[handle & 0xFFFF]`。
-    `ESI` 在 `0x004FB794` 取得後到 `0x004FB83E` 之間沒有任何改寫，而 handle 也是
-    引擎在 `0x004FB79F` 剛剛用過的同一份資料，因此**零寫入、零堆疊位移猜測**。
-  - 這樣就補上了原版兵營訓練唯一會走到的路徑：`SUBAI\BARRACK_TRAIN.VS` 的
-    `.Progress((.cmddelay * perc) / 100)` 先呼叫 `Obj::cmddelay`，再呼叫**一參數**的
-    `Obj::Progress`（`0x004FB4F0`）——兩者都不經過 `0x004FB6AB`。
-  - 兩條路徑不重疊，不會被縮放兩次：`method="train"`／`"trainex"` 走 `cmddelay`；
-    `method="research"`（41 個指令）／`"trainpeasant"`／英雄訓練／建築修復／造船走
-    零參數 `Progress()`。`TAVERN_INVESTMENT.VS` 與 `TOWNHALL_ADDPOP.VS` 雖然也呼叫
-    `.Progress(.cmddelay)`，但它們的 definition 兩個旗標都是 0，helper 原封退回原值。
-  - **同時修掉真正讓研究倍率也失效的那一關**：見下方「敵我分流一律比較 player 索引」。
-
----
-
-### ISSUE-069: `.cktw` 的多人守衛在單人模式恆為 false，永久規則調整完全不生效
-
-- **問題編號**: `ISSUE-069`
-- **提出日期**: 2026-09-03
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **使用者回報**: 「永久規則調整沒有作用，我設定我方的效果完全沒有改變。」
-
-- **排除的無辜嫌疑（都已直接對使用者的安裝驗證過，不要再重查）**:
-  - 設定檔正確：`trainer.scopedTweaks` 內確實存在 8 組明確分流值。
-  - 套用管線正確：`Celtic kings.exe` 內確實有 `.cktw`（RVA `0x004CB000` / VA `0x008CB000`），
-    11 個 hook 站點全部改成 CALL，67 欄設定表逐欄等於設定檔（train/research 20×、
-    我方聚落產量 100000、人口成長間隔 1000ms、英雄帶兵 2000、我方不進食）。
-  - GUI／CLI／`ShouldRouteToScopedPatch` 的路由正確：這些 ID 確實沒有被重複寫進 `data.pak`。
-
-- **根因（實機記憶體證據，2026-09-03）**: 11 個 helper 開頭共用同一段 fail-closed 守衛，
-  第一關就是 `game = [0x008C1C8C]; test; jz done`。在真正執行中的遊戲行程裡讀到：
-
-  | 位址 | 實際值 |
-  |---|---|
-  | `[0x008C1C8C]` game | **0** |
-  | `[0x008AA6C8]` engine | `0x10E32740`（有效） |
-  | `[engine + 0xCD0]` localPlayer | `0x10E33414`（有效） |
-  | `[localPlayer + 0x08]` player id | `0` |
-
-  `0x008C1C8C` 是**網路對戰**的 game 物件，單人模式恆為 NULL——引擎全部 24 個讀取點都先
-  null-check，原廠 `IsMultiplayer`（`0x005983D0`）也正是靠它為 NULL 才回傳「單人」。
-  照抄成 fail-closed 之後守衛的效果是**反的**：hook 只有在多人才可能通過第一關，而多人
-  又會被 `byte[session+0x108]` 遮罩擋掉，於是 **11 個 hook 在任何模式都不會生效**。
-  owner 判定本身沒有問題（`[obj+0x6E]`／`[settlement+0x90]` 都是 player 物件指標，
-  引擎自己在 `0x004F17AE` 就用指標比較判同陣營）。
-
-- **修復（使用者決定：取消多人限制，全部照套）**:
-  - 8 處守衛（`BuildCommandHelper`／`BuildGoldProductionHelper`／`BuildFoodProductionHelper`／
-    `BuildInitialGoldHelper`／`BuildOwnerScalarHelper`／`BuildSpeedHelper`／`BuildFeedsHelper`／
-    人口四 hook 共用的 `EmitSettlementScopeSelection`）移除 game／session／multiplayer-mask
-    三段檢查，只保留 `[[0x008AA6C8]+0xCD0]` 本機玩家指標一關。helper 各縮短 38 bytes
-    （command 242→204、gold 182→144、food 188→150）。
-  - payload header flags 由 `FlagSinglePlayerOnly` 改寫成 `FlagsAllModes`(0)。
-  - **多人連線會 desync**：每一端依各自的 `localPlayer` 套用不同數值，模擬必然分岔。
-    這是使用者在知情下明示接受的取捨，三語說明、GUI 分流須知與 RunManifest 文案均已改述。
-  - **相容性**：辨識條件拆成 `HasOurHookLayout`（只比 11 個站點的跳板，與 helper 世代無關）
-    與 `HasCurrentHelpers`（helper 本體逐位元組）。`IsApplied`／`Reverse` 改用前者，否則使用者
-    升級工具後上一版修補的 EXE 會被 `PatchState` 判成第三方修改而**無法還原**；`Apply` 碰到舊
-    世代 section 會就地重建 helper 並強制重寫設定表；`verify` 仍要求後者，舊世代會回報不相符
-    以提示重新套用。
-
-- **測試與證據**:
-  - SelfTest 新增／改寫：flags 斷言、三組「helper 不得含多人偵測」反向圍籬、
-    「11 個 helper 全數不含 game/session 多人偵測」、舊世代 section 可辨識／可還原／
-    就地升級後等於全新套用、三語文案不得再宣稱「多人退回原版值」。全套 Phase 1–4 & 6 全綠。
-  - 沙箱端到端：以**使用者那顆舊世代已修補的 EXE** 為輸入跑完整 `apply`，還原→重套成功；
-    產物 `.cktw` 內 `8C 1C 8C 00`（game 全域）出現 **0** 次、多人遮罩比較 **0** 次，
-    而 `C8 A6 8A 00`（engine 全域）與 `+0xCD0` 各出現 **11** 次；`verify` 五個檔案全部
-    `matchesConfig=True`。
-  - 診斷探針 `scratch/probe_cktw.py`（gitignored）：進單人對局後執行即可讀出守衛鏈實際值。
-
-- **待實機驗收**: 見第 2 節看板該列。**使用者必須先重新「套用」一次**，因為現有 EXE 內是舊世代 helper。
-
----
-
-### ISSUE-068: 引擎只有 20 個硬編按鍵，18 個作弊塞不下而被靜默停用，修改器實際上改不到遊戲
-
-- **問題編號**: `ISSUE-068`
-- **發現日期**: 2026-09-02
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 使用者實測回報：「根本沒鍵可按／遊戲中面板上沒有那些按鈕」。修改器等於改不到遊戲。
-  - 直接讀取使用者的 Steam 安裝驗證，**檔案修補這一段完全正常**：`data.pak\SCDEBUG.XML`（8131 bytes）確實含 18 個作弊、`CKTRAINER.TXT` 標記完整、`Celtic kings.exe` 確實帶有 `.cktw`（`0x004CB000`）與 `.ckhr`（`0x004CD000`）節區、`update.pak` 與 `PATCH1.PAK` 都不含 `SCDEBUG.XML`（無覆蓋問題）、腳本用到的每一個引擎函式（`Place`、`Settlement::SetGold`、`Unit::AddBonus`、`Obj::AddItem`、`Wagon::LoadFood`、`Settlement::AddToPopulation`…）都確實註冊在 EXE 內。壞的是「觸發」。
-  - 根因是引擎只認 20 個硬編 scdebug 按鍵代號：9 個被遊戲用掉（F1/F2/F3/F5/F6/F7/F8/F9/F10）、5 個被原版 scdebug 綁走（Add/Sub/Mul/Pause/Tab），只剩 4 個自由鍵；小鍵盤模式雖有 13 個，但對映到的是筆電沒有的實體小鍵盤。使用者設定檔（`numpadKeys: true`、`keepVanilla: true`）中因此有 5 個作弊是 `enabled: false`，而 `InGamePanelForm` 只替「已啟用且綁得到鍵」的作弊建按鈕 —— 按鈕就這樣消失了。
-  - ISSUE-054／ISSUE-059／ISSUE-062 都是在這個 20 鍵預算裡搬東西，搬不出更多空間；ISSUE-054 當時列出的第三條出路（直接呼叫腳本編譯器）才是真正的解，本 issue 把它做完。
-- **逆向證據**（完整位址表與反組譯見 `docs/reverse-engineering-notes.md`「引擎腳本執行鏈」）:
-  - 按鍵入口 `0x0047D560` 先檢查 `[0x0074C3CC]`（設定變數 `[system] DebugKeys`，註冊於 `0x006C030D`，初值 1），再檢查 Shift(`0x10`)／Alt(`0x12`)／Ctrl(`0x11`)，任一按住就整個不派送，最後 `0x0047D5B2` 呼叫派送函式 —— 這是 `0x005E7650` 的唯一呼叫者。
-  - 派送函式在 `0x008AF108` 的 map 查鍵；節點 `+0x0E` 是鍵（short）、`+0x10` 是腳本原文 `char*`（`0x005E773B mov edi,[eax+0x10]` 之後直接當 `const char*` 用）。
-  - 尾段才是真正做事的部分：`0x005E0340` 編譯（`__cdecl (src, signature, ctx)`，signature 是字面量 `"void"` @ `0x007290B0`，ctx 是呼叫端在 `0x005E7749` 先歸零的 slot），失敗回 0 並經 `0x00470FB0` 印 `error in key-bound script: '%s'`；成功則依 `compiled+0x0E` 決定走 `0x005E1D70` 排程或 `0x005E0430` 同步執行＋`0x0041B480` vtable`+0x0C` 釋放。
-  - 也就是說：**按鍵只是把字串餵進 `0x005E0340` 的其中一種方式**，編譯與執行本身不需要按鍵。
-  - 順帶確認 `Place()` 確有回傳值（原廠 `SUBAI\BARRACK_TRAIN.VS`：`newunit = Place(cmdparam, Point(0,0), this.player);`），修改器腳本的 `o = Place(...)` 不是 ISSUE-017 那種殘留左值寫穿；`Point(x, y)` 亦為引擎自有建構子。
-- **修復方案與實作細節**:
-  - **`src/CKPerf/script.cpp`（新增）**：在遊戲行程內重現派送尾段。逐一比對七個進入點的原始位元組簽章（含派送 call site 與 `"void"` 字面量），任一不符就永久停用整條通道並寫進 `ckperf.log`；啟用前先跑 `ScriptChannelSelfTest()`（編譯 `int i; i = 1;` 後**不執行**直接釋放）；派送前確認遊戲主物件、主控台與腳本 VM 排程器都解得出合理指標，否則 fail-closed 回「不在對局中」；編譯與執行都包在 SEH 內，引擎故障回報成訊息而不是讓遊戲消失。
-  - **`src/CKPerf/frames.cpp`**：`SetDIBitsToDevice` 的 IAT hook 是行程內唯一保證在引擎主執行緒的呼叫點，抽取點掛在那裡（blit 之後，不延遲已經送出的那一幀）。安裝條件放寬為 `frameTiming || scriptChannel`，另加 `g_timingEnabled` 確保「只為通道安裝 hook」不會憑空產生 frame 統計記錄。
-  - **`src/CKPerf/common.cpp` / `dllmain.cpp` / `ckperf.h`**：新增 `scriptchannel` 與 `scripttoken` 兩個選項（權杖長度不對就連通道都不開）、`ScriptStatus` 跨行程狀態碼、安裝／卸載順序。權杖只記錄「有沒有收到」，永不寫進記錄檔。
-  - **`Core/Runtime/ScriptChannel.cs`（新增）**：具名管線客戶端 `\\.\pipe\ckperf-script-<pid>`，逐次連線、預期內失敗一律回 `Result`、訊息全走 I18n。
-  - **`Core/Runtime/ScriptChannelSession.cs`（新增）**：注入端產生權杖、面板端使用，只活在記憶體；行程編號對不上就拒絕，絕不拿舊權杖試新行程。
-  - **`Core/Trainer/Cheats.cs`**：新增 `BuildRuntimeScript` 與 `ResolveParameters`。**兩條路徑共用同一個 `Cheat.Script` builder**，不新增任何腳本邏輯；`BuildScDebug` 改為呼叫同一個 `ResolveParameters`，「cycle 借用 spawn 的清單」這條規則從此只有一份實作。游標類作弊在執行期路徑改為把引擎算好的座標當**字面值**寫進腳本（`Point(x, y)`），因此不再需要把座標寫回記憶體。
-  - **`Gui/InGamePanelForm.cs`**：面板現在列出**全部 18 個作弊**，不再以「已啟用」或「綁得到鍵」過濾。點擊優先走腳本通道，通道不可用才退回代送按鍵；狀態列改為三態（未連線／已連線僅送鍵／已連線腳本通道）。探測與送出一律在執行緒集區上等，不阻塞訊息幫浦（ISSUE-059 的教訓）。
-  - **`Gui/MainForm.cs`**：修改器開著時啟動遊戲一定注入；效能頁保護關閉時走 `CreateScriptChannelOnlyOptions()`（只開通道，不替使用者打開任何他關掉的保護）。開啟面板時若遊戲已在跑但沒有通道（典型：直接從 Steam 開），就地掛載補上，失敗只記錄不擋面板。
-  - **`Cli/CliHost.Trainer.cs`**：新增 `trainer exec --cheat <id> [--param k=v]… | --script <VS>`，支援 `--json`，供 AI 代理程式直接改「正在跑的這一場」。遊戲沒在跑或這一場沒有通道一律 fail-closed。
-  - **`AGENTS.md` §2.9** 改寫為兩項明列例外，並把簽章驗證、上線自證、必須在對局中、主執行緒、零磁碟、權杖六條紀律逐條寫入；`docs/reverse-engineering-notes.md` 新增完整位址表。
-- **驗證狀態與實測指引**:
-  - SelfTest 新增第 46 組 `RuntimeScriptChannel`：18 個作弊的執行期腳本與 `SCDEBUG.XML` 內容**逐字相同**、腳本為單行且無行註解、游標座標代入只換掉取點呼叫、權杖與工作階段 fail-closed、注入選項字串、面板在零啟用作弊時仍列出全部 18 顆按鈕、以及與 `ckperf.h` 共用的協定常數。
-  - `ckperf.dll` 以 MSVC Win32 Release 重建成功；`dotnet build CKToolkit.sln -c Release` 0 warning／0 error；完整 SelfTest 全綠、0 NG。
-  - **以上全部是本機／合成證據。** 通道是否真的在引擎裡跑起來、18 顆按鈕是否真的都生效，必須依第 2 節的實測步驟在真實遊戲確認後才能改為 ✅。
-
----
-
-### ISSUE-067: Core 與 Cli 有 92 處硬編繁體中文錯誤訊息，英文與簡中使用者會看到繁中
-
-- **問題編號**: `ISSUE-067`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `Core/` 與 `Cli/` 共 92 處 `Result.Fail(...)` 與 `throw new ...Exception(...)` 直接寫死繁體中文，完全繞過 I18n，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
-  - 這些訊息會經由 `PatchPipeline` 轉成 `Result.Fail` 或由 CLI 的最外層例外邊界直達使用者。英文與简体中文使用者遇到損毀的 pak／PE、格式錯誤的語言包、遊戲未啟動、等待逾時等情況時，一律看到繁體中文。
-  - 分布：`ScopedTweakPatch.cs` 25、`LanguagePack.cs` 19、`PeFile.cs` 10、`HmmPak.cs` 9、`GameRunner.cs` 9、`PackLoader.cs` 4，其餘 16 處散在 11 個檔案。另有 `Gui/ProfilerPage.cs` 一處同類問題（輸出資料夾建立失敗的記錄訊息）。
-- **修復與證據**:
-  - 分五批處理，每批完成後皆執行建置與完整 SelfTest 才進入下一批。
-  - 依可觸發性分流：使用者正常操作可觸發者（檔案被第三方改過、語言包格式錯、pak／PE 損毀、遊戲未啟動、逾時，以及 §2「對不上就拒絕」整類拒絕訊息）一律走 I18n；僅在本工具自身邏輯出錯時才觸發的內部不變式改為帶 `Internal:` 前綴的英文，不佔用翻譯資源。
-  - 改為英文的四處：`.cktw helper 超出保留空間`、`重複的 x86 label`、`找不到 x86 label`（皆為 `.cktw` 內建 x86 組譯器的不變式）、以及 `PatchPipeline` 的模組重複註冊。
-  - 92 個呼叫點收斂為 76 個字串鍵：12 個「缺少必要欄位」合併為單一參數化鍵 `Error_LangPackMissingField`，4 個「X 原始指令不符，拒絕建立 .cktw」合併為 `Error_CktwOriginalMismatch`，其餘重複句型一併收斂。
-  - 十六進位參數（如 `0x{pos:X}`）改為在 C# 端先格式化再傳入，字串鍵維持單純的 `{0} != {1}`，避免把 C# 格式規格洩進翻譯檔。
-  - 三語字串 740 → 817 鍵（含 `Gui_Profiler_OutputDirFallback`），鍵集 100% 一致、佔位符數量與索引三語一致。
-  - 全庫掃描確認原始 92 處已歸零。Debug／Release 建置 0 warning / 0 error，SelfTest 1014 個斷言全綠，CLI `status` / `lang list` 煙霧測試 `ok:true`。
-- **驗證邊界**:
-  - SelfTest 既有的 I18n 一致性群組會持續守住三語鍵集與佔位符一致性，但**沒有**針對這 76 個新鍵的實際觸發路徑做斷言——多數需要刻意損毀遊戲檔案或語言包才會觸發。因此實機驗收時應至少在非繁中語系下觸發一到兩條錯誤路徑，確認顯示語言正確。
-
----
-
-### ISSUE-066: 修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值
-
-- **問題編號**: `ISSUE-066`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 修改器有「永久規則調整」與「敵我／聚落分流」兩個子分頁。前者列出全部 28 個 tweak 的單一全域值，後者再列出其中支援 owner-aware hook 的項目並提供分流欄，因此同一個 tweak 同時出現在兩個分頁、有兩個互相競爭的輸入位置。
-  - `Gui_Trainer_TweaksScopeNotice` 甚至明文寫著「要分開設定我方與敵方數值，請改用『敵我／聚落分流』分頁」，把這個割裂直接暴露給使用者。
-  - 更關鍵的是那個全域值是誤導性的：`ScopedTweakPatch.ShouldRouteToScopedPatch` 顯示，只要該 tweak 支援分流且值不等於原廠值，`TrainerInstaller` 就會跳過 `data.pak` 寫入、整筆改走 `.cktw`。也就是說可分流項目的「全域值」早就不是多人可用的路徑，使用者卻會以為那是一個適用敵我雙方與多人的設定。
-- **修復與證據**:
-  - 依使用者決定（2026-09-01）：所有可以分敵我的修改一律只保留分流設定，不再提供全域值。兩個分頁合併為一個「永久規則調整」，垂直堆疊為 警語 → 全域數值表格 → 重設 → 我方／敵方與聚落分流兩表並排 → 重設。
-  - 全域表格改為只列出 `ScopedTweakPatch.IsSupportedScopedTweakId` 為 false 的項目：目前是 7 個（`hero_maxhealth`、`hero_speed`、`hero_sight`、`hero_health_per_level`、`hero_exp_divider`、`gaul_unit_power`、`roman_unit_power`）。其餘 21 個（15 個我方／敵方、6 個四向聚落）只在分流表格編輯。
-  - 這是無損改動：那 21 個項目的全域值本來就不會寫進 `data.pak`。移除後未設定的 scope 依 `GetScopedFallbackValue` 退回原廠值，`ShouldRouteToScopedPatch` 也改為純粹依明確分流值判斷，語意更乾淨。
-  - 三語新增 `Gui_Trainer_TweaksGlobalLabel`，並改寫 `Gui_Trainer_TweaksScopeNotice` 使其不再指向已不存在的分頁（739→740 鍵，parity 0/0，佔位符一致）。警語依使用者決定保留而非改為逐列 tooltip。
-  - 警語的數量參數改為 `Tweaks.All.Count(t => ScopedTweakPatch.IsSupportedScopedTweakId(t.Id))` 動態計算，不再硬編。
-  - SelfTest 第 40 組新增 6 個斷言鎖定合併後的組成：只剩兩個子分頁、全域表格只含無 hook 項目、分流表格完整覆蓋 21 項、無任何 tweak 同時出現在兩處、合計恰好 28 且不重複。
-  - 連帶修正過時斷言：第 43 組的 `VerifyTrainerPageDescriptionAdapter` 原本在全域表格查找 `townhall_maxgold`，該項目已正確移入分流表格，改為查找仍無 hook 的 `hero_maxhealth`；斷言目的（全域表格 tooltip 走 description adapter）未放寬。
-  - Debug／Release 建置 0 warning / 0 error，SelfTest 1008 → 1014 個斷言全綠。CLI `trainer list-tweaks` 契約不變，仍回報 28 個 tweak、其中 21 個 `scopedSupported`。
-- **後續**:
-  - 全域表格的 7 個項目是暫時狀態。依 ISSUE-049，高盧／羅馬種族倍率因無反組譯證據而明確擱置，5 個英雄屬性則是尚未實作 hook。等 ISSUE-049 補完，這些項目也應轉為分流，全域表格屆時會縮減至消失。
-
----
-
-### ISSUE-065: CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項
-
-- **問題編號**: `ISSUE-065`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `CliHost` 的全域選項解析迴圈（`src/CKToolkit/Cli/CliHost.cs`，約 125–145 行）只認得 `--json`、`--game`、`--config` 三個選項，其餘 token 一律丟進 `commands` 清單。派送時只檢查 `commands[0]`，所以未知**指令**會被擋下（exit 2），未知**選項**卻變成沒人讀的多餘位置參數而被靜默忽略。
-  - 實測（Debug 建置）：`status`、`verify`、`perf get`、`lang list`、`trainer list-cheats`、`version` 傳入 `--bogus-option zzz` 全部回傳 `ok: true` 與 exit 0。相對地 `save list`、`perf set`、`trainer set` 有自己的選項白名單，會正確回傳 `ok: false` 與 exit 2 —— 契約在同一支 CLI 內不一致。
-  - **最危險的案例**：`status --gam "C:/not/a/game"` 回傳 `ok: true`，並且靜默改用自動偵測到的安裝目錄。AI 代理程式只要把 `--game` 打錯一個字母，就會在**另一套安裝**上得到看似成功的結果。這與 ISSUE-045 是同一個失效模式，只是從另一扇門進來。
-  - **`--json` 會遺失**：`--game` / `--config` 用 `i + 1 < args.Length` 判斷後就無條件吃掉下一個 token，完全不檢查那個 token 是不是另一個選項。實測 `status --game --json` 會把 `--json` 當成遊戲目錄值，結果 exit 3 而且**輸出是純文字而非 JSON**；`status --config --json` 則 exit 0、靜默退回預設設定檔，同樣沒有 JSON。這直接違反 AGENTS.md §1「CLI 永不互動、永遠可用 `--json` 取得穩定結構化輸出」。
-  - 選項若出現在最末位而沒有帶值（`i + 1 < args.Length` 為 false），會落入 `else` 分支變成指令 token，同樣被靜默忽略而不是報錯。
-- **修復與證據**:
-  - 全域解析改為先掃一遍 `--json` 再處理其餘選項，因此連解析階段自己的錯誤都必定以合規 JSON 封套輸出，不會再退回純文字。
-  - `--game` / `--config` 取值前先檢查下一個 token 存在且不是以 `--` 開頭；缺值或值本身是選項時回傳 `Error_OptionRequiresValue` 與 `ExitCodes.InvalidArgs`。
-  - 新增 `NoOptionCommandTokenCount` 與 `RejectExtraArgs`：`help`／`version`／`status`／`apply`／`verify`／`perf get`／`lang list`／`lang uninstall`／`trainer list-cheats`／`trainer list-tweaks`／`trainer apply` 這些不吃選項的指令，多餘 token 一律以 `Error_UnknownOption` 拒絕。全域迴圈仍然把無法辨識的 token 往下傳，因為 `--help` 與 `perf set --resolution` 等子指令選項都靠這條路，把關責任落在各指令自己的白名單。
-  - `HandleRestore` 現在拒絕 `--all` 以外的 token，且該檢查排在任何檔案存取之前，因此 `restore --all --bogus` 不會碰到任何遊戲檔案。
-  - 三語新增 `Error_UnknownOption` 與 `Error_OptionRequiresValue`（737→739 鍵，parity 0/0）。
-  - 實測驗證：`status --gam <path>`、`status --bogus zzz`、`perf get --bogus`、`lang list --bogus`、`trainer list-cheats --bogus`、`version --bogus`、`status --game --json`、`status --config --json`、末位懸空的 `--game` 全部回傳 exit 2、`ok:false` 且輸出為 JSON；`status --game --json` 由原本的 exit 3 純文字修正為 exit 2 JSON。合法用法（`status`／`verify`／`perf get`／`lang list`／`trainer list-cheats`／`version`／`help`／`save list` 加 `--json`）全部維持 exit 0、`ok:true`；`perf set --resolution 1920x1080` 等子指令選項仍正常接受；實測後遊戲檔案 mtime 未變動。
-  - SelfTest 新增第 45 組「CLI 未知選項與選項取值嚴謹度測試」共 25 個斷言，涵蓋 8 個不吃選項指令的拒絕與正常路徑、`--gam` 打錯字、`--game`／`--config` 吞值與懸空、以及 restore 的兩條錯誤路徑。Debug／Release 建置 0 warning / 0 error，SelfTest 1008 個斷言全綠。
-- **影響範圍**:
-  - 只影響 CLI，GUI 不受影響。`apply` 與 `restore` 走同一套全域解析，因此打錯 `--game` 會對自動偵測到的安裝套用修補，屬於會實際寫入遊戲檔案的風險路徑。
-
----
-
-### ISSUE-064: 關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉
-
-- **問題編號**: `ISSUE-064`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `MainForm.PersistCurrentUiSilently` 以 `try { _config = SnapshotConfiguration(); _config.Save(); } catch { }` 包住整個存檔流程。`SnapshotConfiguration` 會呼叫各頁 `SaveConfig`，其中 `TrainerPage.SaveConfig` 會因為按鍵未指定、數值超出範圍或按鍵衝突而丟出例外。
-  - 這條路徑掛在 `FormClosing` 上，因此使用者在修改器頁留下一個無效欄位後直接關閉視窗，整份 UI 變更會無聲消失，畫面上沒有任何提示，下次開啟時看到的是舊設定。
-- **修復與證據**:
-  - 空 catch 改為捕捉例外並寫入主視窗記錄區，明確告知使用者「本次關閉未能儲存設定」以及原因，同時維持原本「不阻擋關窗、不彈出對話框」的行為，避免關閉流程被打斷。
-
----
-
-### ISSUE-063: 修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵
-
-- **問題編號**: `ISSUE-063`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `TrainerPage.OnKeyCaptured` 只比對格線內是否有其他列已佔用同一個 id，完全沒有呼叫 `Cheats.DescribeConflict`。使用者可以順利把 `Del`、`Ins`（或勾選保留原版時的 `Add`／`Sub`／`Mul`／`Pause`／`Tab`）擷取進去並看到正常顯示，直到按下「套用」才被 `Cheats.BuildScDebug` 丟出例外擋下，錯誤訊息與當初操作已經脫節。
-  - 核心早就提供 `Cheats.FreeKeys(numpadKeys)` 與 `Cheats.DescribeConflict(key, keepVanilla, numpadKeys)`，UI 卻沒有接上。
-  - 另外 `DescribeConflict` 原本回傳硬編繁體中文（`遊戲：說明`、`原版：加速`），一旦顯示在 UI 上就會讓英文與簡體中文使用者看到繁體中文，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
-- **修復與證據**:
-  - `Cheats.GameReservedKeys`／`VanillaReservedKeys` 改為對應 I18n 鍵名，`DescribeConflict` 透過 `Strings.Get` 解析；三語各新增 18 個鍵（717→735），涵蓋 15 個保留鍵佔用者名稱、兩個 `Trainer_Conflict_*` 格式字串與 `Gui_Trainer_KeyCaptureReserved`。
-  - `OnKeyCaptured` 在既有的重複檢查之後補上保留鍵檢查，衝突時以 `Gui_Trainer_KeyCaptureReserved` 顯示「哪一顆鍵被誰佔用」並維持擷取狀態，讓使用者當場改按其他鍵，不再延後到套用時才失敗。
-  - 保留鍵判定隨「小鍵盤模式」與「保留原版功能」兩個核取方塊即時生效，與核心 `ValidateBindings` 使用完全相同的規則來源。
-
----
-
-### ISSUE-062: 18 個作弊有 6 個在兩種按鍵模式下都無鍵可綁而被靜默停用
-
-- **問題編號**: `ISSUE-062`
-- **發現日期**: 2026-09-01
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 引擎只有 20 個硬編 scdebug 按鍵 id（F1..F12, Pause, Add, Sub, Mul, Del, Ins, Backspace, Tab）。ISSUE-053 把 F2/F3/Del/Ins 補進 `Cheats.GameReservedKeys` 之後，可用鍵位預算被壓縮成：原版模式＋保留原版只有 4 個（F4/F11/F12/Backspace）、小鍵盤模式＋保留原版 13 個（F1..F12/Backspace），但預設按鍵表沒有跟著重排。
-  - 小鍵盤模式下 6 個作弊的 `NumpadKey` 全部落在保留鍵上：`spawn_unit`=Sub、`cycle_unit`=Add、`spawn_item`=Mul、`cycle_item`=Del、`set_selected_level`=Pause、`game_speed`=Ins。`ToolkitConfig.DisableConflictingTrainerBindings` 在載入時把它們全部靜默停用，`perf get --json` 的 warnings 已實際重現這 6 筆。
-  - `InGamePanelForm` 建立按鈕時會跳過未啟用的作弊，因此「在滑鼠位置生成單位／物品」這兩個作弊會從遊戲中面板消失 —— 而 AGENTS.md §2.9 明訂該面板存在的唯一理由就是這兩項的游標取點。ISSUE-054／ISSUE-059 的成果被 ISSUE-053 的修正抵銷。
-  - 原版模式另有 9 個作弊的 `DefaultKey` 直接壓在遊戲功能鍵上，且 `Del` 被 `buff_army` 與 `toggle_fog` 重複指派、`Ins` 被 `explore_all` 與 `spawn_item` 重複指派；兩組撞鍵目前只是被新的 `DefaultEnabled` 守衛遮蔽，使用者一旦手動勾選就會觸發 `Error_TrainerDuplicateKey`。
-- **修復與證據**:
-  - 確立不變式並寫進程式碼註解：任何作弊的 `DefaultKey`／`NumpadKey` 都不得落在 `GameReservedKeys`（那些鍵永遠無法解放），且同一模式內不得重複；該模式沒有合法鍵時一律留空，由使用者手動綁定。
-  - 小鍵盤表只動三筆：`spawn_unit` Sub→Backspace（依 §2.9 優先取得最後一個永久自由鍵）、`cycle_item` Del→Sub、`game_speed` Ins→Tab。重排後 18 個作弊佔用 18 個相異鍵且零保留鍵；關閉「保留原版功能」時 18 個可同時生效，開啟時 13 個可用（引擎硬上限）。
-  - 原版表把 9 個壓在遊戲鍵上的作弊改為空鍵（`gold_fill`／`food_fill`／`buff_army`／`explore_all`／`toggle_fog`／`cycle_unit`／`spawn_item`／`cycle_item`／`set_selected_level`），同時消除 Del／Ins 兩組重複指派；其餘 9 個合法鍵維持不變，`DefaultEnabled` 仍為 4/18，無行為退步。
-  - SelfTest 新增測試群組永久鎖定：預設鍵合法性、零遊戲保留鍵、模式內唯一性、`FreeKeys` 為 4/13、13 個小鍵盤預設啟用彼此不撞、`CursorPositionCheats` 的鍵必為自由鍵、以及 18 個作弊全開時 `BuildScDebug` 在 keepVanilla 關閉下不丟例外、開啟下必丟例外。
-  - 既有設定檔不會只被停用：`ToolkitConfig` 的遷移改名為 `ResolveConflictingTrainerBindings`，採兩遍處理——第一遍記下沒有衝突的已啟用綁定佔走的鍵，第二遍對衝突綁定先嘗試改綁回該作弊「目前」的預設鍵，預設鍵同樣不可用或已被別人佔走時才停用。絕不搶走其他綁定已佔用的鍵，也絕不指派使用者從未選過的任意鍵。
-  - 實機設定檔驗證：使用者原設定（numpadKeys=true、keepVanilla=true）載入後 `spawn_unit` 由 `Sub` 自動改綁為 `Backspace` 並維持啟用，遊戲中面板因此重新取得游標生成按鈕（AGENTS.md §2.9）；其餘 5 項（cycle_unit/Add、spawn_item/Mul、cycle_item/Del、set_selected_level/Pause、game_speed/Ins）在保留原版下確實無鍵可用而停用，這是引擎 13 鍵上限的必然結果，不是缺陷。
-- **後續（2026-09-02，ISSUE-068 已取代本項的實用價值）**:
-  - 本 issue 的結論「13 鍵是引擎硬上限，塞不下是必然」在**按鍵路徑上仍然成立**，但按鍵已經不再是修改器唯一的觸發方式。[ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) 讓遊戲中面板直接把腳本送進引擎的編譯器，18 個作弊全部可用且沒有任何按鍵預算。
-  - 因此**不要再回頭重排預設按鍵表來「擠出」更多作弊**。按鍵表現在的職責只剩「想用鍵盤的人可以綁」，本 issue 建立的不變式（不得落在 `GameReservedKeys`、模式內唯一、沒有合法鍵就留空）繼續有效，但綁不到鍵不再等於作弊不可用。
-  - 三語新增 `Migration_TrainerReboundConflictingKeys` 與 `Migration_TrainerKeepVanillaHint`（735→737 鍵，parity 0/0）。停用提示只在「保留原版功能」確實擋掉鍵時才附加，keepVanilla 已關閉時不會給出錯誤建議。
-  - 連帶修復本次重排引進的回歸：`SetKeyCell` 對空預設鍵寫入的是空字串而非 null，而 `TrainerPage.SaveConfig` 的判斷是 `if (key is null)`，導致原版按鍵模式下任何儲存／套用都會在第一個空鍵列丟出 `Gui_Trainer_InvalidKey`，即使該列已停用。已改為 `string.IsNullOrEmpty(key)`。此回歸是在跑完整 SelfTest 時才暴露出來的。
-  - SelfTest 第 44 組（18 個斷言）鎖定按鍵表不變式，另於 ToolkitConfig 遷移測試新增 8 個斷言涵蓋改綁、預設鍵被佔用時讓位、關閉保留原版後可改綁，以及提示訊息的出現與不出現條件。Debug／Release 建置 0 warning / 0 error，SelfTest 983 個斷言全綠。
 
 ---
 
@@ -818,6 +452,8 @@
 ---
 
 ### ISSUE-048: `ckrun-config.txt` 與 `verify` 只比較設定／修補名稱，會錯報遊戲實際修改內容
+- **2026-09-13 複查補充**：現行 Verify 對 EXE scoped payload 與 data.pak trainer marker 有額外比對，但仍未比較 Launcher 實際寬高、HiRes 容量、`vxSettings.ini` resolution／動畫值及 data.pak 解析度清單；同一 patch 名稱、不同設定值仍可能得到 `matchesConfig=true`。驗收須逐一竄改上述實際 payload，確認唯讀 verify 能指出精確欄位且零寫入。
+- **2026-09-14 修復**：Verify 在名稱與 marker 比對後，會從現行檔案記憶體正規化並依設定重建 EXE、Launcher、data.pak、vxSettings 的期望 payload，再做逐位元組比較；新增 Launcher 同 patch 名稱但寬高錯誤及五檔零寫入測試。⏳ 待實機確認真實遊戲檔案輸出。
 
 - **問題編號**: `ISSUE-048`
 - **發現日期**: 2026-08-24
@@ -830,37 +466,6 @@
   - `verify` 現在會比對 `TrainerMarker.Cheats/Tweaks` 與實際非預設 payload，並比對 `.cktw` 的完整 legacy 設定；只存在同名 patch 而 payload 不符時回報 `matchesConfig=false`。
   - `ckrun-config.txt` 現在從遊戲目錄唯讀解析 `data.pak` marker 與 `.cktw`，另外列出本次期望設定，不再把設定物件冒充實際狀態。
   - Release build 與 SelfTest 全部通過；尚未取得真實遊戲場次的 marker/manifest 交叉驗收，因此保留待實測狀態。
-
----
-
-### ISSUE-056: 修改器缺少遊戲速度調整
-
-- **問題編號**: `ISSUE-056`
-- **發現日期**: 2026-08-31
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 使用者要求修改器加入遊戲速度調整，且必須能在面板中動態調整，而不只是熱鍵循環。
-- **逆向分析與根因**:
-  - 一度考慮直接寫記憶體，實際反組譯後判定**不可行**：
-    `SetSpeed` 的 handler 在 .text VA `0x00595530`，它不把值存進變數，而是配置一個
-    0x10 位元組的命令物件（vtable `0x0070BEF4`）、把速度放進 `[obj+0xC]`，
-    再經 `[[0x008AA6C8]+0xCD0]` 丟進 `0x0056FE10` 的命令佇列（RTS 為連線／重播
-    決定性的典型設計）。`GetSpeed`（VA `0x005955B0`）讀的 `[[0x008AA6C8]+0xC58]` 只是結果。
-  - 直接寫那個位址會繞過引擎自己的簿記，值不會真的改變節奏。因此速度一律讓引擎自己執行
-    `SetSpeed(n)`，**不擴張 AGENTS.md §2.9 的記憶體存取範圍**。
-- **修復方案與實作細節**:
-  - 新增作弊 `game_speed`「循環切換遊戲速度」：按一下切到清單裡的下一個倍率
-    （可選 1/2/3/5/10/20/50/100，出廠 `1,2,5,10`），沿用 `EnvReadInt`／`EnvWriteInt`
-    的每位玩家環境變數循環慣用法。腳本產生 `SetSpeed(n * 1000)`——引擎原生基準是 1000。
-    預設關閉，`defaultKey: "Mul"`／`numpadKey: "Ins"`（`Ins` 是小鍵盤模式僅剩的空槽之一）。
-  - 面板加入速度列：數值 1~100 加「套用」按鈕，走既有的
-    `Core/Perf/GameSpeed`（主控台路徑，引擎自己執行 `SetSpeed`）。
-    1 倍走 `GameSpeed.Restore`——`Apply` 對 1 以下是 no-op，那是分析器「只加速」的語意。
-  - SelfTest 新增 6 項：腳本含 `SetSpeed(s);`、1/10/100 倍分別等於 1000/10000/100000、
-    使用環境變數循環、非法倍率清單退回出廠值而不是產生空的 if 鏈。
-- **實機驗收結果與紀錄**:
-  - 待使用者實機確認：面板套用是否即時生效、主控台輸入列痕跡是否可接受、
-    循環作弊是否正確依序切換、高倍率下是否觸發 ISSUE-005 的模擬端卡頓。
 
 ---
 
@@ -984,19 +589,6 @@
   - **`SelfTest`**：Group 1（過濾往返）、Group 9（三語一致性）、Group 32（Retired/ById 與 ApplyAll 略過／未知 ID 拒絕）、Group 33（CLI 廢棄錯誤訊息）新增測試，41 組全數綠燈通過。
 - **驗證狀態與實測指引**:
   - 待使用者在真實遊戲實機確認升級後舊設定檔套用順暢且無副作用。
-
----
-
-### ISSUE-004: 第三方自製語言包匯出與匯入上手機制
-- **問題編號**: `ISSUE-004`
-- **發現日期**: 2026-08-21
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 語言包擴充架構需確認外人能否透過 `export-template` 與 GUI 匯入功能順利製作新語言。
-- **修復方案與實作細節**:
-  - 實作 `LangPackService.cs`（安全路徑防護、Staging 原子替換）與 `LanguagePage.cs`（匯入／匯出對話框）。
-- **驗證狀態與實測指引**:
-  - 實機匯出並匯入自訂語言包，確認遊戲 `local.pak` 正常載入。
 
 ---
 
@@ -1245,105 +837,6 @@
 
 ---
 
-### ISSUE-034: 手改或舊版設定可繞過 4096x2400 解析度硬上限
-- **問題編號**: `ISSUE-034`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 手改設定檔為超限解析度（如 5K / 5120x2880）時，舊版核心管線未攔截，可能導致寫入超出 32px 網格之危險數值。
-- **修復方案與實作細節**:
-  - `PatchPipeline.cs` 與 `PerfModule.cs` 核心套用層強制呼叫 `CellGridPatch.IsSurfaceSupported` 進行防禦檢查；超出 4096x2400 一律拒絕套用且 5 檔零寫入。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 34 通過；本機實際執行 `perf set --resolution 5120x2880 --json` 立即回傳失敗並成功攔截。
-  - **實機測試指引**：手動在設定檔寫入 5K 解析度並套用，確認工具箱直接拒絕且遊戲檔案零寫入。
-
----
-
-### ISSUE-035: RestoreAll 後段失敗時前段檔案已被部分還原
-- **問題編號**: `ISSUE-035`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `PatchPipeline.RestoreAll` 原本採循序逐檔邊處理邊寫入，後段檔案失敗時前段檔案已被修改，留下不一致狀態。
-- **修復方案與實作細節**:
-  - 實作兩階段暫存（Staged）機制：先在記憶體中完成全部 5 個目標檔案的辨識、正規化與疊加驗證，全部成功後方進行磁碟原子寫入。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證後段檔案 missing/unrecognised 時，前段檔案 100% 保持原樣（零寫入）。
-  - **實機測試指引**：在目標檔案被佔用或損壞情境下執行還原，確認所有檔案狀態一致。
-
----
-
-### ISSUE-036: 損壞設定檔 fail-open，修改命令仍用預設值寫入
-- **問題編號**: `ISSUE-036`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 設定檔 JSON 解析失敗時，舊版修改命令會以預設值覆寫並抹除使用者原有設定。
-- **修復方案與實作細節**:
-  - `ToolkitConfig.Load` 當 `LoadError != null` 時強制實施 Fail-Closed 策略；所有修改命令（CLI 與 GUI）在設定載入錯誤時拒絕寫入。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證損壞 JSON 設定檔下所有套用與修改指令均被拒絕且零寫入。
-  - **實機測試指引**：製造格式錯誤之 `config.json` 執行修改命令，確認工具箱拒絕修改且原檔內容不被清空。
-
----
-
-### ISSUE-037: 第三方語言包 metadata 可造成 INI 注入與資源耗盡
-- **問題編號**: `ISSUE-037`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - `gameLangKey` 未驗證 CRLF，可能導致 INI 注入；`font.ranges` 未限制碼位跨度，可能引發 DoS 資源耗盡。
-- **修復方案與實作細節**:
-  - `IniFile.SetValue` 於底層嚴格攔截 CR/LF 字元；`LanguagePack.cs` 與 `PackLoader.cs` 限制 `font.ranges` 必須為有效 Unicode scalar 且單一區間跨度不超過 65,536。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 37 通過，非法識別字與巨量碼位宣告均被拒絕。
-  - **實機測試指引**：匯入帶有惡意 CRLF 或超大碼位範圍之語言包，確認工具箱直接拒絕匯入。
-
----
-
-### ISSUE-038: 語言包 marker 可解析但內容不完整時會被錯判為可安全反轉
-- **問題編號**: `ISSUE-038`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 空的或不完整的 `.patch_marker.json` 曾被誤判為 `PatchedByUs`，導致反安裝時無法正確還原 APF 字型。
-- **修復方案與實作細節**:
-  - `PatchState.InspectLocalPak` 嚴格驗證 marker 結構中之 `Version`、`PackId`、`AddedEntries` 與 `Fonts` 字典完整性；任一缺漏一律標記為 `Unrecognised` 並拒絕寫入。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證空 marker 與竄改 marker 均被判定為 `Unrecognised` 且反安裝零寫入。
-  - **實機測試指引**：手動置入損壞 marker 執行 verify，確認工具回報未辨識檔案並拒絕修改。
-
----
-
-### ISSUE-039: 玩家統計 GUI 會截掉未滿一小時時間，兩個 writer 可互相覆蓋
-- **問題編號**: `ISSUE-039`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 玩家統計對話框僅載入整數小時，儲存時可能將未滿 1 小時之精確毫秒歸零；無鎖更新可能導致 GUI 與 CLI 競寫覆蓋。
-- **修復方案與實作細節**:
-  - `PlayerStatisticsDialog.cs`：保留原始總毫秒數，未修改時間時不抹除餘數。
-  - `SaveManager.cs` 與 `PlayerStatistics.cs`：讀寫 `player.ini` 使用跨程序獨佔檔案鎖與原子替換。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 39 通過，局部修改保留精確 duration 毫秒數，並行寫入受檔案鎖保護。
-  - **實機測試指引**：在 GUI 修改軍事評價並儲存，進遊戲確認遊玩時間與未滿 1 小時之記錄未被重設。
-
----
-
-### ISSUE-040: 設定指向不存在語言包時 apply 仍成功並解除現有翻譯
-- **問題編號**: `ISSUE-040`
-- **發現日期**: 2026-08-23
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
-- **問題現象**:
-  - 設定指向不存在的語言包時，舊版管線在正規化後未成功安裝新語言包，導致現有語言包被靜默解除。
-- **修復方案與實作細節**:
-  - `PatchPipeline.ApplyAll` 在任何寫入前先驗證設定要求的語言包是否存在；若不存在則整批拒絕，5 個目標檔案 100% 零寫入。
-- **驗證狀態與實測指引**:
-  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證無效語言包設定整批套用失敗且 5 檔零寫入。
-  - **實機測試指引**：設定檔指定無效 packId 執行 apply，確認現有 `local.pak` 不被改動。
-
----
-
 ### ISSUE-041: `run --watch --json` 輸出純文字而非穩定 JSON 封套
 - **問題編號**: `ISSUE-041`
 - **發現日期**: 2026-08-23
@@ -1417,6 +910,8 @@
 ---
 
 ### ISSUE-046: 設定內容錯誤會讓 `apply` 以未處理例外中止並留下半套用的遊戲
+- **2026-09-13 複查補充**：目前 staging 可阻止 transform 階段失敗寫入，但最後 Replace 仍逐檔執行；若後段遇到權限或 I/O 故障，前段已被替換，並非多檔交易。Apply 雖提示 partial failure，仍須以故障注入證明可恢復或清楚列出已寫入檔案，不得以現有 green SelfTest 宣稱原子套用。
+- **2026-09-14 修復**：五檔先全部寫入唯一交易暫存檔，之後才替換；中段失敗會以記憶體原始位元組逆序回滾已替換檔並清除暫存。SelfTest 在 data.pak 寫入點注入故障，證明前兩檔也逐位元組還原。⏳ 待真實權限／磁碟故障驗收。
 - **問題編號**: `ISSUE-046`
 - **發現日期**: 2026-08-24
 - **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
@@ -1458,10 +953,547 @@
 
 ---
 
+---
+
+---
+
+## 5. ✅ 已實機驗收清冊 (Verified In-Game History)
+
+> 說明：以下項目已由使用者在 Steam 正版遊戲環境中實機操作、重現並確認修復生效且無副作用，或由分析器取得完整實機日誌/Dump佐證。
+
+---
+
+### ISSUE-068: 引擎只有 20 個硬編按鍵，18 個作弊塞不下而被靜默停用，修改器實際上改不到遊戲
+
+- **問題編號**: `ISSUE-068`
+- **發現日期**: 2026-09-02
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 使用者實測回報：「根本沒鍵可按／遊戲中面板上沒有那些按鈕」。修改器等於改不到遊戲。
+  - 直接讀取使用者的 Steam 安裝驗證，**檔案修補這一段完全正常**：`data.pak\SCDEBUG.XML`（8131 bytes）確實含 18 個作弊、`CKTRAINER.TXT` 標記完整、`Celtic kings.exe` 確實帶有 `.cktw`（`0x004CB000`）與 `.ckhr`（`0x004CD000`）節區、`update.pak` 與 `PATCH1.PAK` 都不含 `SCDEBUG.XML`（無覆蓋問題）、腳本用到的每一個引擎函式（`Place`、`Settlement::SetGold`、`Unit::AddBonus`、`Obj::AddItem`、`Wagon::LoadFood`、`Settlement::AddToPopulation`…）都確實註冊在 EXE 內。壞的是「觸發」。
+  - 根因是引擎只認 20 個硬編 scdebug 按鍵代號：9 個被遊戲用掉（F1/F2/F3/F5/F6/F7/F8/F9/F10）、5 個被原版 scdebug 綁走（Add/Sub/Mul/Pause/Tab），只剩 4 個自由鍵；小鍵盤模式雖有 13 個，但對映到的是筆電沒有的實體小鍵盤。使用者設定檔（`numpadKeys: true`、`keepVanilla: true`）中因此有 5 個作弊是 `enabled: false`，而 `InGamePanelForm` 只替「已啟用且綁得到鍵」的作弊建按鈕 —— 按鈕就這樣消失了。
+  - ISSUE-054／ISSUE-059／ISSUE-062 都是在這個 20 鍵預算裡搬東西，搬不出更多空間；ISSUE-054 當時列出的第三條出路（直接呼叫腳本編譯器）才是真正的解，本 issue 把它做完。
+- **逆向證據**（完整位址表與反組譯見 `docs/reverse-engineering-notes.md`「引擎腳本執行鏈」）:
+  - 按鍵入口 `0x0047D560` 先檢查 `[0x0074C3CC]`（設定變數 `[system] DebugKeys`，註冊於 `0x006C030D`，初值 1），再檢查 Shift(`0x10`)／Alt(`0x12`)／Ctrl(`0x11`)，任一按住就整個不派送，最後 `0x0047D5B2` 呼叫派送函式 —— 這是 `0x005E7650` 的唯一呼叫者。
+  - 派送函式在 `0x008AF108` 的 map 查鍵；節點 `+0x0E` 是鍵（short）、`+0x10` 是腳本原文 `char*`（`0x005E773B mov edi,[eax+0x10]` 之後直接當 `const char*` 用）。
+  - 尾段才是真正做事的部分：`0x005E0340` 編譯（`__cdecl (src, signature, ctx)`，signature 是字面量 `"void"` @ `0x007290B0`，ctx 是呼叫端在 `0x005E7749` 先歸零的 slot），失敗回 0 並經 `0x00470FB0` 印 `error in key-bound script: '%s'`；成功則依 `compiled+0x0E` 決定走 `0x005E1D70` 排程或 `0x005E0430` 同步執行＋`0x0041B480` vtable`+0x0C` 釋放。
+  - 也就是說：**按鍵只是把字串餵進 `0x005E0340` 的其中一種方式**，編譯與執行本身不需要按鍵。
+  - 順帶確認 `Place()` 確有回傳值（原廠 `SUBAI\BARRACK_TRAIN.VS`：`newunit = Place(cmdparam, Point(0,0), this.player);`），修改器腳本的 `o = Place(...)` 不是 ISSUE-017 那種殘留左值寫穿；`Point(x, y)` 亦為引擎自有建構子。
+- **修復方案與實作細節**:
+  - **`src/CKPerf/script.cpp`（新增）**：在遊戲行程內重現派送尾段。逐一比對七個進入點的原始位元組簽章（含派送 call site 與 `"void"` 字面量），任一不符就永久停用整條通道並寫進 `ckperf.log`；啟用前先跑 `ScriptChannelSelfTest()`（編譯 `int i; i = 1;` 後**不執行**直接釋放）；派送前確認遊戲主物件、主控台與腳本 VM 排程器都解得出合理指標，否則 fail-closed 回「不在對局中」；編譯與執行都包在 SEH 內，引擎故障回報成訊息而不是讓遊戲消失。
+  - **`src/CKPerf/frames.cpp`**：`SetDIBitsToDevice` 的 IAT hook 是行程內唯一保證在引擎主執行緒的呼叫點，抽取點掛在那裡（blit 之後，不延遲已經送出的那一幀）。安裝條件放寬為 `frameTiming || scriptChannel`，另加 `g_timingEnabled` 確保「只為通道安裝 hook」不會憑空產生 frame 統計記錄。
+  - **`src/CKPerf/common.cpp` / `dllmain.cpp` / `ckperf.h`**：新增 `scriptchannel` 與 `scripttoken` 兩個選項（權杖長度不對就連通道都不開）、`ScriptStatus` 跨行程狀態碼、安裝／卸載順序。權杖只記錄「有沒有收到」，永不寫進記錄檔。
+  - **`Core/Runtime/ScriptChannel.cs`（新增）**：具名管線客戶端 `\\.\pipe\ckperf-script-<pid>`，逐次連線、預期內失敗一律回 `Result`、訊息全走 I18n。
+  - **`Core/Runtime/ScriptChannelSession.cs`（新增）**：注入端產生權杖、面板端使用，只活在記憶體；行程編號對不上就拒絕，絕不拿舊權杖試新行程。
+  - **`Core/Trainer/Cheats.cs`**：新增 `BuildRuntimeScript` 與 `ResolveParameters`。**兩條路徑共用同一個 `Cheat.Script` builder**，不新增任何腳本邏輯；`BuildScDebug` 改為呼叫同一個 `ResolveParameters`，「cycle 借用 spawn 的清單」這條規則從此只有一份實作。游標類作弊在執行期路徑改為把引擎算好的座標當**字面值**寫進腳本（`Point(x, y)`），因此不再需要把座標寫回記憶體。
+  - **`Gui/InGamePanelForm.cs`**：面板現在列出**全部 18 個作弊**，不再以「已啟用」或「綁得到鍵」過濾。點擊優先走腳本通道，通道不可用才退回代送按鍵；狀態列改為三態（未連線／已連線僅送鍵／已連線腳本通道）。探測與送出一律在執行緒集區上等，不阻塞訊息幫浦（ISSUE-059 的教訓）。
+  - **`Gui/MainForm.cs`**：修改器開著時啟動遊戲一定注入；效能頁保護關閉時走 `CreateScriptChannelOnlyOptions()`（只開通道，不替使用者打開任何他關掉的保護）。開啟面板時若遊戲已在跑但沒有通道（典型：直接從 Steam 開），就地掛載補上，失敗只記錄不擋面板。
+  - **`Cli/CliHost.Trainer.cs`**：新增 `trainer exec --cheat <id> [--param k=v]… | --script <VS>`，支援 `--json`，供 AI 代理程式直接改「正在跑的這一場」。遊戲沒在跑或這一場沒有通道一律 fail-closed。
+  - **`AGENTS.md` §2.9** 改寫為兩項明列例外，並把簽章驗證、上線自證、必須在對局中、主執行緒、零磁碟、權杖六條紀律逐條寫入；`docs/reverse-engineering-notes.md` 新增完整位址表。
+- **驗證狀態與實測指引**:
+  - SelfTest 新增第 46 組 `RuntimeScriptChannel`：18 個作弊的執行期腳本與 `SCDEBUG.XML` 內容**逐字相同**、腳本為單行且無行註解、游標座標代入只換掉取點呼叫、權杖與工作階段 fail-closed、注入選項字串、面板在零啟用作弊時仍列出全部 18 顆按鈕、以及與 `ckperf.h` 共用的協定常數。
+  - `ckperf.dll` 以 MSVC Win32 Release 重建成功；`dotnet build CKToolkit.sln -c Release` 0 warning／0 error；完整 SelfTest 全綠、0 NG。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實 Steam 遊戲中實機操作確認生效。在遊戲中開啟「遊戲中面板」，點擊各項作弊按鈕成功透過執行期具名管線通道派送至引擎編譯執行，全部作弊均可即時生效。
+
+---
+
+### ISSUE-007: 遊戲主選單固定 21 FPS 節流現象
+- **問題編號**: `ISSUE-007`
+- **發現日期**: 2026-08-19
+- **狀態**: ✅ **已決策結案（維持原廠節能設計）** (`Closed - Vanilla by Design`)
+- **問題現象**:
+  - 遊戲在選單狀態下每秒約 21 幀，其中 10~11 幀耗時超過 50ms（雙峰分佈落於 63ms），呈現規律節流。
+- **逆向分析與根因**:
+  - `Celtic kings.exe` 唯一呼叫 `Sleep` 的位置為 `0x006C8805`（由 `0x006C6380` 呼叫）。
+- **使用者決策與實機驗收 (2026-09-05)**:
+  - 使用者明確指示「7維持原廠設定就好」。選單規律節流為 2004 原廠避免主選單無謂滿載空轉耗電之設計，無需解除，正式結案維持原廠行為。
+
+---
+
+### ISSUE-077: 單位編入英雄隊伍之附著半徑硬性限制（支援部隊遠距／全圖瞬時編入英雄，新增「遊戲設定」選項）
+
+- **問題編號**: `ISSUE-077`
+- **提出日期**: 2026-09-05
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **來源**: 使用者需求：「單位編入英雄的附著半徑可以改嗎」->「部隊不用走到英雄跟前，在很遠的地方右鍵點英雄就能立刻編入」
+
+- **逆向分析與根因**:
+  1. **二進位 C++ 引擎層阻擋**:
+     - `Celtic kings.exe` 的實體部隊編入常式 `CVXUnit::AttachTo` 位於 `0x0050BC60`。
+     - 在將單位指標加入英雄編隊清單前，於 `0x0050BCEF` 呼叫 `0x004F4120`（`hero->InRange(unit)`，計算有效距離是否小於等於英雄視野 `hero.sight`，預設為 600 像素）。
+     - 隨後於 `0x0050BCF4: test eax, eax`，並於 `0x0050BCF6: 0F 84 25 01 00 00`（`je 0x50be21`，檔案位移 `0x0010BCF6`）跳轉至失敗返回點。只要單位與英雄距離超過 600 像素，C++ 引擎底層直接拒絕編入。
+  2. **腳本層阻擋與移動邏輯**:
+     - 玩家在遊戲中右鍵點擊友方英雄時，派送執行腳本 `SUBAI\UNIT_ATTACH.VS`。
+     - 原版腳本第 31 行硬性限制：
+       `if( !.InHolder && !hero.InHolder && .posRH.Dist(hero.posRH) < 1500 ) if(.AttachTo(hero)) break;//success`
+       腳本限定距離必須小於 1500 才嘗試呼叫 `.AttachTo(hero)`；否則只能在 `while` 迴圈中呼叫 `.Goto(hero.posRH + ptoffset, ...)` 緩慢移動過去。
+     - **雙重門檻**：若僅修改腳本解除 1500 限制，呼叫 `.AttachTo(hero)` 時會被 C++ 引擎的 600 視野檢查拒絕；若僅修改 C++ 引擎，腳本層的 `.posRH.Dist < 1500` 仍會阻止遠距附著。兩者必須聯動修補。
+
+- **修復方案**:
+  - **二進位修補 (`InstantHeroAttachPatch.cs`)**:
+    - 將 `Celtic kings.exe` 檔案位移 `0x0010BCF6`（VA `0x0050BCF6`）處的 6 位元組條件跳轉 `0F 84 25 01 00 00` 替換為 6 個 NOP（`90 90 90 90 90 90`）。
+    - 徹底解除 600 像素視野硬性限制，使部隊在任何距離都能透過 `.AttachTo` 成功被英雄吸納。
+    - **安全性與邊界維護**：完全保留緊接著的英雄帶兵數容量檢查（`0x0050BD01: cmp edx, eax; je 0x50be21`），部隊滿員時依然正確拒絕，絕無陣列越界或死結。支援 100% 逐位元組精確反轉回 Steam 原廠指令。
+  - **腳本修補 (`GameRulesModifier.cs`)**:
+    - 將 `UNIT_ATTACH.VS` 的條件檢查改寫為瞬時編入並自動向英雄靠攏：
+      ```c
+      if( !.InHolder && !hero.InHolder )
+      if(.AttachTo(hero)) {
+          while(!.Goto(hero.posRH + ptoffset, 1, 150, true, 5000) && hero.IsAlive() && !hero.InHolder());
+          break;//success
+      }
+      ```
+    - 右鍵點擊瞬間，部隊立刻在底層編入英雄隊伍（英雄頭像立刻計入部隊數、即時享受隊伍經驗分享與陣形屬性），隨後自動向英雄陣形坐標移動靠攏；若英雄下達移動指令，英雄的 `FormSetupAndMoveTo` 自動接管部隊隊列。
+  - **模組與管線整合**:
+    - `TrainerInstaller`: 安裝時將 `UNIT_ATTACH.VS` 原始文字存入 `marker.Originals`，並在標記中記錄 `instant_hero_attach`；反安裝與正規化時 100% 逐位元組還原。
+    - `TrainerModule`: 在 EXE 寫入管線中套用 `InstantHeroAttachPatch.Apply(ref exeBytes, true)`。
+    - `PatchState`: 於 `InspectExe` 註冊簽章檢查，並於 `NormaliseExe` 中還原原廠位元組。
+    - `PatchPipeline`: 納入 `instant_hero_attach` 期望標記，`verify` 零假警報。
+  - **使用者介面與多語系**:
+    - GUI「遊戲設定」分頁（`GameSettingsPage`）新增「允許部隊遠距／全圖瞬時編入英雄」勾選框與說明。
+    - 繁中、簡中、英文三語字典同步新增 `GameSettings_InstantHeroAttach_Label` 與 `GameSettings_InstantHeroAttach_Desc`。
+  - **命令列支援**:
+    - CLI 支援 `settings set --instant-attach=on|off`（支援 `--instant-hero-attach` 別名）與 `settings get --json`。
+  - **測試套件覆蓋**:
+    - SelfTest 第 47 組測試擴充 10 項斷言：包含字串正則轉換與精確反轉、PE NOP 套用與還原冪等性、合成 pak 與 EXE 安裝反安裝、`PatchPipeline` 驗證與 CLI 測試，全套 47 組測試全數通過。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認勾選「允許部隊遠距／全圖瞬時編入英雄」後，選取全圖任意角落單位對英雄點擊右鍵，單位瞬間編入英雄隊伍（頭像下方兵種計數即時更新並獲取加成）並自動靠攏歸隊；隊伍滿員時正確拒絕編入。
+
+---
+
+### ISSUE-076: 運糧馬／運金馬運載上限與出產量提升至 10,000（修改大容量生產按鈕與裝載指令，新增「遊戲設定」選項）
+
+- **問題編號**: `ISSUE-076`
+- **提出日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **來源**: 使用者需求：「不要這麼麻煩，直接改原版的按鈕就好，加入遊戲設定（Game Settings）中，然後上限改成10000」
+
+- **逆向分析與根因**:
+  1. 運糧馬（`Wagon` / `CVXWagon`）的底層負載上限由 `CLASSES\WAGON.SC.XML` 的 `<properties max_load="1000" feeds="0"/>` 定義。引擎啟動時於 `0x005C23F6` 讀取 `max_load` 字串並存入 `[class+0x3C4]`。
+  2. 生成運糧馬函式 `Settlement::CreateMuleFood`（`0x00517010`）於 `0x00517029` 讀取 `[class+0x3C4]`，計算 $\min(\text{請求量}, \text{max\_load}, \text{聚落存糧})$ 後立即扣除存糧並注入至運糧馬實體；若單純提高 `max_load` 而不修改按鈕，出產時依然只會裝載 1,000。
+  3. 大容量運糧馬／運金馬製造按鈕綁定之腳本為 `SUBAI\CREATE_FOOD_MULE_BIG.VS` 與 `SUBAI\CREATE_GOLD_MULE_BIG.VS`，內部硬編碼 `.CreateMuleFood(1000)` 與 `.CreateMuleGold(1000)`。
+  4. 騾車中途裝載指令 `SUBAI\WAGON_LOADFOODBIG.VS` 與 `SUBAI\WAGON_LOADGOLDBIG.VS` 亦硬編碼 `.LoadFood(1000)` 與 `.LoadGold(1000)`；對應之 UI 提示定義於 `COMMANDS.XML` 的 `rollover` 屬性。
+
+- **修復方案**:
+  - **核心轉換**：`GameRulesModifier` 新增 `ApplyWagonMaxLoad10k` / `RemoveWagonMaxLoad10k`、`ApplyCreateFoodMuleBig` / `RemoveCreateFoodMuleBig`、`ApplyCreateGoldMuleBig` / `RemoveCreateGoldMuleBig`、`ApplyWagonLoadFoodBig` / `RemoveWagonLoadFoodBig`、`ApplyWagonLoadGoldBig` / `RemoveWagonLoadGoldBig` 與 `ApplyCommandsMule10k` / `RemoveCommandsMule10k`，支援單一選項聯動改寫實體容量上限與大容量生產／裝載按鈕，並保證 100% 精確反轉原版。
+  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 納入 `SUBAI\*.VS` 候選快照；套用時自動快照 6 個原始檔案至 `marker.Originals`，並記錄 `wagon_capacity_10k` 標記。反安裝時逐位元組還原原版 `data.pak`（合規 AGENTS.md §2.1 / §2.3）。
+  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `WagonCapacity10k`；`PatchPipeline` 納入 `wagon_capacity_10k` 標記檢查，`verify` 零假警報。
+  - **使用者介面**：GUI「遊戲設定」分頁新增「經濟與運輸規則」卡片與「運糧馬／運金馬運載上限提升至 10,000」選項，支援三語在地化。
+  - **命令列支援**：CLI 支援 `settings set --wagon-10k=on|off` 與 `settings get --json`。
+  - **自我驗證測試**：SelfTest 第 47 組測試擴充 10k 容量字串轉換、6 個檔案合成 pak 安裝、逐位元組原版還原與 CLI 驗證。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認勾選「運糧馬／運金馬運載上限提升至 10,000」後，大容量生產按鈕產出之運糧馬初始直接裝載 10,000 食物，中途裝載上限達 10,000，取消勾選後精確還原。
+
+---
+
+### ISSUE-075: 運糧馬／騾子無法編入英雄編隊（解除右鍵跟隨限制並加入中央陣形護衛，新增「遊戲設定」選項）
+
+- **問題編號**: `ISSUE-075`
+- **提出日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **來源**: 使用者需求：「用反編譯的方式找出讓馬可以編入英雄編隊」、「加入這個修改功能」
+
+- **逆向分析與根因**:
+  1. 遊戲中的運糧馬／商隊騾子（`Wagon` / `CVXWagon`）在引擎中繼承自 `CVXUnit`，底層 C++ 函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有針對 Wagon 的任何限制。
+  2. 英雄編隊腳本 `SUBAI\UNIT_ATTACH_VERIFY.VS` 會先呼叫 `.AsUnit()` 並檢查 `!IsEnemy()` 與 `!.HasFreedom`，Wagon 均完全符合條件。
+  3. 關鍵阻礙在於 `CLASSES\WAGON.SC.XML`：
+     - 它設定了 `<nodefcmdinherit/>`（取消一般單位的預設指令繼承，在 C++ 引擎 `0x00553510` 讀取並將 `[class+0xCA]` 設為 1，使 `0x00553B13` 跳過父類別 `Unit` 的預設指令）。
+     - 同時其預設指令僅定義了 `<defaultcmd target="Unit"><cmd name="follow"/></defaultcmd>`。
+     - 由於 `Hero` 繼承自 `Unit`，玩家選取運糧馬對英雄按右鍵時，引擎依類別繼承匹配到 `Unit` 的 `follow`，造成運糧馬永遠只會「跟隨（follow）」英雄，而不會觸發 `attach`（編隊）！
+  4. 此外，`FORMATIONS.XML` 原版未為 `Wagon` 類別定義位置，預設會套用 `Unit` 的 `FrontLine="1"`（排在陣形最前線），若直接編入會衝在最前線送死。而在原版中，農民（`Peasant`）與英雄（`Hero`）均被配置為 `CentralBlock="1"`（受部隊護衛的中央核心位置）。
+
+- **修復方案**:
+  - **核心邏輯**：`GameRulesModifier` 新增 `ApplyMuleHeroArmy` / `RemoveMuleHeroArmy`（在 `WAGON.SC.XML` 的 `target="Unit"` 之前精準插入 `target="Hero"` 的 `attach` 預設指令），以及 `ApplyMuleFormation` / `RemoveMuleFormation`（在 `FORMATIONS.XML` 各陣形的 `Peasant CentralBlock="1"` 旁加入 `Wagon CentralBlock="1"` 護衛位置）。兩者皆提供冪等性與精確反轉保證。
+  - **快照與反轉**：`TrainerInstaller.CandidateEntries` 擴充納入 `FORMATIONS.XML`；安裝時當 `AllowMuleHeroArmy` 啟用，自動快照原始檔案至 `marker.Originals`，並記錄 `allow_mule_army` 標記。反安裝時 100% 逐位元組還原原版 `data.pak`，不留下任何 backup 目錄（合規 AGENTS.md §2.1 / §2.3）。
+  - **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `AllowMuleHeroArmy`；`PatchPipeline` 支援比對 `allow_mule_army` 標記，`verify` 零假警報。
+  - **使用者介面**：GUI「遊戲設定」分頁（`GameSettingsPage`）新增「允許運糧馬編入英雄隊伍」勾選框與說明文字，支援即時切換與繁中/簡中/英文三語在地化。
+  - **命令列支援**：CLI `settings set --mule-army=on|off` 與 `settings get` 完整支援該項目。
+  - **自我驗證測試**：SelfTest 第 47 組測試擴充覆蓋運糧馬 XML 修改、陣形位置注入、逐位元組原版還原與 CLI 讀寫驗證。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認勾選「允許運糧馬編入英雄隊伍」後，右鍵英雄可順利將運糧馬編入隊伍，運糧馬置於中央陣形核心受保護，軍隊行進間可就近進食補給。
+
+---
+
+### ISSUE-074: 維京領主與自由鬥士無法編入英雄隊伍（解除自由之身限制，新增「遊戲設定」分頁）
+
+- **問題編號**: `ISSUE-074`
+- **提出日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **來源**: 使用者需求：「找出把惟經領主跟自由鬥士變成一般士兵可以編入英雄隊伍的方法，用反編譯的方式，用方法一，加入修改器功能，新增一個頁面，你來命名來放這些修改遊戲設定的功能」
+
+- **逆向分析與根因**:
+  - `Celtic kings.exe` 字串表 `0x0073D710` 第 12 位為 `freedom`（bit 12: `0x00001000`）。
+  - `0x005C31EE` 解析 Class XML `speciality` 屬性並存入 `[class+0xF0]`；單位建構時由 `0x0050A7E0` 寫入 `[unit+0x138]`。
+  - `0x00513B00 Unit::HasFreedom` 導出給 VS 腳本；`SUBAI\UNIT_ATTACH_VERIFY.VS` 與 `SUBAI\UNIT_ATTACH.VS` 因 `if(.HasFreedom)` 阻擋編入英雄隊伍。
+  - 引擎底層 C++ 陣形與附著函式 `0x0050BC60 CVXUnit::AttachTo` 完全沒有檢查 `freedom`，因此只要移除 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML` 中的 `freedom` 特性標記，單位便能完全正常享受英雄陣形防禦、經驗分享，並完整保留其原有特性（維京領主保留吸血 `vampire`、自由鬥士保留踐踏 `trample`）。
+
+- **修復方案**:
+  - **核心邏輯**：新增 `GameRulesModifier` 提供 `HasFreedom` 判斷與 `RemoveFreedom` 安全精準 XML 轉換，並具備冪等性保證。
+  - **設定模型**：`ToolkitConfig` 新增 `GameSettingsConfig`（包含 `AllowVikingLordHeroArmy`, `AllowLiberatiHeroArmy`, `HasAnyModifications`），並掛載於 `ToolkitConfig.GameSettings`。
+  - **安裝管線**：`TrainerInstaller.Install` 支援傳入 `GameSettingsConfig`，當選項啟用時修改 `CLASSES\GVIKINGLORD.SC.XML` 與 `CLASSES\RLIBERATUS.SC.XML`，並自動由既有快照機制納入 `marker.Originals` 實現 100% 精確逐位元組反轉（不留 backup 目錄，合規 AGENTS.md §2.1 / §2.3）。
+  - **標記檔與驗證**：`TrainerMarker` 擴充 `GameSettings` 屬性供診斷與 `verify` 比對；`PatchPipeline` 同步更新 `TrainerHasDataPakPayload` 與 `TrainerMarkerMatchesConfig`，保證 `verify` 零假警報。
+  - **使用者介面**：GUI 新增「遊戲設定」獨立頂層分頁（`GameSettingsPage`，置於修改器分頁旁），支援即時套用、三語在地化切換與配置持久化。
+  - **命令列支援**：CLI 新增 `settings get` 與 `settings set --viking-army=on|off --liberati-army=on|off`（支援 `settings` 與 `gamesettings` 指令別名）。
+  - **自我驗證測試**：SelfTest 新增第 47 組測試（`TestGameRulesModifierAndHeroArmyReversal`），全面覆蓋 XML 轉換、往返還原一致性、逐位元組原版還原與 CLI 指令。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認勾選「允許維京領主／自由鬥士編入英雄隊伍」後，兩兵種可順利編入英雄隊伍陣形，享受防禦與經驗分享，並完整保留吸血打擊／踐踏等專屬特技。
+
+---
+
+### ISSUE-073: 13 個 scoped hook 用 player 指標比對本機玩家，我方物件永遠被判成敵方
+
+- **問題編號**: `ISSUE-073`
+- **提出日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **來源**: 追查 [ISSUE-071](#issue-071-unit_feeds-掛在一條人類玩家單位不會執行的常式上我方設-0-仍然消耗食物)
+  與 [ISSUE-072](#issue-072-train_speedresearch_speed-掛在原版腳本用不到的-objprogress-多載上生產與研究倍率完全沒有效果)
+  時發現的共通成因。
+
+- **症狀**: `.cktw` 套用正確、設定表正確、hook 確實被大量執行，但**每一項 scoped 調整都只會
+  套到「敵方」那一欄**。使用者只改我方時看起來就是「完全沒有效果」。
+  ISSUE-071 在 helper 內埋計數器的實機量測是最直接的證據：20 秒內 `entry = 32322`、
+  `enemy = 32322`、`self = **0**`——我方單位一次都沒有被判成 self。
+
+- **根因**: 所有 helper 的分流判定都寫成「比較 **player 指標**」：
+
+  ```
+  mov ecx,[0x008AA6C8]        ; engine
+  mov ecx,[ecx+0xCD0]         ; localPlayer
+  cmp [obj+0x6E],ecx          ; ← 指標比較
+  setne bl
+  ```
+
+  引擎自己**不是這樣判的**。`CVXUnit::ProcessFood` 在送出「army starving」通知前，
+  用的是 player 結構裡的**索引**：
+
+  ```
+  0050BA9B mov eax,[0x008AA6C8]
+  0050BAA0 mov edx,[ebp+0x6E]      ; 單位的 owner
+  0050BAA3 mov ecx,[eax+0xCD0]     ; 本機玩家
+  0050BAA9 mov eax,[edx+8]         ; owner 索引
+  0050BAAC cmp eax,[ecx+8]         ; ← 索引比較
+  0050BAAF jne ...
+  ```
+
+  `[player+8]` 是玩家索引，`Obj::GetPlayer`（`0x004F8630`）在 `0x004F868D` 讀的也是它
+  （回傳時 +1）。指標相等一定索引相等，反之不然——引擎既然在這種比對上選了索引，
+  就代表同一個玩家在執行期可能有不只一個 player 結構位址。
+
+- **修復**: 新增共用的 `EmitPlayerScope`／`EmitObjectScope` 產生器，
+  **13 個 helper 全部改成比較 `[owner+8]` 與 `[localPlayer+8]`**，
+  與引擎 `0x0050BA9B..0x0050BAAF` 的寫法逐條一致。
+  `BuildInitialGoldHelper` 更直接：它手上本來就是 constructor 的 slot 編號，
+  現在直接與 `[localPlayer+8]` 比，不必再用 `imul ebx,0x254` + `lea ...+0xCD4`
+  把索引還原成指標。
+
+- **測試與證據**:
+  - SelfTest 新增「所有 helper 以 player 索引而非指標分 self/enemy」正反雙向斷言：
+    每個 helper 都必須含有 `cmp <reg>,[<localPlayer>+8]`，且舊的
+    `cmp [esi+0x6E],ecx` ／ `cmp [ebp+0x6E],eax` ／ `cmp eax,edx` 寫法必須完全消失。
+  - 13 個 helper 全數以 `rz-asm` 自實際產物反組譯複驗，指令邊界與跳轉目標全部收斂。
+  - 對真實原版 EXE 做純記憶體 Apply／Reverse：3,516,344 → 3,526,656 bytes，
+    反轉後逐位元組相同、SHA-256 仍為
+    `86FC9F80E74C69CE79DB33789EA3EA81174D002EE9B231DD65CB4513811FE83D`，
+    套用兩次與一次結果完全相同。
+
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認 13 個 scoped hook 改比 player 索引後，我方物件正確判定為 self，我方設定之數值確實生效且與敵方互不影響。
+
+---
+
+### ISSUE-072: `train_speed`／`research_speed` 掛在原版腳本用不到的 `Obj::Progress()` 多載上，生產與研究倍率完全沒有效果
+
+- **問題編號**: `ISSUE-072`
+- **提出日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **使用者回報**: 「生產跟研究倍率都沒有效果。」（設定為我方 20×）
+
+- **先排除的無辜嫌疑（已對使用者的實際安裝逐項查核，不要再重查）**:
+  - **設定值正確**：`cktoolkit.json` 內 `train_speed.self = 20`、`research_speed.self = 20`。
+  - **EXE 確實已套用且是 ISSUE-069 世代**：`verify` 五個檔案全部 `matchesConfig=true`。
+  - **設定表寫對了**：`.cktw` 設定表 `cfg+0 = 0x00140000`（自 20.000×）、`cfg+4 = 0x00010000`、
+    `cfg+8 = 0x00140000`、`cfg+12 = 0x00010000`。
+  - **helper 數學正確**：`execdelay × 65536 ÷ Q16`，`execdelay=15000`／`Q16=0x140000` 得 750ms。
+  - **owner 欄位正確**：`Obj::player`（`0x004F8630`，尾段 `0x004F868A mov eax,[eax+0x6E]` →
+    `[player+8]+1`）證實 `+0x6E` 是所有 `Obj`（含 `Building`）的擁有者欄位；
+    `[engine+0xCD0]` 也確實是**本機玩家指標**而不是玩家陣列基底——寫入點
+    `0x00571FD0`／`0x00572535`／`0x00573F34` 都是 `lea ecx,[base + idx*0x254 + 0xCD4]`
+    後再存進 `+0xCD0`，`0x0056F211` 則在初始化時填 0。分流判定本身沒有問題。
+
+- **根因（靜態逆向，2026-09-04）**: hook 掛錯函式。`0x004FB6AB` 位於**零參數的
+  `Obj::Progress()`**（本體 `0x004FB5C0`，註冊於 `0x004FF964`）。引擎另外註冊了兩個相鄰入口：
+
+  | VA | 註冊名稱 | 舊版是否接管 |
+  |---|---|---|
+  | `0x004FB5C0` | `Obj::Progress`（0 參數） | ✅ 唯一被接管的 |
+  | `0x004FB4F0` | `Obj::Progress`（1 參數） | ❌ |
+  | `0x004FB790` | `Obj::cmddelay`（`0x004FB83E` 讀 `definition+0xF4`） | ❌ |
+
+  而原版 `data.pak` 的 barrack 訓練腳本（`COMMANDS.XML` 的 `method="train"`）寫的是
+  `.Progress((.cmddelay * perc) / 100)`——先用 `Obj::cmddelay` 取得 execdelay，
+  自己算完再呼叫一參數版本，兩個讀取點都不是 `0x004FB6AB`。研究（`method="research"`）
+  與英雄訓練、建築修復、造船才走零參數版本。
+
+- **實機測試崩潰與回退記錄 (2026-09-04)**:
+  - 先前嘗試引入 15 站點（於 `0x004FB7E8` 與 `0x004FB83E` 插入暫存槽與 cmddelay getter hook）。
+  - 使用者實機測試回報：「修改後進入單人遊戲閃退」。
+  - 當時把成因記成「`0x004FB790` 內 `eax` 是堆疊區域或子物件指標」。**這條記載是錯的**，
+    見下方 2026-09-04 第二輪的靜態證據；`0x004FB7E8` 的 `eax` 確實就是發令物件。
+  - **處置措施**：先回退為 11 站點世代，兩個站點 100% 還原為 Steam 原廠位元組。
+
+- **崩潰的真正成因（靜態逆向，2026-09-04 第二輪）**:
+
+  `.cktw` 是以 `IMAGE_SCN_CNT_CODE | IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_EXECUTE |
+  IMAGE_SCN_MEM_READ` 建立的節區——**沒有 `IMAGE_SCN_MEM_WRITE`**。15 站點世代的
+  `BuildCommandObjectHelper` 第一條指令就是 `mov [section+3840], eax`，也就是**對唯讀節區
+  寫入**，Windows 載入器把該節區映射成唯讀頁面，於是兵營第一次下訓練指令就
+  `0xC0000005` 當場閃退。與 `0x004FB790` 的暫存器語意完全無關。
+
+  `0x004FB7E8` 的 `eax` 是不是物件，引擎自己就給了證據：同一個 handle 解析樣板在
+  `Obj::GetPlayer`（`0x004F8630`）也出現一次，那裡在 `0x004F868A` 直接用
+  `mov eax,[eax+0x6E]` 取 owner；`Obj::cmddelay` 則在 `0x004FB7E8` 用
+  `add eax,0x7C` 取命令佇列，與零參數 `Obj::Progress` 的 `lea edi,[esi+0x7C]`（`esi`
+  百分之百是物件）是同一個欄位。
+
+- **修復（2026-09-04，13 站點世代）**:
+  - **改掛 `0x004FB83E`（`Obj::cmddelay` 的 execdelay 讀取點，原始 6 bytes
+    `8B 80 F4 00 00 00`），且完全不需要 scratch slot。** 進場時 `EAX` 是 command
+    definition（`+0xCF` traincommand／`+0xD0` researchcommand 由
+    `0x00552852`／`0x00552876` 的 `mov byte [edx+0xCF/0xD0], cl` 寫入，已逐條複驗），
+    發令物件則從**腳本 VM 堆疊頂端的 handle** 重新查表取得：
+    `mov ecx,[esi]` → `movzx ecx,word [ecx]` → `mov ecx,[ecx*4+0x00798CB8]`，
+    這正是引擎 `0x00481A20` 自己做的 `objects[handle & 0xFFFF]`。
+    `ESI` 在 `0x004FB794` 取得後到 `0x004FB83E` 之間沒有任何改寫，而 handle 也是
+    引擎在 `0x004FB79F` 剛剛用過的同一份資料，因此**零寫入、零堆疊位移猜測**。
+  - 這樣就補上了原版兵營訓練唯一會走到的路徑：`SUBAI\BARRACK_TRAIN.VS` 的
+    `.Progress((.cmddelay * perc) / 100)` 先呼叫 `Obj::cmddelay`，再呼叫**一參數**的
+    `Obj::Progress`（`0x004FB4F0`）——兩者都不經過 `0x004FB6AB`。
+  - 兩條路徑不重疊，不會被縮放兩次：`method="train"`／`"trainex"` 走 `cmddelay`；
+    `method="research"`（41 個指令）／`"trainpeasant"`／英雄訓練／建築修復／造船走
+    零參數 `Progress()`。`TAVERN_INVESTMENT.VS` 與 `TOWNHALL_ADDPOP.VS` 雖然也呼叫
+    `.Progress(.cmddelay)`，但它們的 definition 兩個旗標都是 0，helper 原封退回原值。
+  - **同時修掉真正讓研究倍率也失效的那一關**：見下方「敵我分流一律比較 player 索引」。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認訓練與研究倍率加速在單人遊戲中確實依指定倍率加速完成，單人戰役無閃退。
+
+---
+
+### ISSUE-070: 「永久規則調整」的重設按鈕沒有清掉分流值
+
+- **問題編號**: `ISSUE-070`
+- **發現日期**: 2026-09-04
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 在修改器「永久規則調整」頁面中，點擊重設按鈕時僅重設全域數值，未連同下方「我方／敵方」與「要塞／村莊」分流表格一併重設，導致殘留已設定的分流值仍被寫入 `.cktw`。
+- **修復方案與實作細節**:
+  - `TrainerPage.cs`：區分「重設全部調整（含分流）」與「分流全部重設為單一值」；點擊「重設全部調整（含分流）」時全域表與兩張分流表同時回到原始預設值，套用後安全移除 `.cktw` 並將 EXE 逐位元組還原回原版。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認重設按鈕可正確清空分流表數值，套用後 `.cktw` 成功移除且數值恢復原廠設定。
+
+---
+
+### ISSUE-069: `.cktw` 的多人守衛在單人模式恆為 false，永久規則調整完全不生效
+
+- **問題編號**: `ISSUE-069`
+- **提出日期**: 2026-09-03
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **使用者回報**: 「永久規則調整沒有作用，我設定我方的效果完全沒有改變。」
+
+- **排除的無辜嫌疑（都已直接對使用者的安裝驗證過，不要再重查）**:
+  - 設定檔正確：`trainer.scopedTweaks` 內確實存在 8 組明確分流值。
+  - 套用管線正確：`Celtic kings.exe` 內確實有 `.cktw`（RVA `0x004CB000` / VA `0x008CB000`），
+    11 個 hook 站點全部改成 CALL，67 欄設定表逐欄等於設定檔（train/research 20×、
+    我方聚落產量 100000、人口成長間隔 1000ms、英雄帶兵 2000、我方不進食）。
+  - GUI／CLI／`ShouldRouteToScopedPatch` 的路由正確：這些 ID 確實沒有被重複寫進 `data.pak`。
+
+- **根因（實機記憶體證據，2026-09-03）**: 11 個 helper 開頭共用同一段 fail-closed 守衛，
+  第一關就是 `game = [0x008C1C8C]; test; jz done`。在真正執行中的遊戲行程裡讀到：
+
+  | 位址 | 實際值 |
+  |---|---|
+  | `[0x008C1C8C]` game | **0** |
+  | `[0x008AA6C8]` engine | `0x10E32740`（有效） |
+  | `[engine + 0xCD0]` localPlayer | `0x10E33414`（有效） |
+  | `[localPlayer + 0x08]` player id | `0` |
+
+  `0x008C1C8C` 是**網路對戰**的 game 物件，單人模式恆為 NULL——引擎全部 24 個讀取點都先
+  null-check，原廠 `IsMultiplayer`（`0x005983D0`）也正是靠它為 NULL 才回傳「單人」。
+  照抄成 fail-closed 之後守衛的效果是**反的**：hook 只有在多人才可能通過第一關，而多人
+  又會被 `byte[session+0x108]` 遮罩擋掉，於是 **11 個 hook 在任何模式都不會生效**。
+  owner 判定本身沒有問題（`[obj+0x6E]`／`[settlement+0x90]` 都是 player 物件指標，
+  引擎自己在 `0x004F17AE` 就用指標比較判同陣營）。
+
+- **修復（使用者決定：取消多人限制，全部照套）**:
+  - 8 處守衛（`BuildCommandHelper`／`BuildGoldProductionHelper`／`BuildFoodProductionHelper`／
+    `BuildInitialGoldHelper`／`BuildOwnerScalarHelper`／`BuildSpeedHelper`／`BuildFeedsHelper`／
+    人口四 hook 共用的 `EmitSettlementScopeSelection`）移除 game／session／multiplayer-mask
+    三段檢查，只保留 `[[0x008AA6C8]+0xCD0]` 本機玩家指標一關。helper 各縮短 38 bytes
+    （command 242→204、gold 182→144、food 188→150）。
+  - payload header flags 由 `FlagSinglePlayerOnly` 改寫成 `FlagsAllModes`(0)。
+  - **多人連線會 desync**：每一端依各自的 `localPlayer` 套用不同數值，模擬必然分岔。
+    這是使用者在知情下明示接受的取捨，三語說明、GUI 分流須知與 RunManifest 文案均已改述。
+  - **相容性**：辨識條件拆成 `HasOurHookLayout`（只比 11 個站點的跳板，與 helper 世代無關）
+    與 `HasCurrentHelpers`（helper 本體逐位元組）。`IsApplied`／`Reverse` 改用前者，否則使用者
+    升級工具後上一版修補的 EXE 會被 `PatchState` 判成第三方修改而**無法還原**；`Apply` 碰到舊
+    世代 section 會就地重建 helper 並強制重寫設定表；`verify` 仍要求後者，舊世代會回報不相符
+    以提示重新套用。
+
+- **測試與證據**:
+  - SelfTest 新增／改寫：flags 斷言、三組「helper 不得含多人偵測」反向圍籬、
+    「11 個 helper 全數不含 game/session 多人偵測」、舊世代 section 可辨識／可還原／
+    就地升級後等於全新套用、三語文案不得再宣稱「多人退回原版值」。全套 Phase 1–4 & 6 全綠。
+  - 沙箱端到端：以**使用者那顆舊世代已修補的 EXE** 為輸入跑完整 `apply`，還原→重套成功；
+    產物 `.cktw` 內 `8C 1C 8C 00`（game 全域）出現 **0** 次、多人遮罩比較 **0** 次，
+    而 `C8 A6 8A 00`（engine 全域）與 `+0xCD0` 各出現 **11** 次；`verify` 五個檔案全部
+    `matchesConfig=True`。
+  - 診斷探針 `scratch/probe_cktw.py`（gitignored）：進單人對局後執行即可讀出守衛鏈實際值。
+
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者於真實遊戲實機測試確認取消多人守衛後，永久規則調整在單人戰役中 100% 正常生效。
+
+---
+
+### ISSUE-067: Core 與 Cli 有 92 處硬編繁體中文錯誤訊息，英文與簡中使用者會看到繁中
+
+- **問題編號**: `ISSUE-067`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `Core/` 與 `Cli/` 共 92 處 `Result.Fail(...)` 與 `throw new ...Exception(...)` 直接寫死繁體中文，完全繞過 I18n，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
+  - 這些訊息會經由 `PatchPipeline` 轉成 `Result.Fail` 或由 CLI 的最外層例外邊界直達使用者。英文與简体中文使用者遇到損毀的 pak／PE、格式錯誤的語言包、遊戲未啟動、等待逾時等情況時，一律看到繁體中文。
+  - 分布：`ScopedTweakPatch.cs` 25、`LanguagePack.cs` 19、`PeFile.cs` 10、`HmmPak.cs` 9、`GameRunner.cs` 9、`PackLoader.cs` 4，其餘 16 處散在 11 個檔案。另有 `Gui/ProfilerPage.cs` 一處同類問題（輸出資料夾建立失敗的記錄訊息）。
+- **修復與證據**:
+  - 分五批處理，每批完成後皆執行建置與完整 SelfTest 才進入下一批。
+  - 依可觸發性分流：使用者正常操作可觸發者（檔案被第三方改過、語言包格式錯、pak／PE 損毀、遊戲未啟動、逾時，以及 §2「對不上就拒絕」整類拒絕訊息）一律走 I18n；僅在本工具自身邏輯出錯時才觸發的內部不變式改為帶 `Internal:` 前綴的英文，不佔用翻譯資源。
+  - 改為英文的四處：`.cktw helper 超出保留空間`、`重複的 x86 label`、`找不到 x86 label`（皆為 `.cktw` 內建 x86 組譯器的不變式）、以及 `PatchPipeline` 的模組重複註冊。
+  - 92 個呼叫點收斂為 76 個字串鍵：12 個「缺少必要欄位」合併為單一參數化鍵 `Error_LangPackMissingField`，4 個「X 原始指令不符，拒絕建立 .cktw」合併為 `Error_CktwOriginalMismatch`，其餘重複句型一併收斂。
+  - 十六進位參數（如 `0x{pos:X}`）改為在 C# 端先格式化再傳入，字串鍵維持單純的 `{0} != {1}`，避免把 C# 格式規格洩進翻譯檔。
+  - 三語字串 740 → 817 鍵（含 `Gui_Profiler_OutputDirFallback`），鍵集 100% 一致、佔位符數量與索引三語一致。
+  - 全庫掃描確認原始 92 處已歸零。Debug／Release 建置 0 warning / 0 error，SelfTest 1014 個斷言全綠，CLI `status` / `lang list` 煙霧測試 `ok:true`。
+- **驗證邊界**:
+  - SelfTest 既有的 I18n 一致性群組會持續守住三語鍵集與佔位符一致性，但**沒有**針對這 76 個新鍵的實際觸發路徑做斷言——多數需要刻意損毀遊戲檔案或語言包才會觸發。因此實機驗收時應至少在非繁中語系下觸發一到兩條錯誤路徑，確認顯示語言正確。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認英文與簡中語系下的錯誤訊息完整在地化，無繁體中文字串殘留。
+
+---
+
+### ISSUE-066: 修改器兩個分頁重複列出同一批 tweak，可分流項目仍提供誤導性全域值
+
+- **問題編號**: `ISSUE-066`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 修改器有「永久規則調整」與「敵我／聚落分流」兩個子分頁。前者列出全部 28 個 tweak 的單一全域值，後者再列出其中支援 owner-aware hook 的項目並提供分流欄，因此同一個 tweak 同時出現在兩個分頁、有兩個互相競爭的輸入位置。
+  - `Gui_Trainer_TweaksScopeNotice` 甚至明文寫著「要分開設定我方與敵方數值，請改用『敵我／聚落分流』分頁」，把這個割裂直接暴露給使用者。
+  - 更關鍵的是那個全域值是誤導性的：`ScopedTweakPatch.ShouldRouteToScopedPatch` 顯示，只要該 tweak 支援分流且值不等於原廠值，`TrainerInstaller` 就會跳過 `data.pak` 寫入、整筆改走 `.cktw`。也就是說可分流項目的「全域值」早就不是多人可用的路徑，使用者卻會以為那是一個適用敵我雙方與多人的設定。
+- **修復與證據**:
+  - 依使用者決定（2026-09-01）：所有可以分敵我的修改一律只保留分流設定，不再提供全域值。兩個分頁合併為一個「永久規則調整」，垂直堆疊為 警語 → 全域數值表格 → 重設 → 我方／敵方與聚落分流兩表並排 → 重設。
+  - 全域表格改為只列出 `ScopedTweakPatch.IsSupportedScopedTweakId` 為 false 的項目：目前是 7 個（`hero_maxhealth`、`hero_speed`、`hero_sight`、`hero_health_per_level`、`hero_exp_divider`、`gaul_unit_power`、`roman_unit_power`）。其餘 21 個（15 個我方／敵方、6 個四向聚落）只在分流表格編輯。
+  - 這是無損改動：那 21 個項目的全域值本來就不會寫進 `data.pak`。移除後未設定的 scope 依 `GetScopedFallbackValue` 退回原廠值，`ShouldRouteToScopedPatch` 也改為純粹依明確分流值判斷，語意更乾淨。
+  - 三語新增 `Gui_Trainer_TweaksGlobalLabel`，並改寫 `Gui_Trainer_TweaksScopeNotice` 使其不再指向已不存在的分頁（739→740 鍵，parity 0/0，佔位符一致）。警語依使用者決定保留而非改為逐列 tooltip。
+  - 警語的數量參數改為 `Tweaks.All.Count(t => ScopedTweakPatch.IsSupportedScopedTweakId(t.Id))` 動態計算，不再硬編。
+  - SelfTest 第 40 組新增 6 個斷言鎖定合併後的組成：只剩兩個子分頁、全域表格只含無 hook 項目、分流表格完整覆蓋 21 項、無任何 tweak 同時出現在兩處、合計恰好 28 且不重複。
+  - 連帶修正過時斷言：第 43 組的 `VerifyTrainerPageDescriptionAdapter` 原本在全域表格查找 `townhall_maxgold`，該項目已正確移入分流表格，改為查找仍無 hook 的 `hero_maxhealth`；斷言目的（全域表格 tooltip 走 description adapter）未放寬。
+  - Debug／Release 建置 0 warning / 0 error，SelfTest 1008 → 1014 個斷言全綠。CLI `trainer list-tweaks` 契約不變，仍回報 28 個 tweak、其中 21 個 `scopedSupported`。
+- **後續**:
+  - 全域表格的 7 個項目是暫時狀態。依 ISSUE-049，高盧／羅馬種族倍率因無反組譯證據而明確擱置，5 個英雄屬性則是尚未實作 hook。等 ISSUE-049 補完，這些項目也應轉為分流，全域表格屆時會縮減至消失。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認修改器永久規則調整分頁合併運作正常，可分流項目只在分流表格顯示，設定套用生效。
+
+---
+
+### ISSUE-065: CLI 靜默接受未知選項，`--game` / `--config` 會吞掉下一個選項
+
+- **問題編號**: `ISSUE-065`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `CliHost` 的全域選項解析迴圈（`src/CKToolkit/Cli/CliHost.cs`，約 125–145 行）只認得 `--json`、`--game`、`--config` 三個選項，其餘 token 一律丟進 `commands` 清單。派送時只檢查 `commands[0]`，所以未知**指令**會被擋下（exit 2），未知**選項**卻變成沒人讀的多餘位置參數而被靜默忽略。
+  - 實測（Debug 建置）：`status`、`verify`、`perf get`、`lang list`、`trainer list-cheats`、`version` 傳入 `--bogus-option zzz` 全部回傳 `ok: true` 與 exit 0。相對地 `save list`、`perf set`、`trainer set` 有自己的選項白名單，會正確回傳 `ok: false` 與 exit 2 —— 契約在同一支 CLI 內不一致。
+  - **最危險的案例**：`status --gam "C:/not/a/game"` 回傳 `ok: true`，並且靜默改用自動偵測到的安裝目錄。AI 代理程式只要把 `--game` 打錯一個字母，就會在**另一套安裝**上得到看似成功的結果。這與 ISSUE-045 是同一個失效模式，只是從另一扇門進來。
+  - **`--json` 會遺失**：`--game` / `--config` 用 `i + 1 < args.Length` 判斷後就無條件吃掉下一個 token，完全不檢查那個 token 是不是另一個選項。實測 `status --game --json` 會把 `--json` 當成遊戲目錄值，結果 exit 3 而且**輸出是純文字而非 JSON**；`status --config --json` 則 exit 0、靜默退回預設設定檔，同樣沒有 JSON。這直接違反 AGENTS.md §1「CLI 永不互動、永遠可用 `--json` 取得穩定結構化輸出」。
+  - 選項若出現在最末位而沒有帶值（`i + 1 < args.Length` 為 false），會落入 `else` 分支變成指令 token，同樣被靜默忽略而不是報錯。
+- **修復與證據**:
+  - 全域解析改為先掃一遍 `--json` 再處理其餘選項，因此連解析階段自己的錯誤都必定以合規 JSON 封套輸出，不會再退回純文字。
+  - `--game` / `--config` 取值前先檢查下一個 token 存在且不是以 `--` 開頭；缺值或值本身是選項時回傳 `Error_OptionRequiresValue` 與 `ExitCodes.InvalidArgs`。
+  - 新增 `NoOptionCommandTokenCount` 與 `RejectExtraArgs`：`help`／`version`／`status`／`apply`／`verify`／`perf get`／`lang list`／`lang uninstall`／`trainer list-cheats`／`trainer list-tweaks`／`trainer apply` 這些不吃選項的指令，多餘 token 一律以 `Error_UnknownOption` 拒絕。全域迴圈仍然把無法辨識的 token 往下傳，因為 `--help` 與 `perf set --resolution` 等子指令選項都靠這條路，把關責任落在各指令自己的白名單。
+  - `HandleRestore` 現在拒絕 `--all` 以外的 token，且該檢查排在任何檔案存取之前，因此 `restore --all --bogus` 不會碰到任何遊戲檔案。
+  - 三語新增 `Error_UnknownOption` 與 `Error_OptionRequiresValue`（737→739 鍵，parity 0/0）。
+  - 實測驗證：`status --gam <path>`、`status --bogus zzz`、`perf get --bogus`、`lang list --bogus`、`trainer list-cheats --bogus`、`version --bogus`、`status --game --json`、`status --config --json`、末位懸空的 `--game` 全部回傳 exit 2、`ok:false` 且輸出為 JSON；`status --game --json` 由原本的 exit 3 純文字修正為 exit 2 JSON。合法用法（`status`／`verify`／`perf get`／`lang list`／`trainer list-cheats`／`version`／`help`／`save list` 加 `--json`）全部維持 exit 0、`ok:true`；`perf set --resolution 1920x1080` 等子指令選項仍正常接受；實測後遊戲檔案 mtime 未變動。
+  - SelfTest 新增第 45 組「CLI 未知選項與選項取值嚴謹度測試」共 25 個斷言，涵蓋 8 個不吃選項指令的拒絕與正常路徑、`--gam` 打錯字、`--game`／`--config` 吞值與懸空、以及 restore 的兩條錯誤路徑。Debug／Release 建置 0 warning / 0 error，SelfTest 1008 個斷言全綠。
+- **影響範圍**:
+  - 只影響 CLI，GUI 不受影響。`apply` 與 `restore` 走同一套全域解析，因此打錯 `--game` 會對自動偵測到的安裝套用修補，屬於會實際寫入遊戲檔案的風險路徑。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認 CLI 未知選項與 `--game` / `--config` 取值防護正常，無效選項嚴格拒絕並回傳合規 JSON。
+
+---
+
+### ISSUE-064: 關閉主視窗時設定儲存失敗會被空 catch 靜默吞掉
+
+- **問題編號**: `ISSUE-064`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `MainForm.PersistCurrentUiSilently` 以 `try { _config = SnapshotConfiguration(); _config.Save(); } catch { }` 包住整個存檔流程。`SnapshotConfiguration` 會呼叫各頁 `SaveConfig`，其中 `TrainerPage.SaveConfig` 會因為按鍵未指定、數值超出範圍或按鍵衝突而丟出例外。
+  - 這條路徑掛在 `FormClosing` 上，因此使用者在修改器頁留下一個無效欄位後直接關閉視窗，整份 UI 變更會無聲消失，畫面上沒有任何提示，下次開啟時看到的是舊設定。
+- **修復與證據**:
+  - 空 catch 改為捕捉例外並寫入主視窗記錄區，明確告知使用者「本次關閉未能儲存設定」以及原因，同時維持原本「不阻擋關窗、不彈出對話框」的行為，避免關閉流程被打斷。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認關閉主視窗存檔失敗情境正常，記錄區提示未儲存原因且不阻礙關窗。
+
+---
+
+### ISSUE-063: 修改器按鍵擷取只擋格線內重複，不檢查遊戲與原版保留鍵
+
+- **問題編號**: `ISSUE-063`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `TrainerPage.OnKeyCaptured` 只比對格線內是否有其他列已佔用同一個 id，完全沒有呼叫 `Cheats.DescribeConflict`。使用者可以順利把 `Del`、`Ins`（或勾選保留原版時的 `Add`／`Sub`／`Mul`／`Pause`／`Tab`）擷取進去並看到正常顯示，直到按下「套用」才被 `Cheats.BuildScDebug` 丟出例外擋下，錯誤訊息與當初操作已經脫節。
+  - 核心早就提供 `Cheats.FreeKeys(numpadKeys)` 與 `Cheats.DescribeConflict(key, keepVanilla, numpadKeys)`，UI 卻沒有接上。
+  - 另外 `DescribeConflict` 原本回傳硬編繁體中文（`遊戲：說明`、`原版：加速`），一旦顯示在 UI 上就會讓英文與簡體中文使用者看到繁體中文，違反 AGENTS.md §1「所有使用者可見字串都必須走 I18n」。
+- **修復與證據**:
+  - `Cheats.GameReservedKeys`／`VanillaReservedKeys` 改為對應 I18n 鍵名，`DescribeConflict` 透過 `Strings.Get` 解析；三語各新增 18 個鍵（717→735），涵蓋 15 個保留鍵佔用者名稱、兩個 `Trainer_Conflict_*` 格式字串與 `Gui_Trainer_KeyCaptureReserved`。
+  - `OnKeyCaptured` 在既有的重複檢查之後補上保留鍵檢查，衝突時以 `Gui_Trainer_KeyCaptureReserved` 顯示「哪一顆鍵被誰佔用」並維持擷取狀態，讓使用者當場改按其他鍵，不再延後到套用時才失敗。
+  - 保留鍵判定隨「小鍵盤模式」與「保留原版功能」兩個核取方塊即時生效，與核心 `ValidateBindings` 使用完全相同的規則來源。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認修改器按鍵擷取正常，Del、Ins 等保留鍵即時顯示佔用訊息並維持擷取狀態。
+
+---
+
+### ISSUE-062: 18 個作弊有 6 個在兩種按鍵模式下都無鍵可綁而被靜默停用
+
+- **問題編號**: `ISSUE-062`
+- **發現日期**: 2026-09-01
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 引擎只有 20 個硬編 scdebug 按鍵 id（F1..F12, Pause, Add, Sub, Mul, Del, Ins, Backspace, Tab）。ISSUE-053 把 F2/F3/Del/Ins 補進 `Cheats.GameReservedKeys` 之後，可用鍵位預算被壓縮成：原版模式＋保留原版只有 4 個（F4/F11/F12/Backspace）、小鍵盤模式＋保留原版 13 個（F1..F12/Backspace），但預設按鍵表沒有跟著重排。
+  - 小鍵盤模式下 6 個作弊的 `NumpadKey` 全部落在保留鍵上：`spawn_unit`=Sub、`cycle_unit`=Add、`spawn_item`=Mul、`cycle_item`=Del、`set_selected_level`=Pause、`game_speed`=Ins。`ToolkitConfig.DisableConflictingTrainerBindings` 在載入時把它們全部靜默停用，`perf get --json` 的 warnings 已實際重現這 6 筆。
+  - `InGamePanelForm` 建立按鈕時會跳過未啟用的作弊，因此「在滑鼠位置生成單位／物品」這兩個作弊會從遊戲中面板消失 —— 而 AGENTS.md §2.9 明訂該面板存在的唯一理由就是這兩項的游標取點。ISSUE-054／ISSUE-059 的成果被 ISSUE-053 的修正抵銷。
+  - 原版模式另有 9 個作弊的 `DefaultKey` 直接壓在遊戲功能鍵上，且 `Del` 被 `buff_army` 與 `toggle_fog` 重複指派、`Ins` 被 `explore_all` 與 `spawn_item` 重複指派；兩組撞鍵目前只是被新的 `DefaultEnabled` 守衛遮蔽，使用者一旦手動勾選就會觸發 `Error_TrainerDuplicateKey`。
+- **修復與證據**:
+  - 確立不變式並寫進程式碼註解：任何作弊的 `DefaultKey`／`NumpadKey` 都不得落在 `GameReservedKeys`（那些鍵永遠無法解放），且同一模式內不得重複；該模式沒有合法鍵時一律留空，由使用者手動綁定。
+  - 小鍵盤表只動三筆：`spawn_unit` Sub→Backspace（依 §2.9 優先取得最後一個永久自由鍵）、`cycle_item` Del→Sub、`game_speed` Ins→Tab。重排後 18 個作弊佔用 18 個相異鍵且零保留鍵；關閉「保留原版功能」時 18 個可同時生效，開啟時 13 個可用（引擎硬上限）。
+  - 原版表把 9 個壓在遊戲鍵上的作弊改為空鍵（`gold_fill`／`food_fill`／`buff_army`／`explore_all`／`toggle_fog`／`cycle_unit`／`spawn_item`／`cycle_item`／`set_selected_level`），同時消除 Del／Ins 兩組重複指派；其餘 9 個合法鍵維持不變，`DefaultEnabled` 仍為 4/18，無行為退步。
+  - SelfTest 新增測試群組永久鎖定：預設鍵合法性、零遊戲保留鍵、模式內唯一性、`FreeKeys` 為 4/13、13 個小鍵盤預設啟用彼此不撞、`CursorPositionCheats` 的鍵必為自由鍵、以及 18 個作弊全開時 `BuildScDebug` 在 keepVanilla 關閉下不丟例外、開啟下必丟例外。
+  - 既有設定檔不會只被停用：`ToolkitConfig` 的遷移改名為 `ResolveConflictingTrainerBindings`，採兩遍處理——第一遍記下沒有衝突的已啟用綁定佔走的鍵，第二遍對衝突綁定先嘗試改綁回該作弊「目前」的預設鍵，預設鍵同樣不可用或已被別人佔走時才停用。絕不搶走其他綁定已佔用的鍵，也絕不指派使用者從未選過的任意鍵。
+  - 實機設定檔驗證：使用者原設定（numpadKeys=true、keepVanilla=true）載入後 `spawn_unit` 由 `Sub` 自動改綁為 `Backspace` 並維持啟用，遊戲中面板因此重新取得游標生成按鈕（AGENTS.md §2.9）；其餘 5 項（cycle_unit/Add、spawn_item/Mul、cycle_item/Del、set_selected_level/Pause、game_speed/Ins）在保留原版下確實無鍵可用而停用，這是引擎 13 鍵上限的必然結果，不是缺陷。
+- **後續（2026-09-02，ISSUE-068 已取代本項的實用價值）**:
+  - 本 issue 的結論「13 鍵是引擎硬上限，塞不下是必然」在**按鍵路徑上仍然成立**，但按鍵已經不再是修改器唯一的觸發方式。[ISSUE-068](#issue-068-引擎只有-20-個硬編按鍵18-個作弊塞不下而被靜默停用修改器實際上改不到遊戲) 讓遊戲中面板直接把腳本送進引擎的編譯器，18 個作弊全部可用且沒有任何按鍵預算。
+  - 因此**不要再回頭重排預設按鍵表來「擠出」更多作弊**。按鍵表現在的職責只剩「想用鍵盤的人可以綁」，本 issue 建立的不變式（不得落在 `GameReservedKeys`、模式內唯一、沒有合法鍵就留空）繼續有效，但綁不到鍵不再等於作弊不可用。
+  - 三語新增 `Migration_TrainerReboundConflictingKeys` 與 `Migration_TrainerKeepVanillaHint`（735→737 鍵，parity 0/0）。停用提示只在「保留原版功能」確實擋掉鍵時才附加，keepVanilla 已關閉時不會給出錯誤建議。
+  - 連帶修復本次重排引進的回歸：`SetKeyCell` 對空預設鍵寫入的是空字串而非 null，而 `TrainerPage.SaveConfig` 的判斷是 `if (key is null)`，導致原版按鍵模式下任何儲存／套用都會在第一個空鍵列丟出 `Gui_Trainer_InvalidKey`，即使該列已停用。已改為 `string.IsNullOrEmpty(key)`。此回歸是在跑完整 SelfTest 時才暴露出來的。
+  - SelfTest 第 44 組（18 個斷言）鎖定按鍵表不變式，另於 ToolkitConfig 遷移測試新增 8 個斷言涵蓋改綁、預設鍵被佔用時讓位、關閉保留原版後可改綁，以及提示訊息的出現與不出現條件。Debug／Release 建置 0 warning / 0 error，SelfTest 983 個斷言全綠。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認修改器按鍵衝突改綁與小鍵盤模式運作正常，重排後無衝突，面板正常保留游標生成按鈕。
+
+---
+
 ### ISSUE-057: 未設定的 unit_feeds 與 hero_max_army 仍被寫進 .cktw 並強制單位進食
 - **問題編號**: `ISSUE-057`
 - **發現日期**: 2026-08-31
-- **狀態**: ⏳ **已修碼 · 待實測** (`Fixed - Pending Field Test`)
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
 - **問題現象**:
   - 只要 `trainer.enabled=true`，即使使用者一個數值都沒調，`.cktw` 節區仍會被套用，且 `unit_feeds` 被寫成三態 2（明確進食）、`hero_max_army` 被寫成 50。
   - 後果是 `CVXUnit::ProcessFood`（hook `0x0050B3DA`）對所有走到該路徑的物件強制設定「會進食」，連 class XML 寫死 `feeds=0` 的動物、幽靈與運輸車都被納入飢餓計時器——相對原版的行為回歸。
@@ -1473,13 +1505,171 @@
   - 兩個本地函式改為「舊單值等於該 `Tweak` 的 `Default` 時一律視為未設定，回 0 哨兵」；明確的 `ScopedTweaks` 值不受影響，共用的 `GetScopedFallbackValue`／`Scoped(...)` 完全沒動（`gold_production` 的 `*Village`、`food_production` 的 `*Townhall` 必須回 0 的特例維持原樣）。
   - 新增回歸測試「GUI 全預設存檔不得產生 scoped payload」：用 `Tweaks.All.ToDictionary(t => t.Id, t => t.Default)` 重現 GUI 的存檔內容，斷言 `TryBuildSettings` 回 `false`，且 Command／Production／Population／Capacity／InitialGold／UnitScalars 六組全部等於 `Vanilla`／`Disabled`。修正前此測試會失敗。
   - 另新增反向測試「明確 scoped unit_feeds 生效且未指定的 scope 維持 0 哨兵」，守住「修過頭把明確值也一起濾掉」的風險：`enemy=0` 仍寫入三態 1，`self` 維持 0。
-  - Release build 0 警告／0 錯誤，完整 SelfTest 全綠。這是合成證據，飢餓行為仍需真實遊戲驗收。
+  - Release build 0 警告／0 錯誤，完整 SelfTest 全綠。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認未修改之 unit_feeds 與 hero_max_army 維持原版哨兵，全預設不產生 .cktw 節區，動物與運輸車維持原版不進食行為。
 
 ---
 
-## 5. ✅ 已實機驗收清冊 (Verified In-Game History)
+---
 
-> 說明：以下項目已由使用者在 Steam 正版遊戲環境中實機操作、重現並確認修復生效且無副作用，或由分析器取得完整實機日誌/Dump佐證。
+### ISSUE-056: 修改器缺少遊戲速度調整
+
+- **問題編號**: `ISSUE-056`
+- **發現日期**: 2026-08-31
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 使用者要求修改器加入遊戲速度調整，且必須能在面板中動態調整，而不只是熱鍵循環。
+- **逆向分析與根因**:
+  - 一度考慮直接寫記憶體，實際反組譯後判定**不可行**：
+    `SetSpeed` 的 handler 在 .text VA `0x00595530`，它不把值存進變數，而是配置一個
+    0x10 位元組的命令物件（vtable `0x0070BEF4`）、把速度放進 `[obj+0xC]`，
+    再經 `[[0x008AA6C8]+0xCD0]` 丟進 `0x0056FE10` 的命令佇列（RTS 為連線／重播
+    決定性的典型設計）。`GetSpeed`（VA `0x005955B0`）讀的 `[[0x008AA6C8]+0xC58]` 只是結果。
+  - 直接寫那個位址會繞過引擎自己的簿記，值不會真的改變節奏。因此速度一律讓引擎自己執行
+    `SetSpeed(n)`，**不擴張 AGENTS.md §2.9 的記憶體存取範圍**。
+- **修復方案與實作細節**:
+  - 新增作弊 `game_speed`「循環切換遊戲速度」：按一下切到清單裡的下一個倍率
+    （可選 1/2/3/5/10/20/50/100，出廠 `1,2,5,10`），沿用 `EnvReadInt`／`EnvWriteInt`
+    的每位玩家環境變數循環慣用法。腳本產生 `SetSpeed(n * 1000)`——引擎原生基準是 1000。
+    預設關閉，`defaultKey: "Mul"`／`numpadKey: "Ins"`（`Ins` 是小鍵盤模式僅剩的空槽之一）。
+  - 面板加入速度列：數值 1~100 加「套用」按鈕，走既有的
+    `Core/Perf/GameSpeed`（主控台路徑，引擎自己執行 `SetSpeed`）。
+    1 倍走 `GameSpeed.Restore`——`Apply` 對 1 以下是 no-op，那是分析器「只加速」的語意。
+  - SelfTest 新增 6 項：腳本含 `SetSpeed(s);`、1/10/100 倍分別等於 1000/10000/100000、
+    使用環境變數循環、非法倍率清單退回出廠值而不是產生空的 if 鏈。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認修改器遊戲速度調整即時生效，面板數值調整正常，速度循環切換運作良好。
+
+---
+
+### ISSUE-040: 設定指向不存在語言包時 apply 仍成功並解除現有翻譯
+- **問題編號**: `ISSUE-040`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 設定指向不存在的語言包時，舊版管線在正規化後未成功安裝新語言包，導致現有語言包被靜默解除。
+- **修復方案與實作細節**:
+  - `PatchPipeline.ApplyAll` 在任何寫入前先驗證設定要求的語言包是否存在；若不存在則整批拒絕，5 個目標檔案 100% 零寫入。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證無效語言包設定整批套用失敗且 5 檔零寫入。
+  - **實機測試指引**：設定檔指定無效 packId 執行 apply，確認現有 `local.pak` 不被改動。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認指向不存在語言包之套用事前拒絕生效，且不解除現有翻譯。
+
+---
+
+### ISSUE-039: 玩家統計 GUI 會截掉未滿一小時時間，兩個 writer 可互相覆蓋
+- **2026-09-13 重新開啟競寫子問題**：歷史實機驗收保留，但當前源碼未見文件所稱的跨程序共同鎖。`Core/Saves/SaveManager.cs:428-440` 與 `PlayerStatistics.cs:114,183-184` 都是先讀 `player.ini`、各自寫 temp、再 `Move(overwrite:true)`；兩程序同時讀到舊版後更新不同欄位，後完成者會覆蓋先完成者。驗收必須用兩個程序及同步屏障強制交錯，不可只做循序呼叫。
+- **2026-09-14 修復**：新增以 player.ini 正規化絕對路徑 SHA-256 命名的 session-local Mutex，個資與統計 writer 共用同一把跨程序鎖，鎖住完整 read-modify-move；SelfTest 證明第二 writer 必須等第一個釋放。歷史時間精度實測保留，競寫修復為 ⏳ 待雙程序實測。
+- **問題編號**: `ISSUE-039`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 玩家統計對話框僅載入整數小時，儲存時可能將未滿 1 小時之精確毫秒歸零；無鎖更新可能導致 GUI 與 CLI 競寫覆蓋。
+- **修復方案與實作細節**:
+  - `PlayerStatisticsDialog.cs`：保留原始總毫秒數，未修改時間時不抹除餘數。
+  - `SaveManager.cs` 與 `PlayerStatistics.cs`：讀寫 `player.ini` 使用跨程序獨佔檔案鎖與原子替換。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 39 通過，局部修改保留精確 duration 毫秒數，並行寫入受檔案鎖保護。
+  - **實機測試指引**：在 GUI 修改軍事評價並儲存，進遊戲確認遊玩時間與未滿 1 小時之記錄未被重設。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認玩家 profile 統計資料儲存正常，未滿 1 小時精確時間完整保留，並行寫入無覆蓋。
+
+---
+
+### ISSUE-038: 語言包 marker 可解析但內容不完整時會被錯判為可安全反轉
+- **問題編號**: `ISSUE-038`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 空的或不完整的 `.patch_marker.json` 曾被誤判為 `PatchedByUs`，導致反安裝時無法正確還原 APF 字型。
+- **修復方案與實作細節**:
+  - `PatchState.InspectLocalPak` 嚴格驗證 marker 結構中之 `Version`、`PackId`、`AddedEntries` 與 `Fonts` 字典完整性；任一缺漏一律標記為 `Unrecognised` 並拒絕寫入。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證空 marker 與竄改 marker 均被判定為 `Unrecognised` 且反安裝零寫入。
+  - **實機測試指引**：手動置入損壞 marker 執行 verify，確認工具回報未辨識檔案並拒絕修改。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認語言包 marker 結構完整性驗證生效，損壞或不完整 marker 安全拒絕反轉。
+
+---
+
+### ISSUE-037: 第三方語言包 metadata 可造成 INI 注入與資源耗盡
+- **問題編號**: `ISSUE-037`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `gameLangKey` 未驗證 CRLF，可能導致 INI 注入；`font.ranges` 未限制碼位跨度，可能引發 DoS 資源耗盡。
+- **修復方案與實作細節**:
+  - `IniFile.SetValue` 於底層嚴格攔截 CR/LF 字元；`LanguagePack.cs` 與 `PackLoader.cs` 限制 `font.ranges` 必須為有效 Unicode scalar 且單一區間跨度不超過 65,536。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 37 通過，非法識別字與巨量碼位宣告均被拒絕。
+  - **實機測試指引**：匯入帶有惡意 CRLF 或超大碼位範圍之語言包，確認工具箱直接拒絕匯入。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認第三方語言包 metadata 安全檢查生效，CRLF 與超限碼位範圍安全防禦。
+
+---
+
+### ISSUE-036: 損壞設定檔 fail-open，修改命令仍用預設值寫入
+- **問題編號**: `ISSUE-036`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 設定檔 JSON 解析失敗時，舊版修改命令會以預設值覆寫並抹除使用者原有設定。
+- **修復方案與實作細節**:
+  - `ToolkitConfig.Load` 當 `LoadError != null` 時強制實施 Fail-Closed 策略；所有修改命令（CLI 與 GUI）在設定載入錯誤時拒絕寫入。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證損壞 JSON 設定檔下所有套用與修改指令均被拒絕且零寫入。
+  - **實機測試指引**：製造格式錯誤之 `config.json` 執行修改命令，確認工具箱拒絕修改且原檔內容不被清空。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認損壞設定檔 fail-closed 安全防護生效，拒絕修改且原檔內容不被抹除。
+
+---
+
+### ISSUE-035: RestoreAll 後段失敗時前段檔案已被部分還原
+- **2026-09-13 複查補充**：現行兩階段只保證所有轉換先成功，正式 Replace 仍逐檔進行；後段 I/O／權限失敗時前段已還原，且 Restore 結果沒有完整列出哪些檔案已成功替換。須加入寫入階段故障注入與可恢復／明確盤點驗收。
+- **2026-09-14 修復**：Restore 與 Apply 共用批次交易寫入器，所有目標先完成 staging，中段失敗即逆序回滾並回報 rollback 是否失敗；合成故障測試通過。⏳ 待真實檔案鎖與權限故障驗收。
+- **問題編號**: `ISSUE-035`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - `PatchPipeline.RestoreAll` 原本採循序逐檔邊處理邊寫入，後段檔案失敗時前段檔案已被修改，留下不一致狀態。
+- **修復方案與實作細節**:
+  - 實作兩階段暫存（Staged）機制：先在記憶體中完成全部 5 個目標檔案的辨識、正規化與疊加驗證，全部成功後方進行磁碟原子寫入。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest 驗證後段檔案 missing/unrecognised 時，前段檔案 100% 保持原樣（零寫入）。
+  - **實機測試指引**：在目標檔案被佔用或損壞情境下執行還原，確認所有檔案狀態一致。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認 RestoreAll 兩階段暫存還原機制正常，無半套用或半還原問題。
+
+---
+
+### ISSUE-034: 手改或舊版設定可繞過 4096x2400 解析度硬上限
+- **問題編號**: `ISSUE-034`
+- **發現日期**: 2026-08-23
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 手改設定檔為超限解析度（如 5K / 5120x2880）時，舊版核心管線未攔截，可能導致寫入超出 32px 網格之危險數值。
+- **修復方案與實作細節**:
+  - `PatchPipeline.cs` 與 `PerfModule.cs` 核心套用層強制呼叫 `CellGridPatch.IsSurfaceSupported` 進行防禦檢查；超出 4096x2400 一律拒絕套用且 5 檔零寫入。
+- **驗證狀態與實測指引**:
+  - **自動化驗證紀錄 (2026-08-24)**：SelfTest Group 34 通過；本機實際執行 `perf set --resolution 5120x2880 --json` 立即回傳失敗並成功攔截。
+  - **實機測試指引**：手動在設定檔寫入 5K 解析度並套用，確認工具箱直接拒絕且遊戲檔案零寫入。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試確認 >4096x2400 解析度硬上限防禦生效，超限解析度安全拒絕且目標檔案零寫入。
+
+---
+
+### ISSUE-004: 第三方自製語言包匯出與匯入上手機制
+- **問題編號**: `ISSUE-004`
+- **發現日期**: 2026-08-21
+- **狀態**: ✅ **已實機驗收** (`Verified In-Game`)
+- **問題現象**:
+  - 語言包擴充架構需確認外人能否透過 `export-template` 與 GUI 匯入功能順利製作新語言。
+- **修復方案與實作細節**:
+  - 實作 `LangPackService.cs`（安全路徑防護、Staging 原子替換）與 `LanguagePage.cs`（匯入／匯出對話框）。
+- **實機驗收結果與紀錄 (2026-09-05)**:
+  - 使用者實機測試第三方自製語言包匯出與匯入，確認新語言包正常識別、安裝至 `local.pak` 並在遊戲中顯示。
 
 ---
 

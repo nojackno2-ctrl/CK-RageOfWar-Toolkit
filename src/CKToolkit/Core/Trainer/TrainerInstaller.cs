@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Trainer;
 
@@ -66,7 +67,7 @@ public static class TrainerInstaller
             snapshot[name] = pak.ReadText(name);
         }
 
-        var marker = new TrainerMarker();
+        var marker = new TrainerMarker { Version = 1, ToolkitVersion = "1.0.5" };
 
         // 2. 作弊：產生 SCDEBUG.XML
         var selections = config.SupportsFilePatch
@@ -313,30 +314,23 @@ public static class TrainerInstaller
             return;
         }
 
-        TrainerMarker? marker;
-        try
+        TrainerMarker? marker = ReadMarker(pak);
+        if (marker is null)
         {
-            marker = JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
-        }
-        catch
-        {
-            marker = null;
+            throw new TrainerException(Strings.Get("Error_TrainerMarkerInvalid"));
         }
 
-        if (marker is not null)
+        foreach (string name in marker.AddedEntries)
         {
-            foreach (string name in marker.AddedEntries)
+            if (pak.Contains(name))
             {
-                if (pak.Contains(name))
-                {
-                    pak.Remove(name);
-                }
+                pak.Remove(name);
             }
+        }
 
-            foreach (var (name, original) in marker.Originals)
-            {
-                pak.WriteText(name, original);
-            }
+        foreach (var (name, original) in marker.Originals)
+        {
+            pak.WriteText(name, original);
         }
 
         pak.Remove(MarkerPath);
@@ -351,12 +345,40 @@ public static class TrainerInstaller
         if (!pak.Contains(MarkerPath)) return null;
         try
         {
-            return JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
+            TrainerMarker? marker = JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
+            return IsValidMarker(pak, marker) ? marker : null;
         }
         catch
         {
             return null;
         }
+    }
+
+    private static bool IsValidMarker(HmmPak pak, TrainerMarker? marker)
+    {
+        if (marker is null || marker.Version != 1 || string.IsNullOrWhiteSpace(marker.ToolkitVersion) ||
+            marker.AddedEntries is null || marker.Originals is null || marker.Cheats is null ||
+            marker.Tweaks is null || marker.GameSettings is null)
+        {
+            return false;
+        }
+
+        // No current trainer operation creates a new data.pak entry. Accepting a
+        // marker-provided deletion list would let corrupted metadata delete content
+        // whose original bytes are unknowable, so fail closed until a future format
+        // version introduces an explicit, audited whitelist.
+        if (marker.AddedEntries.Count != 0) return false;
+
+        var candidates = CandidateEntries(pak).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in marker.Originals)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null ||
+                !candidates.Contains(pair.Key))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>

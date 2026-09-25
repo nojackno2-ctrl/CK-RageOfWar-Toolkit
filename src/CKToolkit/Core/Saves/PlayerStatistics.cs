@@ -75,6 +75,7 @@ public static class PlayerStatistics
         try
         {
             Encoding encoding = Encoding.GetEncoding(1252);
+            using IDisposable operationLock = PlayerIniLock.Acquire(playerIniPath);
             IniFile ini = IniFile.FromText(encoding.GetString(File.ReadAllBytes(playerIniPath)));
             var records = ReadContiguousRecords(ini);
             return Result<PlayerStatisticsSummary>.Ok(Aggregate(profile, playerIniPath, records));

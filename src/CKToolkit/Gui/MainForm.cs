@@ -331,6 +331,11 @@ public sealed class MainForm : Form
     {
         gameDir = _gamePath.Text.Trim();
         snapshot = ToolkitConfig.CreateDefault();
+        if (_config.LoadError is not null)
+        {
+            ShowOperationError(_config.LoadError);
+            return false;
+        }
         if (!GamePaths.IsGameDir(gameDir))
         {
             ShowOperationError(Strings.Get("Error_GameNotFound"));
