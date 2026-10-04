@@ -29,6 +29,12 @@
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
+## 交接事項：2026-10-04 發布 v1.0.6
+
+- 使用者要求發布新版本。版本由 1.0.5 升為 **1.0.6**，同步 `CKToolkit.csproj`、`CliHost.Lifecycle.cs`、`TrainerInstaller` marker 的 `ToolkitVersion`（僅記錄用，`IsValid` 只檢查非空）與三語 `Cli_Version`／`Gui_Placeholder_Title`／`Gui_WindowTitle`。SelfTest 第 2966 行的 `1.0.5` 是舊版 marker 測試資料，刻意不改。
+- 本版內容：GUI 跨電腦版面重做（ISSUE-101）、設定同步存遊戲資料夾（ISSUE-100）、版面自適應（ISSUE-099），以及 2026-09-25 的執行期安全與存檔處理強化（ISSUE-079～098）。以上皆為 ⏳ 待實測。
+- 發布方式：推 `v1.0.6` 標籤，由 `.github/workflows/release.yml` 在 GitHub runner 上跑 SelfTest、從原始碼建 ckperf.dll、publish 兩種 EXE 並附 provenance。
+
 ## 交接事項：2026-10-04 GUI 重做——跨電腦版面永久修正（ISSUE-101）與設定存遊戲資料夾（ISSUE-100 擴充）
 
 > 📌 **編號說明（2026-10-04 合併）**：本機 2026-09-20／10-04 的 GUI 與設定工作原本編為 ISSUE-079／080／081，與遠端 2026-09-05～09-25 已使用的同號 issue 撞號，合併時改編為 **ISSUE-099（版面自適應）／ISSUE-100（設定存遊戲資料夾）／ISSUE-101（GUI 跨電腦重做）**。

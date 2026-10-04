@@ -67,7 +67,7 @@ public static class TrainerInstaller
             snapshot[name] = pak.ReadText(name);
         }
 
-        var marker = new TrainerMarker { Version = 1, ToolkitVersion = "1.0.5" };
+        var marker = new TrainerMarker { Version = 1, ToolkitVersion = "1.0.6" };
 
         // 2. 作弊：產生 SCDEBUG.XML
         var selections = config.SupportsFilePatch
