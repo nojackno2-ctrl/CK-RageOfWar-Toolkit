@@ -65,7 +65,9 @@ public static partial class LocXml
 
     public static bool IsTranslationTable(byte[] data)
     {
-        int n = Math.Min(data.Length, 64);
+        // 戰役 XML 可能在開頭包含長註解或 metadata（如 Return to the Throne CONV.XML 在 1376 bytes 處才出現標籤），
+        // 因此搜尋範圍擴展至 4096 bytes 以確保所有合法翻譯表均能正確識別。
+        int n = Math.Min(data.Length, 4096);
         var span = data.AsSpan(0, n);
         ReadOnlySpan<byte> target = "<translationtable"u8;
         if (span.Length < target.Length) return false;

@@ -1,4 +1,5 @@
 using CKToolkit.I18n;
+using System.IO.Pipes;
 using System.Reflection;
 using CKToolkit.Core.Common;
 
@@ -60,7 +61,7 @@ public sealed class DiagnosticsOptions
     /// </summary>
     public string? OutputDirectory { get; set; }
 
-    internal string ToOptionString()
+    internal string ToOptionString(bool includeScriptToken = true)
     {
         // 權杖長度不對就連 scriptchannel 都不寫出去，讓「開了通道卻沒有共用祕密」
         // 這種狀態在來源端就不可能發生（原生端另有一道同樣的檢查）。
@@ -74,7 +75,7 @@ public sealed class DiagnosticsOptions
             $"maxreports={MaxReports},telemetryms={TelemetryMs}";
 
         return channel
-            ? options + $",scriptchannel=1,scripttoken={ScriptToken}"
+            ? options + ",scriptchannel=1" + (includeScriptToken ? $",scripttoken={ScriptToken}" : string.Empty)
             : options;
     }
 }
@@ -188,6 +189,37 @@ public static class GameRunner
     private static string RuntimeDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                      "CKToolkit", "runtime");
+
+    private sealed class ScriptTokenBootstrap : IDisposable
+    {
+        private readonly NamedPipeServerStream _pipe;
+        private readonly CancellationTokenSource _cancel = new(TimeSpan.FromSeconds(20));
+        private readonly Task _serve;
+
+        private ScriptTokenBootstrap(uint pid, string token)
+        {
+            _pipe = new NamedPipeServerStream(
+                $"ckperf-bootstrap-{pid}", PipeDirection.Out, 1,
+                PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            byte[] bytes = System.Text.Encoding.ASCII.GetBytes(token);
+            _serve = Task.Run(async () =>
+            {
+                await _pipe.WaitForConnectionAsync(_cancel.Token).ConfigureAwait(false);
+                await _pipe.WriteAsync(bytes, _cancel.Token).ConfigureAwait(false);
+                await _pipe.FlushAsync(_cancel.Token).ConfigureAwait(false);
+            });
+        }
+
+        public static ScriptTokenBootstrap Start(uint pid, string token) => new(pid, token);
+
+        public void Dispose()
+        {
+            _cancel.Cancel();
+            try { _serve.Wait(TimeSpan.FromSeconds(1)); } catch { }
+            _pipe.Dispose();
+            _cancel.Dispose();
+        }
+    }
 
     /// <summary>
     /// 啟動遊戲並注入診斷層。
@@ -378,8 +410,12 @@ public static class GameRunner
         string outDir = ResolveOutputDirectory(options);
         Directory.CreateDirectory(outDir);
 
-        // 掛載模式沒有機會設定子程序環境（行程是別人開的），設定只能經由
-        // DLL 旁邊的 ckperf.ini 傳遞。所以這一步一定要在注入之前完成。
+        // 掛載模式的非敏感設定由 ini 傳遞；一次性腳本權杖只走目前使用者可連的
+        // 記憶體管線，絕不持久化到磁碟。
+        using ScriptTokenBootstrap? tokenBootstrap =
+            options.ScriptChannel && ScriptChannel.IsValidToken(options.ScriptToken)
+                ? ScriptTokenBootstrap.Start(pid, options.ScriptToken!)
+                : null;
         Result settings = WriteSettingsFile(options, outDir);
         if (settings.IsError)
         {
@@ -438,7 +474,7 @@ public static class GameRunner
             string ini =
                 "[ckperf]\r\n" +
                 $"out={outDir}\r\n" +
-                $"opts={options.ToOptionString()}\r\n";
+                $"opts={options.ToOptionString(includeScriptToken: false)}\r\n";
             File.WriteAllText(Path.Combine(RuntimeDirectory, "ckperf.ini"), ini,
                               new System.Text.UnicodeEncoding(bigEndian: false, byteOrderMark: true));
             return Result.Ok();
@@ -452,9 +488,8 @@ public static class GameRunner
     /// <summary>
     /// 把內嵌的 <c>ckperf.dll</c> 展開到 <c>%LOCALAPPDATA%\CKToolkit\runtime</c>。
     ///
-    /// 為什麼不直接從工具所在目錄注入：遠端 <c>LoadLibraryA</c> 收的是 ANSI 路徑，
-    /// 而本工具很可能被放在含非 ANSI 字元的目錄（這個專案自己就在「離線儲存」底下）。
-    /// LocalAppData 之下的路徑是純 ASCII，注入才穩。
+    /// DLL 放在 LocalAppData，讓遊戲執行期間能持續持有穩定檔案；注入端使用
+    /// <c>LoadLibraryW</c>，所以使用者名稱或工具路徑含非 ASCII 字元亦不會失真。
     /// </summary>
     private static Result<string> ExtractRuntimeDll()
     {

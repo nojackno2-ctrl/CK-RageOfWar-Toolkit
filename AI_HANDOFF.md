@@ -1,5 +1,23 @@
 # AI_HANDOFF.md — 即時共用記憶
 
+## 交接事項：2026-09-14 全面稽核修復（ISSUE-082～098、080～081 與既有缺口）
+
+- 使用者要求修好 9/13 稽核問題。本輪已實作 `ISSUE-082`～`ISSUE-098` 共 17 項，並修復 `ISSUE-080` 主執行緒延後自測、`ISSUE-081` 原生報告配額分離，以及 `ISSUE-035/039/046/048` 的寫入交易、player.ini 跨程序鎖與 verify payload 盲區。
+- Runtime：managed pipe 的單一 deadline 涵蓋 connect/write/read，Probe 只接受 Ok/Scheduled/NotInGame；native mailbox 加 Running/Abandoned claim，header/body 讀取與 flush 有 deadline；腳本自測在 live session 的 SetDIBitsToDevice 主執行緒才執行。
+- 注入：改用目標 x86 `LoadLibraryW` + UTF-16；逾時不釋放仍可能被遠端 thread 使用的參數；注入失敗又無法還原 EB FE 時終止行程。`ckperf.ini` 不再包含 token，launch 用環境，attach 用 current-user-only bootstrap named pipe 一次傳遞。
+- Patch／資料：Trainer marker 現在驗證 version/toolkitVersion/集合/候選 Originals，當前格式拒絕任何 AddedEntries 刪除清單；外部語言包探索共用安全驗證；五檔套用／還原改成全 staging 後替換，中段失敗逆序回滾；verify 對 EXE/Launcher/data.pak/vxSettings 重建期望 payload 再逐位元組比較。
+- GUI／CLI／存檔：損毀設定 GUI Apply fail-closed、null 子設定正規化、分析器前置例外被 UI 接住、settings get typo 拒絕與三語 help、自訂字型保存、畸形 cksave null descriptor、孤立預覽槽位、Windows-1252 名稱無損拒絕；player.ini 兩個 writer 共用跨程序 Mutex。
+- 驗證：`tools/perf/build-ckperf.ps1` Release|Win32 成功，`assets/ckperf/ckperf.dll` SHA-256 `95164001D217BDB1EC6C6515B96DA49DDD8D59E739E615CC615E15FE90CEF58A` 與 sidecar 相符；`dotnet build CKToolkit.sln -c Release` 0 警告／0 錯誤；完整 SelfTest 全綠。沒有啟動或寫入真實遊戲。
+- 狀態邊界：上述修復一律為 `⏳ 已修碼 · 待實測`。`ISSUE-079` 的歷史 AppHang 仍缺 hang dump，不能把這批靜態修復宣稱為其根因修復；需要真實遊戲驗證腳本通道 launch/attach、快速連按／timeout、Unicode 路徑、故障配額與多檔 I/O 故障。
+
+## 交接事項：2026-09-13 全面唯讀稽核（已完成，只登記代辦）
+
+- 使用者要求完整檢查並將問題交給其他 AI 修復；本輪禁止修碼、修改遊戲、啟動遊戲或提交 Git。只更新 ISSUES.md 與本交接文件，保留兩者既有未提交驗收紀錄。
+- 基準為 master / 17bc735；本輪 Release 建置成功（0 警告、0 錯誤），Release SelfTest 全部通過。測試為合成資料與控制項測試，不是實機驗收；未重建會覆寫內嵌資產的原生 DLL。
+- 已新增 `ISSUE-082`～`ISSUE-098` 共 17 項：GUI 損毀／null 設定、trainer marker、腳本 mailbox 與 pipe deadline、權杖落盤、注入器 timeout／編碼／還原、Probe 狀態、外部語言包探索、畸形存檔封存、玩家名稱編碼、孤立預覽圖、分析器例外邊界、settings CLI 與自訂字型保存。
+- 已補強既有 `ISSUE-035`、`ISSUE-039`、`ISSUE-046`、`ISSUE-048`：多檔 Replace 仍非交易、player.ini 當前缺少共同跨程序鎖、寫入階段 partial apply/restore、verify 非 trainer 數值盲區。保留歷史實機驗收紀錄，不把本輪靜態證據寫成實機重現。
+- 覆蓋 Core patch/PAK/language/save/statistics、GUI/CLI/I18n、CKPerf runtime/script channel/injector/crash guards、scoped tweaks 與 release/SelfTest 入口。未逐指令重新逆向所有組語、未重建會覆寫內嵌資產的 native DLL、未啟動真實遊戲；這些是下一位修復 AI 的驗收邊界。
+
 ## 專案概要
 
 **CK-RageOfWar-Toolkit** — 《Celtic Kings: Rage of War》（凱爾特之王：戰爭狂怒，2004, Steam 版）整合工具包。
@@ -11,8 +29,163 @@
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
-> 📌 **問題、修復與實機驗收狀態追蹤**：請參閱 [ISSUES.md](ISSUES.md)。
-> 所有 Bug 發現、修復進度與「是否已在真實遊戲實機驗收」均由 AI 代理人在 `ISSUES.md` 即時更新維護。
+## 交接事項：2026-10-04 發布 v1.0.6
+
+- 使用者要求發布新版本。版本由 1.0.5 升為 **1.0.6**，同步 `CKToolkit.csproj`、`CliHost.Lifecycle.cs`、`TrainerInstaller` marker 的 `ToolkitVersion`（僅記錄用，`IsValid` 只檢查非空）與三語 `Cli_Version`／`Gui_Placeholder_Title`／`Gui_WindowTitle`。SelfTest 第 2966 行的 `1.0.5` 是舊版 marker 測試資料，刻意不改。
+- 本版內容：GUI 跨電腦版面重做（ISSUE-101）、設定同步存遊戲資料夾（ISSUE-100）、版面自適應（ISSUE-099），以及 2026-09-25 的執行期安全與存檔處理強化（ISSUE-079～098）。以上皆為 ⏳ 待實測。
+- 發布方式：推 `v1.0.6` 標籤，由 `.github/workflows/release.yml` 在 GitHub runner 上跑 SelfTest、從原始碼建 ckperf.dll、publish 兩種 EXE 並附 provenance。
+
+## 交接事項：2026-10-04 GUI 重做——跨電腦版面永久修正（ISSUE-101）與設定存遊戲資料夾（ISSUE-100 擴充）
+
+> 📌 **編號說明（2026-10-04 合併）**：本機 2026-09-20／10-04 的 GUI 與設定工作原本編為 ISSUE-079／080／081，與遠端 2026-09-05～09-25 已使用的同號 issue 撞號，合併時改編為 **ISSUE-099（版面自適應）／ISSUE-100（設定存遊戲資料夾）／ISSUE-101（GUI 跨電腦重做）**。
+
+> ⏳ **已修碼 · 待實測（2026-10-04）**：
+> - 使用者：「重作UI，只要換電腦介面就會亂掉，我要永久解決這個問題，所有的分頁都是」。根因三個（實驗證實）：表單的 DPI 自動縮放從未生效（缺 `AutoScaleDimensions`、設定時機錯）；高度用百分比列與寫死 `MinimumSize` 猜；`DataGridView` 欄寬列高、`TableLayoutPanel` Absolute 樣式、`ComboBox` 實際高度都不會被正確縮放。
+> - **新版面規則在 `src/CKToolkit/Gui/Layout/`**（`StackPanel`、`ScrollPage`、`Card`、`ColumnsPanel`、`UniformGrid`、`ContentTabControl`、`GridMetrics`、`UiComboBox`、`Ui`）。**改 GUI 的鐵律**：①表單建構以 `Ui.BeginForm`／`Ui.EndForm` 包住，所有尺寸寫 96 DPI 邏輯像素；②分頁繼承 `ScrollPage`，內容加到 `Content`；③不要用 `RowStyle(Percent)`、`SizeType.Absolute`、寫死高度的 `MinimumSize`、`GroupBox`、`AutoScroll` 的 TableLayoutPanel；④`DataGridView` 加完欄位呼叫 `GridMetrics.Apply`；⑤下拉選單用 `UiComboBox`，自然寬度的呼叫 `Ui.FitComboToItems`；⑥EndForm 之後才動態建立的控制項，尺寸要用 `LogicalToDeviceUnits`。
+> - **SelfTest 第 49 組 GUI 版面稽核**（`src/CKToolkit.SelfTest/LayoutAudit.cs`）：96 DPI 與本機 DPI × 字型 100～200% × 三語 × 三種視窗大小，檢查不裁切／文字完整／不重疊／表格列高。子行程以 `CKToolkit.SelfTest.exe --layout-audit <unaware|permonitor> <scale>` 執行，設環境變數 `CK_LAYOUT_AUDIT_LOG=<路徑>` 可輸出完整違規清單。
+> - 使用者另要求「設定記錄檔應放在遊戲資料夾，工具換位置才抓得到」：GUI 平常存設定時也寫遊戲資料夾（`MainForm.SaveToGameDirQuietly`），本次執行中還原過的目錄在下次套用前不寫。CLI 維持零寫入遊戲目錄。ISSUE-100 先前未登記於 ISSUES.md，已補登；第 48 組錯誤期望（`Numpad1`）已修正為 `F1`。
+> - 注意：2026-09-20 的 ISSUE-099／080 工作原本就未 commit（工作樹含 `ToolkitConfig.cs`、`PatchPipeline.cs`、`CliHost.Config.cs` 等）。本次未 commit。
+> - **驗證**：Release build 0 警告 0 錯誤；完整 SelfTest 全綠（1332 項）。仍須使用者在其他電腦／縮放比例／多螢幕實測。
+
+## 交接事項：2026-09-20 GUI 版面自適應（ISSUE-099）
+
+> ⏳ **已修碼 · 待實測（2026-09-20）**：
+> - 使用者需求「我要讓UI會自動調整」，附最大化視窗截圖：效能分頁的四個區塊擠在上緣、區塊內出現小捲軸、說明文字被裁掉半行，下方近千像素空白。
+> - **根因**：①`PerformancePage` 根面板是 `Dock = Top + AutoSize`，只取內容自然高度；②各 `GroupBox` 內容面板開了 `AutoScroll`，導致對外回報的偏好尺寸極小，外層只配得出 `MinimumSize` 的高度，內容因此被裁切；③七個分頁的說明文字都用寫死的 `MaximumSize`（760～1600px）決定換行點；④主視窗記錄區是固定 130px 的絕對列。
+> - **修復**：新增 `Gui/ResponsiveLayout.cs` 提供兩條共用規則——`WrapToContainer`（換行寬度跟著容器走，上限 1100 邏輯像素可讀行寬，橫幅可傳 `maximumWidth: 0` 填滿）與 `FillOrScroll`（根面板填滿分頁，放不下才由分頁出捲軸；停靠子控制項不會產生捲動範圍，所以用 `AutoScrollMinSize` 明講，並取已依 DPI 換算過的 `root.MinimumSize` 當來源）。`PerformancePage` 三列改 26/30/44 百分比並移除內層 `AutoScroll`；`MainForm` 分頁／記錄區改 78% / 22%。
+> - 順手修掉 `GameSettingsPage` 重設按鈕查不存在的鍵 `Gui_ResetDefaults`（按鈕上直接印鍵名），改為新增的三語 `GameSettings_ResetDefaults`。
+> - **驗證**：build 零警告；SelfTest 47 組全綠；於 200% DPI 以最大化／1900x1400／1000x800 三種尺寸實際擷取七個分頁畫面核對。仍須使用者在自己的螢幕與 DPI 下確認。
+## 交接事項：2026-09-05 最近當機報告分析（ISSUE-079～081，未修碼）
+
+- Windows Application 1002／WER AppHangB1 確認兩次「停止回應」：9/5 08:47:33（PID 31184，ReportId `75c1d487-78c0-4a7c-89f5-e2dbd67d7d83`）及 9/4 20:38:22（PID 36436，ReportId `4a4655fa-62c2-43e4-b0a3-ab074e108382`）。這是卡死事件，尚無根因證明。
+- 證據根目錄 `%LOCALAPPDATA%\CKToolkit\stability`。今天對應 `ckperf-20260905-081351-pid31184.log` 最後兩行於 08:47:05.251／.253 記錄 `004F3026`／`004F3DE5` 空存取被修復；無 `process exiting`，未找到該場 hang dump，不能把最後 EIP 當成卡死根因。
+- 最新 `ckcrash-20260905-101558-01..05.txt` 是啟動期間五個被修復的 first-chance AV；同場 Log 到 10:25:35 才記錄退出。9/3～9/5 共 22 批 110 份均為相同五個 EIP，不能算成 110 次閃退。
+- `dllmain.cpp` 初始化執行緒直接呼叫 `ScriptChannelInstall` → `ScriptChannelSelfTest` → 遊戲編譯器；未等待引擎就緒，也未移至主執行緒。Log 隨後記錄自測編譯返回 null、通道停用。高度懷疑啟動時序不正確；它與後續 AppHang 的因果關係未證明。保留 ISSUE-068 既有使用者驗收，另立 ISSUE-080 追蹤此啟動路徑。
+- 原生 `crash.cpp` 的修復例外與未修復例外共用報告額度；這些場次 `maxreports=5` 在啟動就耗盡，且 `dump=0 telemetry=0 frames=0`。今日十個分析器 attach 資料夾只有 `ckrun-config.txt`，不能以清單內期望設定宣稱實際取樣／Dump 已啟動。ISSUE-081 與 managed CrashCatcher 的 ISSUE-047 分開追蹤。
+- 下一步：引擎就緒後在主執行緒進行通道自測；為未修復例外保留獨立報告額度；再次停止回應時取得執行緒 Dump／取樣資料。另有 dirty-cell byte mismatch 警告，尚無證據將其歸因於本次卡死。
+- 本次只更新兩份追蹤文件，保留既有未提交驗收紀錄，未啟動或修改遊戲。Release build 0 警告／0 錯誤，SelfTest 47 組全部通過；這些結果不代表卡死已修復。文件委派逾時且未留下檔案變更，已補登證據。
+
+## 交接事項：2026-09-05 使用者實機驗收通過修改器執行期腳本通道（ISSUE-068）
+
+> ✅ **已實機驗收（2026-09-05）**：
+> - 使用者回報：「68也有生效」。
+> - `ISSUE-068`（修改器改用執行期腳本通道，徹底繞開 20 個硬編按鍵上限）已在 Steam 真實遊戲中實機操作通過。
+> - 在遊戲中開啟「遊戲中面板」，點擊作弊按鈕成功透過執行期具名管線通道（`ckperf.dll` 重現 scdebug 編譯執行鏈）即時派送執行，包含在滑鼠目標位置生成單位等 18 項作弊皆可即時生效。狀態升級為 `✅ 已實機驗收`，移入 `ISSUES.md` 第 5 節。
+
+## 交接事項：2026-09-05 使用者決策結案遊戲主選單 21 FPS 節流現象（ISSUE-007）
+
+> ✅ **已決策結案（2026-09-05）**：
+> - 使用者明確指示「7維持原廠設定就好」。
+> - `ISSUE-007` 經逆向分析，選單規律節流係因 `Celtic kings.exe` 於 `0x006C8805`（由 `0x006C6380` 呼叫）主動執行 `Sleep`，為原廠避免主選單無謂滿載空轉耗電之正常節能設計。
+> - 遵照指示維持原廠行為不予解鎖，正式自 `ISSUES.md` 第 3 節（未修復清冊）移至第 5 節（已實機驗收／決策結案清冊）。
+
+## 交接事項：2026-09-05 使用者實機驗收通過 8 項核心規則修復與新功能（ISSUE-077, 076, 075, 074, 073, 072, 070, 069）
+
+> ✅ **已實機驗收（2026-09-05）**：
+> - 使用者回報：「77 76 75 74 73 72 70 69 都實測成功」。
+> - 共計 8 項核心遊戲規則、兵種編隊與永久規則調整於真實 Steam 遊戲實機驗收通過，狀態升級為 `✅ 已實機驗收`，移入 `ISSUES.md` 第 5 節：
+>   1. **ISSUE-077**：部隊遠距／全圖瞬時編入英雄隊伍（右鍵瞬時編入與自動移動靠攏歸隊，滿員正確拒絕）。
+>   2. **ISSUE-076**：運糧馬／運金馬運載上限與大容量生產提升至 10,000，中途裝載達 10,000。
+>   3. **ISSUE-075**：運糧馬／騾子右鍵編入英雄隊伍，置於中央陣形核心受保護並行進間補給大軍。
+>   4. **ISSUE-074**：維京領主與自由鬥士解除自由之身（Freedom），可順利編入英雄隊伍並保留專屬特技。
+>   5. **ISSUE-073**：13 個 scoped hook 改比對 player 索引，我方物件正確判定為 self，敵我數值獨立生效。
+>   6. **ISSUE-072**：兵營訓練與神殿研究倍率加速正確生效，單人戰役無閃退。
+>   7. **ISSUE-070**：修改器永久規則調整重設按鈕成功清空分流表並安全移除 `.cktw`。
+>   8. **ISSUE-069**：取消 `.cktw` 多人守衛限制，永久規則調整於單人戰役 100% 正常生效。
+
+## 交接事項：2026-09-05 使用者實機驗收通過 16 項問題修復（ISSUE-062~067, 056, 057, 004, 034~040）
+
+> ✅ **已實機驗收（2026-09-05）**：
+> - 使用者回報：「62~67 56 57 4 34~40都成功」。
+> - 共計 16 項已在 Steam 正版環境由使用者實機測試通過，狀態由 `⏳ 待實測` 升級為 `✅ 已實機驗收`，並自 `ISSUES.md` 第 2 節（待實測看板）與第 4 節移至第 5 節（已實機驗收清冊）：
+>   1. **ISSUE-062**：修改器 18 個作弊按鍵重排，消除保留鍵衝突與小鍵盤模式自動改綁，保留游標生成按鈕。
+>   2. **ISSUE-063**：修改器按鍵擷取排除遊戲與原版保留鍵，即時提示佔用。
+>   3. **ISSUE-064**：關閉主視窗存檔失敗提示，不阻礙關窗。
+>   4. **ISSUE-065**：CLI 嚴格白名單選項檢查，拒絕未知選項，`--game` / `--config` 取值防護。
+>   5. **ISSUE-066**：修改器永久規則調整分頁合併，可分流項目只在分流表格顯示，全域誤導值消除。
+>   6. **ISSUE-067**：Core 與 Cli 92 處繁中錯誤訊息三語在地化收斂為 76 鍵。
+>   7. **ISSUE-056**：修改器遊戲速度調整（1/2/5/10 倍速循環與面板數值即時套用）。
+>   8. **ISSUE-057**：未修改之 `unit_feeds` 與 `hero_max_army` 維持原版哨兵，全預設不產生 `.cktw` 節區，動物與車輛不進食。
+>   9. **ISSUE-004**：第三方自製語言包匯出與匯入上手機制。
+>   10. **ISSUE-034**：解析度 >4096x2400 硬上限防護，超限拒絕且五檔零寫入。
+>   11. **ISSUE-035**：RestoreAll 兩階段暫存機制，防止半還原狀態。
+>   12. **ISSUE-036**：損壞設定檔 fail-closed 安全拒絕，不抹除既有設定。
+>   13. **ISSUE-037**：第三方語言包 metadata 注入防護與碼位跨度限制。
+>   14. **ISSUE-038**：語言包 marker 結構完整性驗證，不完整 marker 拒絕反轉。
+>   15. **ISSUE-039**：玩家 profile 統計資料未滿 1 小時精確時間保留與跨程序獨佔檔案鎖。
+>   16. **ISSUE-040**：設定指向不存在語言包時事前拒絕套用且不解除現有翻譯。
+
+## 交接事項：2026-09-05 額外戰役／劇本對話與任務說明 100% 翻譯缺漏修復（ISSUE-078）
+
+> ⏳ **已修碼 · 待實測（2026-09-05）**：
+> - 針對使用者要求「檢查戰役翻譯是不是全部都翻到」以及「立即修復」，深入掃描 415 個戰役與劇本 XML，揪出並徹底修復額外戰役 356 條對話/任務未翻之兩大技術根因。
+> - **根因分析**：
+>   1. `LocXml.cs`：`IsTranslationTable` 檢查長度寫死 64 bytes。額外戰役有 4 個 XML 檔案（包括 Return to the Throne 的 `CONV.XML` offset 1376，以及 Defenders 的 3 個 XML offset 101）帶有長作者註解，直接被誤判為非翻譯表而全數略過。
+>   2. `ExtraCampaignTemplates.cs`：歷史提取模板時將 UTF-8 引號以 CP1252 解碼產生 Mojibake（如 `â\x80\x99`、`Ã¢â\x82¬â\x84¢`），破壞鍵值致字典查表脫靶（MISS）。
+>   3. 引號風格不一致：彎引號（`’`）與直 ASCII 引號（`'`）缺乏雙向轉換容錯。
+> - **修復方案**：
+>   1. `LocXml.cs`：`IsTranslationTable` 搜尋範圍擴大至 4096 bytes。
+>   2. `ExtraCampaignTemplates.cs`：新增 `CleanMojibake` 自動還原為標準 Unicode 標點。
+>   3. `Translations.cs`：`Lookup` 支援彎直引號自動互轉與 Mojibake 標點容錯。
+>   4. 額外戰役 118 檔模板 1003 個標籤（997 個有效條目）100% 翻譯覆蓋，並同步涵蓋全部 6 種語言包。
+>   5. 透過 CLI `apply` 重新產生並寫入 Steam 正版目錄 `local.pak`，實機掃描確認除 14 個作者名/內部 ID 外，其餘 3,085 條戰役文字全數 100% 翻譯。
+> - **測試驗證**：
+>   - SelfTest Group 26 新增長 Header 翻譯表識別、引號容錯與 118 檔 100% 覆蓋測試，全套 47 組測試全數全綠通過。
+
+## 交接事項：2026-09-05 單位編入英雄隊伍附著半徑硬性限制解除（遠距／全圖瞬時編入英雄，ISSUE-077）
+
+> ⏳ **已修碼 · 待實測（2026-09-05）**：
+> - 依使用者需求「單位編入英雄的附著半徑可以改嗎」->「部隊不用走到英雄跟前，在很遠的地方右鍵點英雄就能立刻編入」，完成了 C++ 引擎視野限制解除與 VS 腳本瞬時編入聯動修復。
+> - **雙重門檻逆向分析**：
+>   1. **二進位 C++ 引擎層**：`0x0050BC60`（`CVXUnit::AttachTo`）在 `0x0050BCEF` 呼叫 `0x004F4120`（`hero->InRange(unit)`，判斷是否小於等於英雄視野 `sight`，預設 600），隨後於 `0x0050BCF6`（檔案位移 `0x0010BCF6`）執行 `je 0x50be21`（`0F 84 25 01 00 00`），超距即強制拒絕編入。
+>   2. **腳本層**：`SUBAI\UNIT_ATTACH.VS` 第 31 行限定 `.posRH.Dist(hero.posRH) < 1500` 才呼叫 `.AttachTo(hero)`，否則只能在迴圈中緩慢走向英雄。
+> - **修補方案**：
+>   1. `InstantHeroAttachPatch.cs`：將 `0x0010BCF6` 的 6 位元組跳轉替換為 NOP（`90 90 90 90 90 90`），保留帶兵數容量檢查（滿員依然正確拒絕），100% 逐位元組精確反轉。
+>   2. `GameRulesModifier.cs`：將 `UNIT_ATTACH.VS` 改寫為點擊瞬間立刻 `.AttachTo(hero)`，並在背景以 `while(!.Goto(...))` 自動靠攏英雄陣形。
+>   3. 整合至 `ToolkitConfig.GameSettings.InstantHeroAttach`、`TrainerInstaller`（快照至 `marker.Originals`）、`TrainerModule`、`PatchState` 與 `PatchPipeline`。
+>   4. GUI「遊戲設定」分頁新增「允許部隊遠距／全圖瞬時編入英雄」勾選框與說明；CLI 支援 `settings set --instant-attach=on|off` 與 `settings get --json`。
+>   5. 繁中、簡中、英文三語在地化字典 100% 同步。
+>   6. SelfTest 第 47 組測試擴充 10 項斷言，全套 47 組測試全數通過。
+
+## 交接事項：2026-09-04 運糧馬／運金馬運載上限與出產量提升至 10,000（ISSUE-076）
+
+> ⏳ **已修碼 · 待實測（2026-09-04）**：
+> - 依使用者需求「不要這麼麻煩，直接改原版的按鈕就好，加入遊戲設定（Game Settings）中，然後上限改成10000」，將運糧馬與運金馬的容量上限改為 10,000，並同步改寫原廠大容量生產按鈕與裝載指令。
+> - 經二進位逆向分析，Wagon 的底層負載上限由 `CLASSES\WAGON.SC.XML` 的 `max_load` 決定，存於 `[class+0x3C4]`；生成函式 `Settlement::CreateMuleFood`（`0x00517010`）於 `0x00517029` 讀取並以 `min(請求量, max_load, 聚落存糧)` 裝載。
+> - 修改包含：
+>   1. `CLASSES\WAGON.SC.XML`：`max_load="1000"` -> `10000`
+>   2. `SUBAI\CREATE_FOOD_MULE_BIG.VS`：`.CreateMuleFood(1000)` -> `10000`
+>   3. `SUBAI\CREATE_GOLD_MULE_BIG.VS`：`.CreateMuleGold(1000)` -> `10000`
+>   4. `SUBAI\WAGON_LOADFOODBIG.VS`：`.LoadFood(1000)` -> `10000`
+>   5. `SUBAI\WAGON_LOADGOLDBIG.VS`：`.LoadGold(1000)` -> `10000`
+>   6. `COMMANDS.XML`：按鈕 rollover 提示由 1000 改為 10000
+> - 遵守無備份目錄、100% 精確反轉（`marker.Originals` 快照還原）與三語在地化原則。
+> - SelfTest 47 組測試（1014+ 斷言）全數全綠通過。
+
+## 交接事項：2026-09-04 運糧馬／騾子編入英雄編隊與護衛陣形功能（ISSUE-075）
+
+> ⏳ **已修碼 · 待實測（2026-09-04）**：
+> - 經逆向分析 `Celtic kings.exe` 與 VS 腳本，找出運糧馬無法編隊的根因並非引擎或腳本阻擋，而是 `CLASSES\WAGON.SC.XML` 的 `<nodefcmdinherit/>` 與 `<defaultcmd target="Unit"><cmd name="follow"/></defaultcmd>` 將右鍵點擊英雄吃成跟隨（follow）。
+> - 陣形護衛：`FORMATIONS.XML` 原版未為 `Wagon` 定位而預設排在 `FrontLine="1"` 最前線送死，修復將其置於陣形核心 `CentralBlock="1"`（與 `Peasant` 同列），受大軍護衛並供軍隊行進間就近進食補糧。
+> - 完整實作「遊戲設定」分頁勾選框、CLI `--mule-army=on|off`、`data.pak` 原始檔案快照與 100% 逐位元組精確反轉。
+> - 擴充 SelfTest 第 47 組測試，47 組測試全綠通過，CLI smoke test 驗證合規。
+
+### 1. 逆向定位與根因
+- `CVXUnit::AttachTo`（`0x0050BC60`）：底層引擎純檢查 Unit 物件指標，Wagon（`0x00515A60` 虛擬函式表）完全合規。
+- `SUBAI\UNIT_ATTACH_VERIFY.VS`：檢查 `.AsUnit()`、`!IsEnemy()`、`!.HasFreedom`，Wagon 均通過。
+- `CLASSES\WAGON.SC.XML`：因 `<nodefcmdinherit/>`（`[class+0xCA]=1`），C++ 引擎跳過父類別 `Unit` 的預設指令表；而自身又僅定義 `target="Unit"` 為 `follow`。英雄也是 `Unit`，右鍵派送直接解析為跟隨。
+- **解法**：在 `WAGON.SC.XML` 的 `target="Unit"` 前注入 `<defaultcmd target="Hero"><cmd name="attach"/></defaultcmd>`；並在 `FORMATIONS.XML` 各陣形中加入 `<Class Name="Wagon" CentralBlock="1"/>`。
+
+### 2. 實作變更清冊
+- **核心轉換**：`src/CKToolkit/Core/Trainer/GameRulesModifier.cs` 新增 `ApplyMuleHeroArmy` / `RemoveMuleHeroArmy` 及 `ApplyMuleFormation` / `RemoveMuleFormation`。
+- **快照與反轉**：`TrainerInstaller.CandidateEntries` 納入 `FORMATIONS.XML`；安裝時當 `AllowMuleHeroArmy` 啟用，自動快照至 `marker.Originals`，在 `Uninstall` 與 `Normalise` 時 100% 逐位元組還原。
+- **設定模型與驗證**：`ToolkitConfig.GameSettings` 新增 `AllowMuleHeroArmy`；`PatchPipeline.TrainerMarkerMatchesConfig` 比對 `allow_mule_army` 標記。
+- **GUI 頁面**：`src/CKToolkit/Gui/GameSettingsPage.cs` 新增「允許運糧馬編入英雄隊伍」勾選框與說明。
+- **CLI 指令**：`src/CKToolkit/Cli/CliHost.GameSettings.cs` 支援 `settings set --mule-army=on|off` 與 `settings get` 顯示。
+- **I18n**：`strings.zh-TW.json`、`strings.zh-CN.json`、`strings.en.json` 新增對應標籤與說明（繁中、簡中、英文），鍵集 100% 一致。
+- **測試**：`src/CKToolkit.SelfTest/Program.cs` Group 47 全面覆蓋，全套測試全綠。
+
+---
 
 ## 交接事項：2026-09-04 版本升級至 v1.0.5 與發布作業
 

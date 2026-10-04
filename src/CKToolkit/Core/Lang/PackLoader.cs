@@ -289,7 +289,7 @@ public static class PackLoader
                 string subPackJson = Path.Combine(subDir, "pack.json");
                 if (File.Exists(subPackJson))
                 {
-                    var loaded = LoadFromDirectory(subDir);
+                    var loaded = LangPackService.ValidatePackDirectory(subDir);
                     if (loaded.Success && loaded.Value is not null)
                     {
                         packs[loaded.Value.Meta.Id] = loaded.Value;

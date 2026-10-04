@@ -170,6 +170,11 @@ public static class PatchState
         if (keyMapApplied && !KeyMap.IsFullyRemappedExe(bytes))
             return FileState.Unrecognised();
 
+        // 6. InstantHeroAttach 檢查
+        bool attachApplied = InstantHeroAttachPatch.IsApplied(bytes);
+        bool attachOrig = InstantHeroAttachPatch.IsOriginal(bytes);
+        if (!attachApplied && !attachOrig) return FileState.Unrecognised();
+
         var patches = new List<string>();
         if (laaApplied) patches.Add("laa");
         if (vmApplied) patches.Add("video_fix");
@@ -178,6 +183,7 @@ public static class PatchState
         if (rwApplied) patches.Add("res_writeback");
         if (scopedApplied) patches.Add("scoped_tweaks");
         if (keyMapApplied) patches.Add("key_map");
+        if (attachApplied) patches.Add("instant_hero_attach");
 
         return patches.Count > 0 ? FileState.PatchedByUs(patches) : FileState.Vanilla();
     }
@@ -229,6 +235,9 @@ public static class PatchState
 
             // 5. 還原 Trainer 的 F1~F12 小鍵盤立即數
             exeBytes = KeyMap.Restore(exeBytes);
+
+            // 6. 還原 InstantHeroAttach 視野距離條件跳轉指令
+            InstantHeroAttachPatch.Apply(ref exeBytes, false);
 
             return Result<byte[]>.Ok(exeBytes);
         }

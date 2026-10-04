@@ -740,7 +740,8 @@ public static class ExtraCampaignTemplates
             {
                 foreach (var (relPath, xmlText) in files)
                 {
-                    byte[] data = Encoding.UTF8.GetBytes(xmlText);
+                    string cleanXml = CleanMojibake(xmlText);
+                    byte[] data = Encoding.UTF8.GetBytes(cleanXml);
                     result.Add((pakPrefix, relPath, data));
                 }
             }
@@ -748,5 +749,22 @@ public static class ExtraCampaignTemplates
 
         _cachedTemplates = result;
         return _cachedTemplates;
+    }
+
+    /// <summary>
+    /// 清除歷史提取時因以 Latin-1/Windows-1252 解碼 UTF-8 位元組所殘留之 Mojibake 引號與標點符號。
+    /// </summary>
+    public static string CleanMojibake(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        return s
+            .Replace("â\u0080\u0099", "’")
+            .Replace("â\u0080\u0098", "‘")
+            .Replace("â\u0080¦", "…")
+            .Replace("â\u0080\u0093", "–")
+            .Replace("â\u0080\u0094", "—")
+            .Replace("â\u0080\u009c", "“")
+            .Replace("â\u0080\u009d", "”")
+            .Replace("Ã¢â\u0082¬â\u0084¢", "’");
     }
 }

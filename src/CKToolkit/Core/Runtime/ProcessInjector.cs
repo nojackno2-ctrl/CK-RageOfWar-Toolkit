@@ -7,13 +7,13 @@ namespace CKToolkit.Core.Runtime;
 /// 把 32 位元 DLL 注入 32 位元子程序的低階機制。本工具為 x64 而目標遊戲為 x86，
 /// 跨位元注入的兩個難處都在這裡解決：
 ///
-/// 1. <b>取得目標行程的 32 位元 <c>LoadLibraryA</c> 位址。</b>
+/// 1. <b>取得目標行程的 32 位元 <c>LoadLibraryW</c> 位址。</b>
 ///    本行程是 x64，自己的 kernel32 位址對 32 位元子程序毫無意義，
 ///    所以必須從目標行程讀出 SysWOW64 kernel32 的載入基底並自行解析匯出表。
 ///
 /// 2. <b>在遊戲執行第一道指令之前就注入。</b>
 ///    以 <c>CREATE_SUSPENDED</c> 建立的行程只映射了 ntdll，kernel32 尚未載入，
-///    此時無從解析 <c>LoadLibraryA</c>。解法是把進入點暫時改寫為 <c>EB FE</c>
+///    此時無從解析 <c>LoadLibraryW</c>。解法是把進入點暫時改寫為 <c>EB FE</c>
 ///    （跳回自己的兩位元組無限迴圈），恢復主執行緒讓載入器跑完，
 ///    主執行緒便會停在進入點空轉；此時 kernel32 已就位，注入完成後再把
 ///    進入點原位元組寫回，遊戲程式碼才開始執行。
@@ -177,11 +177,11 @@ internal static partial class ProcessInjector
         try
         {
             // 行程早就跑起來了，kernel32 一定在，所以不需要等待迴圈的耐心值。
-            IntPtr loadLibrary = WaitForLoadLibraryA(pid, hProcess, timeoutMs: 3000);
+            IntPtr loadLibrary = WaitForLoadLibraryW(pid, hProcess, timeoutMs: 3000);
             if (loadLibrary == IntPtr.Zero)
-                return new LaunchResult(0, "在目標行程中找不到 32 位元 kernel32!LoadLibraryA。", false);
+                return new LaunchResult(0, "在目標行程中找不到 32 位元 kernel32!LoadLibraryW。", false);
 
-            Log($"目標行程 kernel32!LoadLibraryA = 0x{(uint)loadLibrary:X8}");
+            Log($"目標行程 kernel32!LoadLibraryW = 0x{(uint)loadLibrary:X8}");
 
             string detail = InjectDll(hProcess, loadLibrary, dllPath, out bool injected);
             return new LaunchResult(injected ? pid : 0, detail, false);
@@ -269,20 +269,24 @@ internal static partial class ProcessInjector
             // --- 2. 放行主執行緒，讓 Windows 載入器把 kernel32 映射進來 -------------
             ResumeThread(pi.hThread);
 
-            IntPtr loadLibrary = WaitForLoadLibraryA(pi.dwProcessId, pi.hProcess, timeoutMs: 15000);
+            IntPtr loadLibrary = WaitForLoadLibraryW(pi.dwProcessId, pi.hProcess, timeoutMs: 15000);
             if (loadLibrary == IntPtr.Zero)
             {
                 if (spinning) TerminateProcess(pi.hProcess, 1);
-                return new LaunchResult(0, "在目標行程中找不到 32 位元 kernel32!LoadLibraryA。", false);
+                return new LaunchResult(0, "在目標行程中找不到 32 位元 kernel32!LoadLibraryW。", false);
             }
-            Log($"目標行程 kernel32!LoadLibraryA = 0x{(uint)loadLibrary:X8}");
+            Log($"目標行程 kernel32!LoadLibraryW = 0x{(uint)loadLibrary:X8}");
 
             // --- 3. 注入 -----------------------------------------------------------
             string detail = InjectDll(pi.hProcess, loadLibrary, dllPath, out bool injected);
             if (!injected && spinning)
             {
                 // 注入失敗就把進入點還原，讓遊戲照常玩，不要因為診斷層而毀掉這一局。
-                RestoreEntryPoint(pi.hProcess, entryVa, savedEntry);
+                if (!RestoreEntryPoint(pi.hProcess, entryVa, savedEntry))
+                {
+                    TerminateProcess(pi.hProcess, 1);
+                    return new LaunchResult(0, "注入失敗且無法還原進入點，已終止行程以免留下空轉的遊戲。", false);
+                }
                 Log("注入失敗，已還原進入點，遊戲會以未插樁狀態正常啟動。");
                 return new LaunchResult(pi.dwProcessId, detail, false);
             }
@@ -328,14 +332,11 @@ internal static partial class ProcessInjector
         return ok;
     }
 
-    private static string InjectDll(IntPtr hProcess, IntPtr loadLibraryA, string dllPath, out bool injected)
+    private static string InjectDll(IntPtr hProcess, IntPtr loadLibraryW, string dllPath, out bool injected)
     {
         injected = false;
 
-        // LoadLibraryA 吃 ANSI，所以路徑必須能用系統 ANSI 字碼頁表示。
-        // 這台機器的字碼頁是 950，而工具本身可能被放在含非 ANSI 字元的目錄下，
-        // 因此 DLL 一律先落到 %LOCALAPPDATA%（純 ASCII）再注入，由呼叫端保證。
-        byte[] pathBytes = Encoding.Default.GetBytes(dllPath + "\0");
+        byte[] pathBytes = Encoding.Unicode.GetBytes(dllPath + "\0");
 
         IntPtr remote = VirtualAllocEx(hProcess, IntPtr.Zero, pathBytes.Length, MemCommit | MemReserve, PageReadWrite);
         if (remote == IntPtr.Zero)
@@ -346,18 +347,24 @@ internal static partial class ProcessInjector
             if (!WriteProcessMemory(hProcess, remote, pathBytes, pathBytes.Length, out _))
                 return $"WriteProcessMemory 失敗 (Win32 error {Marshal.GetLastWin32Error()})";
 
-            IntPtr thread = CreateRemoteThread(hProcess, IntPtr.Zero, IntPtr.Zero, loadLibraryA, remote, 0, IntPtr.Zero);
+            IntPtr thread = CreateRemoteThread(hProcess, IntPtr.Zero, IntPtr.Zero, loadLibraryW, remote, 0, IntPtr.Zero);
             if (thread == IntPtr.Zero)
                 return $"CreateRemoteThread 失敗 (Win32 error {Marshal.GetLastWin32Error()})";
 
             try
             {
-                if (WaitForSingleObject(thread, 15000) != 0)
-                    return "遠端 LoadLibraryA 逾時未返回。";
+                uint wait = WaitForSingleObject(thread, 15000);
+                if (wait != 0)
+                {
+                    // The thread may still read its argument later. Keep the allocation
+                    // alive until process exit rather than introducing a remote UAF.
+                    remote = IntPtr.Zero;
+                    return "遠端 LoadLibraryW 逾時未返回；參數記憶體已保留以避免目標行程存取已釋放資料。";
+                }
 
                 GetExitCodeThread(thread, out uint hmodule);
                 if (hmodule == 0)
-                    return "遠端 LoadLibraryA 回傳 NULL；DLL 未能載入（位元數不符或相依項缺失）。";
+                    return "遠端 LoadLibraryW 回傳 NULL；DLL 未能載入（位元數不符或相依項缺失）。";
 
                 injected = true;
                 return $"ckperf.dll 已注入，遠端模組控制代碼 0x{hmodule:X8}。";
@@ -369,17 +376,17 @@ internal static partial class ProcessInjector
         }
         finally
         {
-            VirtualFreeEx(hProcess, remote, IntPtr.Zero, MemRelease);
+            if (remote != IntPtr.Zero) VirtualFreeEx(hProcess, remote, IntPtr.Zero, MemRelease);
         }
     }
 
     // ---------------------------------------------------------------- 匯出表解析
 
     /// <summary>
-    /// 輪詢目標行程的 32 位元模組清單直到 kernel32 出現，再解析其匯出表取得 LoadLibraryA。
+    /// 輪詢目標行程的 32 位元模組清單直到 kernel32 出現，再解析其匯出表取得 LoadLibraryW。
     /// 暫停中的行程還沒跑載入器，所以這一定要在 ResumeThread 之後做。
     /// </summary>
-    private static IntPtr WaitForLoadLibraryA(uint pid, IntPtr hProcess, int timeoutMs)
+    private static IntPtr WaitForLoadLibraryW(uint pid, IntPtr hProcess, int timeoutMs)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
         while (Environment.TickCount64 < deadline)
@@ -387,7 +394,7 @@ internal static partial class ProcessInjector
             IntPtr kernel32 = FindModuleBase(pid, "kernel32.dll");
             if (kernel32 != IntPtr.Zero)
             {
-                IntPtr fn = ResolveExport(hProcess, kernel32, "LoadLibraryA");
+                IntPtr fn = ResolveExport(hProcess, kernel32, "LoadLibraryW");
                 if (fn != IntPtr.Zero) return fn;
             }
             Thread.Sleep(10);
@@ -459,7 +466,7 @@ internal static partial class ProcessInjector
             uint fnRva = BitConverter.ToUInt32(fnBytes, 0);
             if (fnRva == 0) return IntPtr.Zero;
 
-            // 轉送匯出 (forwarder) 的 RVA 會落在匯出目錄自身範圍內。kernel32!LoadLibraryA
+            // 轉送匯出 (forwarder) 的 RVA 會落在匯出目錄自身範圍內。kernel32!LoadLibraryW
             // 在所有支援的 Windows 上都是真實函式，不是轉送，但仍然檢查以免無聲取錯位址。
             uint expSize = BitConverter.ToUInt32(dir, 4);
             if (fnRva >= expRva && fnRva < expRva + expSize) return IntPtr.Zero;

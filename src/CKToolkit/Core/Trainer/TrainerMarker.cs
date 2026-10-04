@@ -21,10 +21,10 @@ namespace CKToolkit.Core.Trainer;
 public sealed class TrainerMarker
 {
     [JsonPropertyName("version")]
-    public int Version { get; set; } = 1;
+    public int Version { get; set; }
 
     [JsonPropertyName("toolkitVersion")]
-    public string ToolkitVersion { get; set; } = "1.0.0";
+    public string ToolkitVersion { get; set; } = string.Empty;
 
     /// <summary>安裝時新建、原本不存在於 data.pak 的項目，解除時直接刪除。</summary>
     [JsonPropertyName("addedEntries")]

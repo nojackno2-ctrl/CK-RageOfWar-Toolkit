@@ -110,6 +110,13 @@ internal static class SaveManagerSelfTests
             check("匯入後預覽逐位元組一致", File.ReadAllBytes(Path.Combine(profileDir, "2.adv.bmp")).SequenceEqual(previewBytes), null);
             check("原 1.adv 未被覆寫", File.ReadAllBytes(savePath).SequenceEqual(saveBytes), null);
 
+            File.WriteAllBytes(Path.Combine(profileDir, "3.adv.bmp"), [0x42, 0x4D, 0x55]);
+            Result<SaveImportResult> importedPastOrphanPreview = SaveManager.ImportSave(gameDir, "noname", archivePath);
+            check("孤立預覽圖會佔用槽位，匯入改選完整空槽",
+                importedPastOrphanPreview.Success && importedPastOrphanPreview.Value?.SaveFileName == "4.adv", importedPastOrphanPreview.ErrorMessage);
+            check("既有孤立預覽圖未被覆寫",
+                File.ReadAllBytes(Path.Combine(profileDir, "3.adv.bmp")).SequenceEqual(new byte[] { 0x42, 0x4D, 0x55 }), null);
+
             string tamperedPath = Path.Combine(exportDir, "tampered.cksave");
             File.Copy(archivePath, tamperedPath);
             using (var tampered = ZipFile.Open(tamperedPath, ZipArchiveMode.Update))
@@ -127,16 +134,52 @@ internal static class SaveManagerSelfTests
             check("SHA-256 不符的封裝被拒絕", !tamperedImport.Success, tamperedImport.ErrorMessage);
             check("封裝驗證失敗時 profile 零寫入", Directory.EnumerateFiles(profileDir, "*.adv").Count() == savesBeforeTamperedImport, null);
 
+            string nullDescriptorPath = Path.Combine(exportDir, "null-descriptor.cksave");
+            File.Copy(archivePath, nullDescriptorPath);
+            using (var malformed = ZipFile.Open(nullDescriptorPath, ZipArchiveMode.Update))
+            {
+                ZipArchiveEntry manifest = malformed.GetEntry("manifest.json")!;
+                manifest.Delete();
+                manifest = malformed.CreateEntry("manifest.json");
+                using var writer = new StreamWriter(manifest.Open(), new UTF8Encoding(false));
+                writer.Write("{\"formatVersion\":1,\"product\":\"CKToolkit.CelticKingsSave\",\"sourceProfile\":\"noname\",\"saveFileName\":\"1.adv\",\"screenshotFileName\":\"1.adv.bmp\",\"files\":[null]}");
+            }
+            int savesBeforeNullDescriptor = Directory.EnumerateFiles(profileDir, "*.adv").Count();
+            Result<SaveImportResult> nullDescriptor = SaveManager.ImportSave(gameDir, "noname", nullDescriptorPath);
+            check("manifest files 含 null 時回傳失敗而不拋例外", !nullDescriptor.Success, nullDescriptor.ErrorMessage);
+            check("null manifest descriptor 匯入維持 profile 零寫入",
+                Directory.EnumerateFiles(profileDir, "*.adv").Count() == savesBeforeNullDescriptor, null);
+
             byte[] playerBeforeInvalid = File.ReadAllBytes(Path.Combine(profileDir, "player.ini"));
             Result<PlayerProfileData> invalidPlayer = SaveManager.UpdatePlayerProfile(gameDir, "noname", new PlayerProfileUpdate("bad", 99, 1));
             check("越界玩家顏色被拒絕", !invalidPlayer.Success, invalidPlayer.ErrorMessage);
             check("玩家參數驗證失敗時 player.ini 零寫入", File.ReadAllBytes(Path.Combine(profileDir, "player.ini")).SequenceEqual(playerBeforeInvalid), null);
+
+            Result<PlayerProfileData> unencodablePlayer = SaveManager.UpdatePlayerProfile(
+                gameDir, "noname", new PlayerProfileUpdate("玩家", 0, 1));
+            check("Windows-1252 無法表示的玩家名稱被明確拒絕", !unencodablePlayer.Success, unencodablePlayer.ErrorMessage);
+            check("名稱編碼失敗時 player.ini 零寫入",
+                File.ReadAllBytes(Path.Combine(profileDir, "player.ini")).SequenceEqual(playerBeforeInvalid), null);
 
             Result<PlayerProfileData> playerUpdated = SaveManager.UpdatePlayerProfile(gameDir, "noname", new PlayerProfileUpdate("Larax", 6, 0));
             check("玩家名稱／顏色／種族更新成功", playerUpdated.Success && playerUpdated.Value is { DisplayName: "Larax", Color: 6, Race: 0 }, playerUpdated.ErrorMessage);
             string updatedPlayerText = File.ReadAllText(Path.Combine(profileDir, "player.ini"), Encoding.GetEncoding(1252));
             check("player.ini 未知欄位完整保留", updatedPlayerText.Contains("custom_unknown=keep-me", StringComparison.Ordinal), null);
             check("[Player] 與 [Player 0] 的鏡像欄位同步", updatedPlayerText.Contains("name=Larax", StringComparison.Ordinal) && updatedPlayerText.Contains("plrname=Larax", StringComparison.Ordinal) && updatedPlayerText.Contains("plrcolor=6", StringComparison.Ordinal) && updatedPlayerText.Contains("plrnation=0", StringComparison.Ordinal), null);
+
+            string playerIniPath = Path.Combine(profileDir, "player.ini");
+            PlayerIniLock heldPlayerLock = PlayerIniLock.Acquire(playerIniPath);
+            bool secondWriterEntered = false;
+            Task secondWriter = Task.Run(() =>
+            {
+                using PlayerIniLock acquired = PlayerIniLock.Acquire(playerIniPath);
+                Volatile.Write(ref secondWriterEntered, true);
+            });
+            Thread.Sleep(100);
+            check("player.ini 共同鎖會阻擋另一個 writer", !Volatile.Read(ref secondWriterEntered), null);
+            heldPlayerLock.Dispose();
+            secondWriter.GetAwaiter().GetResult();
+            check("前一 writer 結束後下一個 writer 可繼續", Volatile.Read(ref secondWriterEntered), null);
 
             var requestedStats = new PlayerStatisticsUpdate(
                 SinglePlayerGames: 3,

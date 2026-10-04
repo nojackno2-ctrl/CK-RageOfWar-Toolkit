@@ -186,7 +186,13 @@ static bool DerefPointer(uintptr_t va, uintptr_t& out) {
 // on a panel, so a single-slot mailbox is both sufficient and the easiest thing to
 // reason about: the pipe thread fills it and waits, the render thread drains it.
 
-enum SlotState { kSlotEmpty = 0, kSlotPending = 1, kSlotDone = 2 };
+enum SlotState {
+    kSlotEmpty = 0,
+    kSlotPending = 1,
+    kSlotRunning = 2,
+    kSlotDone = 3,
+    kSlotAbandoned = 4,
+};
 
 static const int   kMaxScriptBytes  = 16 * 1024;
 static const int   kMaxMessageBytes = 512;
@@ -202,6 +208,10 @@ static char             g_slotMessage[kMaxMessageBytes];
 
 static volatile LONG    g_executed = 0;
 static volatile LONG    g_rejected = 0;
+static volatile LONG    g_selfTestPending = 0;
+static HANDLE           g_pipeThread = nullptr;
+static volatile LONG    g_stopping = 0;
+static DWORD WINAPI PipeThread(LPVOID);
 
 // --------------------------------------------------------------------- execution
 
@@ -334,8 +344,28 @@ static void ExecuteOnMainThread(const char* script, int& status, char* message, 
 }
 
 void ScriptChannelPump() {
+    if (InterlockedCompareExchange(&g_selfTestPending, 1, 1) == 1) {
+        if (!LiveSessionOk()) return;
+        if (InterlockedCompareExchange(&g_selfTestPending, 0, 1) == 1) {
+            if (!ScriptChannelSelfTest()) {
+                g_refused = true;
+                return;
+            }
+            g_enabled = true;
+            uint32_t debugKeys = 0;
+            SafeRead(Resolve(kVaDebugKeysFlag), &debugKeys, sizeof(debugKeys));
+            Logf("script channel: entry points verified and main-thread self-test passed; DebugKeys=%u.",
+                 (unsigned)debugKeys);
+            g_pipeThread = CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
+            if (!g_pipeThread) {
+                Logf("script channel: could not start the pipe thread (%u); channel DISABLED.", GetLastError());
+                g_enabled = false;
+                g_refused = true;
+            }
+        }
+    }
     if (!g_enabled) return;
-    if (InterlockedCompareExchange(&g_slotState, kSlotPending, kSlotPending) != kSlotPending) return;
+    if (InterlockedCompareExchange(&g_slotState, kSlotRunning, kSlotPending) != kSlotPending) return;
 
     int  status = kScriptNotInGame;
     char message[kMaxMessageBytes];
@@ -350,8 +380,12 @@ void ScriptChannelPump() {
 
     g_slotStatus = status;
     strncpy_s(g_slotMessage, sizeof(g_slotMessage), message, _TRUNCATE);
-    InterlockedExchange(&g_slotState, kSlotDone);
-    if (g_slotDone) SetEvent(g_slotDone);
+    if (InterlockedCompareExchange(&g_slotState, kSlotDone, kSlotRunning) == kSlotRunning) {
+        if (g_slotDone) SetEvent(g_slotDone);
+    } else {
+        // The caller timed out after execution began. It will never consume this result.
+        InterlockedCompareExchange(&g_slotState, kSlotEmpty, kSlotAbandoned);
+    }
 }
 
 // Called by the pipe thread. Blocks until the render thread has run the script or the
@@ -383,17 +417,20 @@ static int Submit(const char* script, int length, char* message, int cap, DWORD 
     DWORD wait = g_slotDone ? WaitForSingleObject(g_slotDone, timeoutMs) : WAIT_FAILED;
 
     int status;
-    if (wait == WAIT_OBJECT_0 &&
-        InterlockedCompareExchange(&g_slotState, kSlotDone, kSlotDone) == kSlotDone) {
+    LONG state = InterlockedCompareExchange(&g_slotState, kSlotDone, kSlotDone);
+    if ((wait == WAIT_OBJECT_0 || state == kSlotDone) && state == kSlotDone) {
         status = g_slotStatus;
         strncpy_s(message, (size_t)cap, g_slotMessage, _TRUNCATE);
+        InterlockedExchange(&g_slotState, kSlotEmpty);
     } else {
         status = kScriptTimedOut;
         Append(message, cap, 0, "the engine did not draw a frame within %u ms",
                (unsigned)timeoutMs);
+        if (InterlockedCompareExchange(&g_slotState, kSlotEmpty, kSlotPending) != kSlotPending) {
+            InterlockedCompareExchange(&g_slotState, kSlotAbandoned, kSlotRunning);
+        }
     }
 
-    InterlockedExchange(&g_slotState, kSlotEmpty);
     LeaveCriticalSection(&g_slotLock);
     return status;
 }
@@ -424,14 +461,22 @@ struct ResponseHeader {
 };
 #pragma pack(pop)
 
-static HANDLE        g_pipeThread = nullptr;
-static volatile LONG g_stopping   = 0;
+static const DWORD   kPipeIoTimeoutMs = 3000;
 
 static bool ReadExact(HANDLE pipe, void* dst, DWORD length) {
     DWORD done = 0;
+    ULONGLONG deadline = GetTickCount64() + kPipeIoTimeoutMs;
     while (done < length) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr)) return false;
+        if (available == 0) {
+            if (g_stopping || GetTickCount64() >= deadline) return false;
+            Sleep(5);
+            continue;
+        }
         DWORD n = 0;
-        if (!ReadFile(pipe, (char*)dst + done, length - done, &n, nullptr) || n == 0) return false;
+        DWORD wanted = (length - done) < available ? (length - done) : available;
+        if (!ReadFile(pipe, (char*)dst + done, wanted, &n, nullptr) || n == 0) return false;
         done += n;
     }
     return true;
@@ -450,7 +495,21 @@ static void Respond(HANDLE pipe, int status, const char* message) {
     DWORD written = 0;
     WriteFile(pipe, &header, sizeof(header), &written, nullptr);
     if (header.messageLength) WriteFile(pipe, body, header.messageLength, &written, nullptr);
-    FlushFileBuffers(pipe);
+}
+
+static DWORD WINAPI FlushPipeThread(LPVOID parameter) {
+    FlushFileBuffers((HANDLE)parameter);
+    return 0;
+}
+
+static void FlushWithDeadline(HANDLE pipe) {
+    HANDLE thread = CreateThread(nullptr, 0, FlushPipeThread, pipe, 0, nullptr);
+    if (!thread) return;
+    if (WaitForSingleObject(thread, kPipeIoTimeoutMs) != WAIT_OBJECT_0) {
+        CancelSynchronousIo(thread);
+        WaitForSingleObject(thread, 1000);
+    }
+    CloseHandle(thread);
 }
 
 // The token is not a secret worth defending against timing attacks, but there is no
@@ -519,7 +578,7 @@ static DWORD WINAPI PipeThread(LPVOID) {
                          GetLastError() == ERROR_PIPE_CONNECTED;
         if (connected && !g_stopping) {
             ServeOne(pipe);
-            FlushFileBuffers(pipe);
+            FlushWithDeadline(pipe);
         }
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
@@ -611,11 +670,6 @@ void ScriptChannelInstall() {
     g_signatureVoid  = (const char*)Resolve(kVaSignatureVoid);
     g_errorFormat    = (const char*)Resolve(kVaErrorFormat);
 
-    if (!ScriptChannelSelfTest()) {
-        g_refused = true;
-        return;
-    }
-
     InitializeCriticalSection(&g_slotLock);
     g_slotLockReady = true;
     g_slotDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -625,22 +679,13 @@ void ScriptChannelInstall() {
         return;
     }
 
-    g_enabled = true;
-
-    uint32_t debugKeys = 0;
-    SafeRead(Resolve(kVaDebugKeysFlag), &debugKeys, sizeof(debugKeys));
-    Logf("script channel: entry points verified and self-test passed; DebugKeys=%u "
-         "(informational -- this channel does not use the key path).", (unsigned)debugKeys);
-
-    g_pipeThread = CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
-    if (!g_pipeThread) {
-        Logf("script channel: could not start the pipe thread (%u); the channel is "
-             "verified but unreachable.", GetLastError());
-    }
+    InterlockedExchange(&g_selfTestPending, 1);
+    Logf("script channel: entry points verified; main-thread self-test deferred until a live session.");
 }
 
 void ScriptChannelUninstall() {
     InterlockedExchange(&g_stopping, 1);
+    InterlockedExchange(&g_selfTestPending, 0);
     if (g_pipeThread) {
         // Unblock a ConnectNamedPipe that is waiting for a client that will never come.
         wchar_t name[64];

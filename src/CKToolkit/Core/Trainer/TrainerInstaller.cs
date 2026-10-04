@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using CKToolkit.Core.Common;
+using CKToolkit.I18n;
 
 namespace CKToolkit.Core.Trainer;
 
@@ -48,8 +49,11 @@ public static class TrainerInstaller
             n.Equals(Cheats.ScDebugPath, StringComparison.OrdinalIgnoreCase) ||
             n.Equals(Tweaks.VxConst, StringComparison.OrdinalIgnoreCase) ||
             n.Equals(Tweaks.Commands, StringComparison.OrdinalIgnoreCase) ||
+            n.Equals(GameRulesModifier.FormationsPath, StringComparison.OrdinalIgnoreCase) ||
             (n.StartsWith(Tweaks.Classes, StringComparison.OrdinalIgnoreCase) &&
-             n.EndsWith(".SC.XML", StringComparison.OrdinalIgnoreCase)));
+             n.EndsWith(".SC.XML", StringComparison.OrdinalIgnoreCase)) ||
+            (n.StartsWith(@"SUBAI\", StringComparison.OrdinalIgnoreCase) &&
+             n.EndsWith(".VS", StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// 依設定把修改器與遊戲設定安裝進 data.pak。呼叫端必須先確保 pak 已正規化為原版狀態。
@@ -63,7 +67,7 @@ public static class TrainerInstaller
             snapshot[name] = pak.ReadText(name);
         }
 
-        var marker = new TrainerMarker();
+        var marker = new TrainerMarker { Version = 1, ToolkitVersion = "1.0.6" };
 
         // 2. 作弊：產生 SCDEBUG.XML
         var selections = config.SupportsFilePatch
@@ -145,6 +149,126 @@ public static class TrainerInstaller
                     log?.Invoke("  自由鬥士：解除自由之身限制（可編入英雄隊伍）");
                 }
             }
+
+            if (gameSettings.AllowMuleHeroArmy)
+            {
+                bool muleModified = false;
+                if (pak.Contains(GameRulesModifier.WagonClassPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.WagonClassPath);
+                    string modifiedXml = GameRulesModifier.ApplyMuleHeroArmy(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonClassPath, modifiedXml);
+                        muleModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.FormationsPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.FormationsPath);
+                    string modifiedXml = GameRulesModifier.ApplyMuleFormation(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.FormationsPath, modifiedXml);
+                        muleModified = true;
+                    }
+                }
+
+                if (muleModified)
+                {
+                    marker.GameSettings.Add("allow_mule_army");
+                    log?.Invoke("  運糧馬／騾子：解除跟隨限制並加入陣形護衛（可編入英雄隊伍）");
+                }
+            }
+
+            if (gameSettings.WagonCapacity10k)
+            {
+                bool wagonCapModified = false;
+                if (pak.Contains(GameRulesModifier.WagonClassPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.WagonClassPath);
+                    string modifiedXml = GameRulesModifier.ApplyWagonMaxLoad10k(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonClassPath, modifiedXml);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CreateFoodMuleBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.CreateFoodMuleBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyCreateFoodMuleBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CreateFoodMuleBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CreateGoldMuleBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.CreateGoldMuleBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyCreateGoldMuleBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CreateGoldMuleBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.WagonLoadFoodBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.WagonLoadFoodBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyWagonLoadFoodBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonLoadFoodBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.WagonLoadGoldBigScriptPath))
+                {
+                    string originalVs = pak.ReadText(GameRulesModifier.WagonLoadGoldBigScriptPath);
+                    string modifiedVs = GameRulesModifier.ApplyWagonLoadGoldBig(originalVs);
+                    if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.WagonLoadGoldBigScriptPath, modifiedVs);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (pak.Contains(GameRulesModifier.CommandsXmlPath))
+                {
+                    string originalXml = pak.ReadText(GameRulesModifier.CommandsXmlPath);
+                    string modifiedXml = GameRulesModifier.ApplyCommandsMule10k(originalXml);
+                    if (!string.Equals(modifiedXml, originalXml, StringComparison.Ordinal))
+                    {
+                        pak.WriteText(GameRulesModifier.CommandsXmlPath, modifiedXml);
+                        wagonCapModified = true;
+                    }
+                }
+
+                if (wagonCapModified)
+                {
+                    marker.GameSettings.Add("wagon_capacity_10k");
+                    log?.Invoke("  運糧馬／運金馬：運載上限與大容量製造按鈕提升至 10,000");
+                }
+            }
+
+            if (gameSettings.InstantHeroAttach && pak.Contains(GameRulesModifier.UnitAttachScriptPath))
+            {
+                string originalVs = pak.ReadText(GameRulesModifier.UnitAttachScriptPath);
+                string modifiedVs = GameRulesModifier.ApplyInstantHeroAttach(originalVs);
+                if (!string.Equals(modifiedVs, originalVs, StringComparison.Ordinal))
+                {
+                    pak.WriteText(GameRulesModifier.UnitAttachScriptPath, modifiedVs);
+                    marker.GameSettings.Add("instant_hero_attach");
+                    log?.Invoke("  部隊編入：解除視野距離限制，支援遠距／全圖瞬時編入英雄");
+                }
+            }
         }
 
         // 4. 比對快照，只記錄真的被改動的項目
@@ -190,30 +314,23 @@ public static class TrainerInstaller
             return;
         }
 
-        TrainerMarker? marker;
-        try
+        TrainerMarker? marker = ReadMarker(pak);
+        if (marker is null)
         {
-            marker = JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
-        }
-        catch
-        {
-            marker = null;
+            throw new TrainerException(Strings.Get("Error_TrainerMarkerInvalid"));
         }
 
-        if (marker is not null)
+        foreach (string name in marker.AddedEntries)
         {
-            foreach (string name in marker.AddedEntries)
+            if (pak.Contains(name))
             {
-                if (pak.Contains(name))
-                {
-                    pak.Remove(name);
-                }
+                pak.Remove(name);
             }
+        }
 
-            foreach (var (name, original) in marker.Originals)
-            {
-                pak.WriteText(name, original);
-            }
+        foreach (var (name, original) in marker.Originals)
+        {
+            pak.WriteText(name, original);
         }
 
         pak.Remove(MarkerPath);
@@ -228,12 +345,40 @@ public static class TrainerInstaller
         if (!pak.Contains(MarkerPath)) return null;
         try
         {
-            return JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
+            TrainerMarker? marker = JsonSerializer.Deserialize<TrainerMarker>(pak.ReadText(MarkerPath));
+            return IsValidMarker(pak, marker) ? marker : null;
         }
         catch
         {
             return null;
         }
+    }
+
+    private static bool IsValidMarker(HmmPak pak, TrainerMarker? marker)
+    {
+        if (marker is null || marker.Version != 1 || string.IsNullOrWhiteSpace(marker.ToolkitVersion) ||
+            marker.AddedEntries is null || marker.Originals is null || marker.Cheats is null ||
+            marker.Tweaks is null || marker.GameSettings is null)
+        {
+            return false;
+        }
+
+        // No current trainer operation creates a new data.pak entry. Accepting a
+        // marker-provided deletion list would let corrupted metadata delete content
+        // whose original bytes are unknowable, so fail closed until a future format
+        // version introduces an explicit, audited whitelist.
+        if (marker.AddedEntries.Count != 0) return false;
+
+        var candidates = CandidateEntries(pak).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in marker.Originals)
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null ||
+                !candidates.Contains(pair.Key))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>

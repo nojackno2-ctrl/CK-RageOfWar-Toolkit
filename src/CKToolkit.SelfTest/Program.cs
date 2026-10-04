@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.IO.Pipes;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
@@ -82,6 +83,10 @@ internal static class Program
         Console.OutputEncoding = utf8;
         Console.InputEncoding = utf8;
 
+        // 第 49 組的子行程：DPI 模式只能在建立第一個視窗前設定，所以版面稽核要在獨立行程裡跑。
+        if (args.Length >= 3 && args[0] == LayoutAudit.ChildSwitch)
+            return LayoutAudit.RunChild(args[1], float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture));
+
         Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1–4 & Phase 6) ===\n");
 
         // Phase 1 核心測試
@@ -147,6 +152,8 @@ internal static class Program
         RunGroup("45. CliOptionStrictness", TestCliOptionStrictness);
         RunGroup("46. RuntimeScriptChannel", TestRuntimeScriptChannel);
         RunGroup("47. GameRulesModifierAndHeroArmyReversal", TestGameRulesModifierAndHeroArmyReversal);
+        RunGroup("48. GameDirSettingsRoundTrip", TestGameDirSettingsRoundTrip);
+        RunGroup("49. GuiLayoutAudit", TestGuiLayoutAudit);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -162,6 +169,22 @@ internal static class Program
             Console.WriteLine($"測試完成，共有 {_failures} 項失敗。");
             Console.ResetColor();
             return 1;
+        }
+    }
+
+    // --- 49. GUI 版面稽核（ISSUE-101）---------------------------------------
+    /// <summary>
+    /// 每個分頁與對話框在三語、多種視窗大小與字型放大倍率下，於 96 DPI 與本機實際 DPI
+    /// 各跑一次：不裁切、文字完整、不重疊、表格列高足夠。詳見 <see cref="LayoutAudit"/>。
+    /// </summary>
+    private static void TestGuiLayoutAudit()
+    {
+        Console.WriteLine("49. GUI 版面稽核（不裁切／文字完整／不重疊；三語 × 字型 100%～200% × 96 DPI 與本機 DPI）");
+        foreach ((string mode, int exitCode, string output) in LayoutAudit.RunChildren())
+        {
+            string summary = output.Split(Environment.NewLine.ToCharArray(), StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(l => l.StartsWith("dpi=", StringComparison.Ordinal))?.Trim() ?? output.Trim();
+            Check($"版面稽核（{mode}）零違規", exitCode == 0, summary);
+            if (exitCode != 0) Console.WriteLine(output);
         }
     }
 
@@ -289,6 +312,12 @@ internal static class Program
         Check("Trainer scopedTweaks 巢狀設定完整還原",
             restored.Trainer.ScopedTweaks["train_speed"]["enemy"] == 0.75m &&
             restored.Trainer.ScopedTweaks["gold_production"]["selfTownhall"] == 48m);
+
+        ToolkitConfig nullSections = ToolkitConfig.FromJson(
+            "{\"perf\":null,\"lang\":null,\"trainer\":null,\"gameSettings\":null}");
+        Check("合法 JSON 的 null 子設定會安全正規化",
+            nullSections.Perf is not null && nullSections.Lang is not null &&
+            nullSections.Trainer is not null && nullSections.GameSettings is not null);
 
         string legacyWithRetiredJson = """
         {
@@ -912,6 +941,15 @@ internal static class Program
                 PlaceholderCount(cn[key]) == PlaceholderCount(en[key]));
         }
 
+        using var languagePage = new LanguagePage();
+        var customFontConfig = new LangConfig { Pack = "zh-TW", FontFace = "Noto Sans CJK TC" };
+        languagePage.LoadConfig(customFontConfig);
+        languagePage.ApplyLanguage();
+        var savedFontConfig = new LangConfig();
+        languagePage.SaveConfig(savedFontConfig);
+        Check("語言頁載入與切換 UI 語系後保留自訂字型",
+            savedFontConfig.FontFace == "Noto Sans CJK TC");
+
         static int PlaceholderCount(string value) =>
             System.Text.RegularExpressions.Regex.Matches(value, @"\{\d+\}").Count;
     }
@@ -1244,6 +1282,33 @@ internal static class Program
             Check("LocalPak 未被修改因此略過寫入 (written=false)", apply1.Value?.Files[GamePaths.LocalPakFileName].Written == false);
             Check("VxSettings 被寫入 (written=true)", apply1.Value?.Files[GamePaths.VxSettingsFileName].Written == true);
 
+            var beforeFailedBatch = Enum.GetValues<GameFile>().ToDictionary(
+                file => file,
+                file => File.ReadAllBytes(Path.Combine(tempGameDir, PatchState.GetFileName(file))));
+            config.Perf.Laa = false;
+            config.Perf.DesktopMode = "suppress";
+            config.Perf.Hires = 1600;
+            config.Perf.Resolution = "1600x900";
+            config.Perf.AddRes = ["1600x900"];
+            config.Perf.NoWaterAnimation = true;
+            PatchPipeline.BatchWriteFailureForTests = name =>
+                name.Equals(GamePaths.DataPakFileName, StringComparison.OrdinalIgnoreCase);
+            Result<ApplyReport> failedBatch;
+            try { failedBatch = pipeline.ApplyAll(tempGameDir, config); }
+            finally { PatchPipeline.BatchWriteFailureForTests = null; }
+            Check("批次寫入中段失敗會回報失敗", failedBatch.IsError);
+            Check("批次寫入失敗會回滾所有已替換檔案",
+                Enum.GetValues<GameFile>().All(file => File.ReadAllBytes(
+                    Path.Combine(tempGameDir, PatchState.GetFileName(file))).SequenceEqual(beforeFailedBatch[file])));
+            Check("批次寫入失敗不殘留交易暫存檔",
+                !Directory.EnumerateFiles(tempGameDir, "*.cktmp-*", SearchOption.TopDirectoryOnly).Any());
+            config.Perf.Laa = true;
+            config.Perf.DesktopMode = "autoSwitch";
+            config.Perf.Hires = 1920;
+            config.Perf.Resolution = "1920x1080";
+            config.Perf.AddRes = ["1920x1080"];
+            config.Perf.NoWaterAnimation = false;
+
             // 2. 再次 ApplyAll（相同設定）：所有檔案內容均未變更，全部略過寫入
             var apply2 = pipeline.ApplyAll(tempGameDir, config);
             Check("再次 ApplyAll 執行成功", apply2.Success);
@@ -1527,6 +1592,22 @@ internal static class Program
 
             var currentFiles = Directory.GetFileSystemEntries(tempGameDir, "*", SearchOption.AllDirectories).OrderBy(x => x).ToList();
             Check("verify 執行後遊戲目錄 100% 零變更 (零寫入保證)", initialFiles.SequenceEqual(currentFiles));
+
+            var expectedConfig = ToolkitConfig.CreateDefault();
+            var pipeline = PatchPipeline.CreateDefault();
+            Check("verify payload 測試設定可先套用", pipeline.ApplyAll(tempGameDir, expectedConfig).Success);
+            byte[] wrongLauncher = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName));
+            LauncherModeTable.Apply(ref wrongLauncher, enable: true, 1280, 720);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), wrongLauncher);
+            var beforeValueAwareVerify = Enum.GetValues<GameFile>().ToDictionary(
+                file => file,
+                file => File.ReadAllBytes(Path.Combine(tempGameDir, PatchState.GetFileName(file))));
+            Result<VerificationReport> valueAware = pipeline.Verify(tempGameDir, expectedConfig);
+            Check("verify 會抓到同 patch 名稱但 Launcher 寬高不同",
+                valueAware.Success && valueAware.Value?.Files[GamePaths.LauncherFileName].MatchesConfig == false);
+            Check("value-aware verify 仍維持五個遊戲檔案零寫入",
+                Enum.GetValues<GameFile>().All(file => File.ReadAllBytes(
+                    Path.Combine(tempGameDir, PatchState.GetFileName(file))).SequenceEqual(beforeValueAwareVerify[file])));
         }
         finally
         {
@@ -2012,6 +2093,62 @@ internal static class Program
         Check("RebuildHelp 第一段翻譯正確", rebuiltHelpText.Contains(">第一段說明。<"));
         Check("RebuildHelp 第三段翻譯正確", rebuiltHelpText.Contains(">第三段說明。<"));
         Check("RebuildHelp 自閉合標籤 <entry id=\"2\" self=\"true\"/> 完整保留且未被損毀", rebuiltHelpText.Contains("<entry id=\"2\" self=\"true\"/>"));
+
+        // 3. 長 Header 與長註解之 TranslationTable 識別測試 (ISSUE-078)
+        string longCommentXml =
+            "<!-- " + new string('A', 1500) + " -->\r\n" +
+            "<translationtable>\r\n" +
+            "  <translationtableentry text=\"Hello\" result=\"Hello\"/>\r\n" +
+            "</translationtable>\r\n";
+        byte[] longBytes = Encoding.UTF8.GetBytes(longCommentXml);
+        Check("LocXml.IsTranslationTable 成功辨識超過 64 位元組長註解之翻譯表 (1500+ bytes)", LocXml.IsTranslationTable(longBytes));
+
+        // 4. 引號容錯與 Mojibake 標點自動正規化測試 (ISSUE-078)
+        var transTest = new Translations();
+        transTest.ByText["You didn't choose wisely."] = "你的選擇不夠明智。";
+        transTest.ByText["Move along, peasant!"] = "走開，農民！";
+        transTest.ByText["What’s wrong with soldiers these days?"] = "現在的士兵到底是怎麼回事？";
+
+        var curlyAttrs = new Dictionary<string, string> { ["text"] = "You didn’t choose wisely." };
+        Check("Translations.Lookup 彎引號自動對應直引號", transTest.Lookup(curlyAttrs) == "你的選擇不夠明智。");
+
+        var asciiAttrs = new Dictionary<string, string> { ["text"] = "What's wrong with soldiers these days?" };
+        Check("Translations.Lookup 直引號自動對應彎引號", transTest.Lookup(asciiAttrs) == "現在的士兵到底是怎麼回事？");
+
+        var mojibakeAttrs = new Dictionary<string, string> { ["text"] = "Whatâ\u0080\u0099s wrong with soldiers these days?" };
+        Check("Translations.Lookup Mojibake 引號自動修復對應", transTest.Lookup(mojibakeAttrs) == "現在的士兵到底是怎麼回事？");
+
+        // 5. 額外戰役 118 檔模板 100% 翻譯覆蓋率驗證 (ISSUE-078)
+        var zhTwPack = PackLoader.LoadEmbeddedPack("zh-TW").Value!;
+        int extraDone = 0, extraTotal = 0;
+        bool invadersFixed = false;
+        bool throneConvFixed = false;
+
+        foreach (var (pakPrefix, relPath, templateData) in ExtraCampaignTemplates.GetTemplates())
+        {
+            if (relPath.EndsWith(".XML", StringComparison.OrdinalIgnoreCase) && LocXml.IsTranslationTable(templateData))
+            {
+                byte[] rebuiltData = LocXml.Rebuild(templateData, zhTwPack.Translations.Lookup, out int d, out int t);
+                extraDone += d;
+                extraTotal += t;
+
+                if (pakPrefix.Contains("INVADERS") && relPath.Equals("ADVENTURE.LOC.XML", StringComparison.OrdinalIgnoreCase))
+                {
+                    string xml = Encoding.UTF8.GetString(rebuiltData);
+                    invadersFixed = xml.Contains("入侵者") && !xml.Contains("Oleada tras oleada");
+                }
+                if (pakPrefix.Contains("RETURN TO THE THRONE") && relPath.Equals("CONV.XML", StringComparison.OrdinalIgnoreCase))
+                {
+                    throneConvFixed = d == 221 && t == 221;
+                }
+            }
+        }
+
+        Check("ExtraCampaignTemplates Invaders ADVENTURE.LOC.XML 成功翻譯且無殘留西文", invadersFixed);
+        Check("ExtraCampaignTemplates Return to the Throne CONV.XML 221 條對話 100% 翻譯", throneConvFixed);
+        Check("ExtraCampaignTemplates 全部 118 檔 100% 翻譯無遺漏 (997/997 條目全數翻譯)",
+            extraDone == 997 && extraTotal == 1003,
+            $"done={extraDone}, total={extraTotal}");
     }
 
     // --- 27. 合成 local.pak 語言包安裝與反轉測試 ----------------------------
@@ -2522,6 +2659,18 @@ internal static class Program
             Directory.Delete(orphanRollback, recursive: true);
             validMeta.Version = "1.0.0";
 
+            string manuallyPlacedInvalid = Path.Combine(testBaseDir, "langpacks", "manual-invalid");
+            Directory.CreateDirectory(manuallyPlacedInvalid);
+            validMeta.Id = "manual-invalid";
+            validMeta.Files.Ui = "../../outside.json";
+            File.WriteAllText(Path.Combine(testBaseDir, "outside.json"), "{}");
+            File.WriteAllText(Path.Combine(manuallyPlacedInvalid, "pack.json"), JsonSerializer.Serialize(validMeta));
+            Check("DiscoverAll 對手動放入的包套用相同路徑邊界驗證",
+                !PackLoader.DiscoverAll(testBaseDir).ContainsKey("manual-invalid"));
+            Directory.Delete(manuallyPlacedInvalid, recursive: true);
+            validMeta.Id = "custom-test";
+            validMeta.Files.Ui = "ui.json";
+
             // B. 安全檢查：路徑走訪 (Path Traversal) 拒絕
             string traversalSource = Path.Combine(testBaseDir, "SourceTraversal");
             Directory.CreateDirectory(traversalSource);
@@ -2804,6 +2953,19 @@ internal static class Program
             "auto", 1, keepVanilla: false, numpadKeys: true);
         Check("spawn_item 產生 DefItemHolder 與 AddItem 腳本", itemScript.Contains("Place(&quot;DefItemHolder&quot;", StringComparison.Ordinal) && itemScript.Contains("o.AddItem(item)", StringComparison.Ordinal));
         Check("cycle_item 借用 spawn_item 之 items 參數", itemScript.Contains("King's Belt", StringComparison.Ordinal) && itemScript.Contains("Boar teeth", StringComparison.Ordinal));
+
+        var invalidMarkerPak = HmmPak.CreateEmpty();
+        invalidMarkerPak.WriteText(TrainerInstaller.MarkerPath, "{}");
+        Check("空修改器 marker 被拒絕而非視為可反轉", TrainerInstaller.ReadMarker(invalidMarkerPak) is null);
+        bool invalidMarkerRefused = false;
+        try { TrainerInstaller.Uninstall(invalidMarkerPak); }
+        catch (TrainerException) { invalidMarkerRefused = true; }
+        Check("無效修改器 marker 的 Uninstall fail-closed 且保留 marker",
+            invalidMarkerRefused && invalidMarkerPak.Contains(TrainerInstaller.MarkerPath));
+        invalidMarkerPak.WriteText(TrainerInstaller.MarkerPath,
+            "{\"version\":1,\"toolkitVersion\":\"1.0.5\",\"addedEntries\":[\"CKTRAINER_OLD.VS\"],\"originals\":{},\"cheats\":[],\"tweaks\":{},\"gameSettings\":[]}");
+        Check("修改器 marker 不接受未受稽核的刪除清單",
+            TrainerInstaller.ReadMarker(invalidMarkerPak) is null);
 
         // 永久 scoped Tweak 的 command helper：驗證 .cktw 格式、真實位址 hook、
         // 多人 fail-closed／owner／command 旗標與設定位址、重設值、冪等、
@@ -5913,7 +6075,8 @@ internal static class Program
             using var panelForm = new InGamePanelForm(testTrainerConfig);
             _ = panelForm.Handle;
             string expectedCheatName = strings[TrainerStrings.CheatNameKey("gold_fill")];
-            Button? goldBtn = Descendants(panelForm).OfType<Button>().FirstOrDefault();
+            Button? goldBtn = Descendants(panelForm).OfType<Button>()
+                .FirstOrDefault(b => b.Parent is CKToolkit.Gui.Layout.StackPanel);
             bool panelMatches = goldBtn is not null && goldBtn.Text.StartsWith(expectedCheatName) && panelForm.AutoScaleMode == AutoScaleMode.Dpi && spawnUnitDialog.AutoScaleMode == AutoScaleMode.Dpi;
 
             return adaptersMatch &&
@@ -6191,6 +6354,45 @@ internal static class Program
         Check("權杖原樣寫出", good.Contains($"scripttoken={token}", StringComparison.Ordinal));
         Check("選項以逗號分隔，權杖是最後一段（原生端 OptAscii 讀到逗號就停）",
             good.EndsWith($"scripttoken={token}", StringComparison.Ordinal));
+        string diskSafe = new DiagnosticsOptions { ScriptChannel = true, ScriptToken = token }
+            .ToOptionString(includeScriptToken: false);
+        Check("落盤選項保留通道開關但不含權杖",
+            diskSafe.Contains("scriptchannel=1", StringComparison.Ordinal) &&
+            !diskSafe.Contains("scripttoken", StringComparison.Ordinal));
+
+        Check("Probe 只接受可用狀態",
+            ScriptChannel.IsProbeReady(ScriptStatus.Ok) &&
+            ScriptChannel.IsProbeReady(ScriptStatus.Scheduled) &&
+            ScriptChannel.IsProbeReady(ScriptStatus.NotInGame) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.Rejected) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.CompileError) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.Faulted) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.TimedOut));
+
+        uint partialPid = unchecked((uint)(Environment.ProcessId + 100000));
+        using (var partialServer = new NamedPipeServerStream(
+            ScriptChannel.PipeNameFor(partialPid), PipeDirection.InOut, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous))
+        {
+            Task partialResponse = Task.Run(async () =>
+            {
+                try
+                {
+                    await partialServer.WaitForConnectionAsync();
+                    await partialServer.WriteAsync(new byte[] { 0x43, 0x4B, 0x53, 0x43 });
+                    await partialServer.FlushAsync();
+                    await Task.Delay(300);
+                }
+                catch (IOException) { }
+            });
+            using ScriptChannel partialChannel = ScriptChannel.Create(partialPid, token).Value!;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            Result<ScriptRunOutcome> partialResult = partialChannel.Run("int i; i = 1;", TimeSpan.FromMilliseconds(100));
+            started.Stop();
+            Check("管線只回部分標頭時整體 deadline 仍會終止 Run",
+                partialResult.IsError && started.Elapsed < TimeSpan.FromSeconds(1));
+            partialResponse.GetAwaiter().GetResult();
+        }
 
         var channelOnly = GameRunner.CreateScriptChannelOnlyOptions();
         Check("channel-only 選項不替使用者打開任何保護",
@@ -6243,6 +6445,27 @@ internal static class Program
                 Check($"ScriptStatus.{status} 有對應的原生常數",
                     statuses.Any(s => s.Value == (int)status));
             }
+
+            string nativeScript = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "script.cpp")));
+            Check("原生 mailbox 具 Running 與 Abandoned 所有權狀態",
+                nativeScript.Contains("kSlotRunning", StringComparison.Ordinal) &&
+                nativeScript.Contains("kSlotAbandoned", StringComparison.Ordinal));
+            Check("原生腳本自測延後至主執行緒 pump",
+                nativeScript.Contains("g_selfTestPending", StringComparison.Ordinal) &&
+                nativeScript.Contains("main-thread self-test deferred", StringComparison.Ordinal));
+            Check("原生 pipe 讀取與 flush 都有 deadline",
+                nativeScript.Contains("PeekNamedPipe", StringComparison.Ordinal) &&
+                nativeScript.Contains("FlushWithDeadline", StringComparison.Ordinal));
+
+            string nativeCommon = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "common.cpp")));
+            Check("掛載模式權杖由記憶體 bootstrap pipe 讀取",
+                nativeCommon.Contains("ckperf-bootstrap-", StringComparison.Ordinal) &&
+                nativeCommon.Contains("ReadBootstrapToken", StringComparison.Ordinal));
+
+            string nativeCrash = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "crash.cpp")));
+            Check("已修復站點與未修復故障使用獨立報告計數",
+                nativeCrash.Contains("g_repairedReportCount", StringComparison.Ordinal) &&
+                nativeCrash.Contains("g_reportCount", StringComparison.Ordinal));
         }
         else
         {
@@ -6251,10 +6474,9 @@ internal static class Program
     }
 
     /// <summary>數面板上有幾顆作弊按鈕。面板的按鈕都放在唯一那個 TableLayoutPanel 裡。</summary>
+    // 作弊按鈕直接放在面板的捲動堆疊裡（ISSUE-101）；速度列的「套用」按鈕在自己的 FlowLayoutPanel，不計入。
     private static int CountPanelCheatButtons(InGamePanelForm panel) =>
-        panel.Controls.OfType<TableLayoutPanel>()
-             .SelectMany(t => t.Controls.OfType<Button>())
-             .Count();
+        Descendants(panel).OfType<Button>().Count(b => b.Parent is CKToolkit.Gui.Layout.StackPanel);
 
     /// <summary>
     /// 從目前執行目錄往上找出儲存庫內的檔案。SelfTest 是從 bin 底下跑的，
@@ -6363,6 +6585,9 @@ internal static class Program
 
         // B. ResolutionWriteback (0x00258FAB)
         ResolutionWriteback.OrigBytes.CopyTo(pe.AsSpan(ResolutionWriteback.Offset, ResolutionWriteback.OrigBytes.Length));
+
+        // B2. InstantHeroAttach (0x0010BCF6)
+        InstantHeroAttachPatch.OrigBytes.CopyTo(pe.AsSpan(InstantHeroAttachPatch.Offset, InstantHeroAttachPatch.OrigBytes.Length));
 
         // C. ZoomTables Immediates & Rewrites
         foreach (var site in ZoomTables.Sites)
@@ -7006,6 +7231,164 @@ internal static class Program
         return (code, envelope, raw);
     }
 
+    /// <summary>
+    /// 48. 遊戲資料夾設定往返測試（ISSUE-100）。
+    ///
+    /// 這一組鎖住的是「使用者不必一直重新設定」這件事本身：套用之後設定留在遊戲資料夾、
+    /// 換一份工具包（設定檔不存在）時讀得回來、還原原版時不留痕跡。
+    /// </summary>
+    private static void TestGameDirSettingsRoundTrip()
+    {
+        Console.WriteLine("\n48. 遊戲資料夾設定往返、採用規則與還原清痕跡測試");
+
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cfg_" + Guid.NewGuid().ToString("N")[..8]);
+        string tempConfigDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cfgl_" + Guid.NewGuid().ToString("N")[..8]);
+
+        try
+        {
+            Directory.CreateDirectory(tempGameDir);
+            Directory.CreateDirectory(tempConfigDir);
+            string localConfigPath = Path.Combine(tempConfigDir, "cktoolkit.json");
+
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
+
+            string gameDirConfigPath = ToolkitConfig.GameDirConfigPath(tempGameDir);
+            Check("套用前遊戲資料夾沒有設定檔", !File.Exists(gameDirConfigPath));
+
+            // 一份「使用者真的調過」的設定：作弊、按鍵、參數、數值與遊戲規則都動過，
+            // 才能證明回讀的是完整設定，而不是只有幾個旗標。
+            // （合成 data.pak 只有 VXCONST.INI 與 SCDEBUG.XML，所以數值與遊戲規則這兩項
+            //   走的是直接往返，不經過需要 CLASSES\*.SC.XML 的套用管線。）
+            var config = ToolkitConfig.CreateDefault();
+            config.GameDir = tempGameDir;
+            config.Perf.Resolution = "2560x1440";
+            config.Perf.Hires = 2560;
+            config.Perf.AddRes = ["2560x1440"];
+            config.Trainer.Enabled = true;
+            config.Trainer.NumpadKeys = true;
+            config.Trainer.Cheats =
+            [
+                new CheatConfig { Id = "gold_fill", Enabled = true, Key = "F1" },
+                new CheatConfig
+                {
+                    Id = "population_boost",
+                    Enabled = true,
+                    Key = "F11",
+                    Parameters = new Dictionary<string, string>(StringComparer.Ordinal) { ["amount"] = "750" }
+                }
+            ];
+
+            var richConfig = ToolkitConfig.FromJson(config.ToJson());
+            richConfig.Trainer.Tweaks["hero_max_army"] = 40m;
+            richConfig.GameSettings.AllowVikingLordHeroArmy = true;
+            Check("直接寫入遊戲資料夾成功", richConfig.SaveToGameDir(tempGameDir, applied: true).Success);
+            var richBack = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? richError);
+            Check("含數值與遊戲規則的完整設定可原樣讀回",
+                richError is null &&
+                richBack?.Trainer.Tweaks["hero_max_army"] == 40m &&
+                richBack.GameSettings.AllowVikingLordHeroArmy);
+            File.Delete(gameDirConfigPath);
+
+            var pipeline = PatchPipeline.CreateDefault();
+            var apply = pipeline.ApplyAll(tempGameDir, config);
+            Check("ApplyAll 執行成功", apply.Success, apply.ErrorMessage);
+            Check("ApplyAll 回報寫出的設定檔路徑", apply.Value?.SettingsFile == gameDirConfigPath);
+            Check("套用後遊戲資料夾出現設定檔", File.Exists(gameDirConfigPath));
+
+            // 1. 遊戲資料夾那份帶著 appliedAt，而且不帶絕對路徑（換台電腦才不會指到不存在的目錄）
+            var fromGameDir = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? parseError);
+            Check("遊戲資料夾設定可正常解析", fromGameDir is not null && parseError is null);
+            Check("遊戲資料夾設定帶有 appliedAt", fromGameDir?.AppliedAt is not null);
+            Check("遊戲資料夾設定的 gameDir 由讀取端補上而非寫死絕對路徑",
+                fromGameDir?.GameDir == tempGameDir);
+
+            // 2. 完整往返：作弊、按鍵、參數、數值、遊戲規則、效能設定都要回得來
+            Check("回讀的作弊清單完全相同",
+                fromGameDir?.Trainer.Cheats.Count == 2 &&
+                fromGameDir.Trainer.Cheats[0].Id == "gold_fill" &&
+                // 按鍵以名稱儲存（F1），小鍵盤模式只在修補 EXE 時換算鍵碼（KeyMap），
+                // 設定檔裡不會出現「Numpad1」這種名稱。
+                fromGameDir.Trainer.Cheats[0].Key == "F1" &&
+                fromGameDir.Trainer.NumpadKeys &&
+                fromGameDir.Trainer.Cheats[1].Parameters["amount"] == "750",
+                string.Join(" | ", fromGameDir?.Trainer.Cheats.Select(c => $"{c.Id}:{c.Key}") ?? []));
+            Check("回讀的效能設定完全相同",
+                fromGameDir?.Perf.Resolution == "2560x1440" && fromGameDir.Perf.Hires == 2560);
+
+            // 3. 採用規則：全新工具包（沒有設定檔）一律採用遊戲資料夾那份
+            var freshLocal = ToolkitConfig.CreateDefault();
+            Check("沒有本機設定時採用遊戲資料夾設定", freshLocal.ShouldAdopt(fromGameDir!));
+
+            // 4. 採用規則：本機設定比較新時不得被蓋掉（使用者改了還沒套用的設定要留住）
+            var newerLocal = ToolkitConfig.CreateDefault();
+            newerLocal.Save(localConfigPath);
+            Check("本機設定比較新時不採用遊戲資料夾設定", !newerLocal.ShouldAdopt(fromGameDir!));
+
+            // 5. 壞掉的遊戲資料夾設定：回報訊息而不是丟例外，也不得靜默退回預設值
+            File.WriteAllText(gameDirConfigPath, "{ this is not json");
+            var broken = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? brokenError);
+            Check("損壞的遊戲資料夾設定回傳 null 並帶出錯誤訊息",
+                broken is null && !string.IsNullOrWhiteSpace(brokenError));
+
+            // 6. CLI config show / pull / push
+            var pushResult = RunCli("config", "push", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config push` 成功執行", pushResult.Code == ExitCodes.Success);
+            Check("`config push` 之後遊戲資料夾設定可再次解析",
+                ToolkitConfig.TryLoadFromGameDir(tempGameDir, out _) is not null);
+            Check("`config push` 不會蓋上 appliedAt（它沒有套用任何檔案）",
+                ToolkitConfig.TryLoadFromGameDir(tempGameDir, out _)?.AppliedAt is null);
+
+            var showResult = RunCli("config", "show", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config show` 成功執行且回傳 ok", showResult.Code == ExitCodes.Success && showResult.Envelope?.Ok == true);
+
+            File.Delete(localConfigPath);
+            var pullResult = RunCli("config", "pull", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config pull` 成功執行", pullResult.Code == ExitCodes.Success);
+            Check("`config pull` 之後本機設定檔存在", File.Exists(localConfigPath));
+
+            var badSub = RunCli("config", "bogus", "--game", tempGameDir, "--json");
+            Check("`config` 未知子指令被拒絕", badSub.Code == ExitCodes.InvalidArgs);
+            var noSub = RunCli("config", "--game", tempGameDir, "--json");
+            Check("`config` 缺少子指令時拒絕", noSub.Code == ExitCodes.InvalidArgs);
+
+            // 7. status 是唯讀的：不得因為這個功能而在遊戲資料夾生出設定檔
+            File.Delete(gameDirConfigPath);
+            var statusResult = RunCli("status", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`status` 成功執行", statusResult.Code == ExitCodes.Success);
+            Check("`status` 不在遊戲資料夾建立設定檔", !File.Exists(gameDirConfigPath));
+
+            // 8. 還原原版必須把設定檔一併清掉，遊戲資料夾不留痕跡
+            var applyAgain = pipeline.ApplyAll(tempGameDir, config);
+            Check("再次套用成功且重新寫出設定檔", applyAgain.Success && File.Exists(gameDirConfigPath));
+
+            var restore = pipeline.RestoreAll(tempGameDir);
+            Check("RestoreAll 執行成功", restore.Success);
+            Check("RestoreAll 回報已移除設定檔", restore.Value?.SettingsFileRemoved == true);
+            Check("還原後遊戲資料夾不留設定檔", !File.Exists(gameDirConfigPath));
+            Check("還原後遊戲資料夾只剩五個原版檔案",
+                Directory.GetFiles(tempGameDir).Length == 5);
+            Check("還原後 Celtic kings.exe 與原版逐位元組相同",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName)).SequenceEqual(vanillaExeBytes));
+            Check("還原後 data.pak 與原版逐位元組相同",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)).SequenceEqual(vanillaDataPakBytes));
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+            try { if (Directory.Exists(tempConfigDir)) Directory.Delete(tempConfigDir, true); } catch { }
+        }
+    }
+
     private static void TestGameRulesModifierAndHeroArmyReversal()
     {
         Console.WriteLine("\n47. GameRulesModifier 兵種規則修改與 data.pak 精確反轉測試");
@@ -7046,13 +7429,117 @@ internal static class Program
         string unchanged = GameRulesModifier.RemoveFreedom(xmlNoFreedom);
         Check("RemoveFreedom 在無 freedom 時原文不變", unchanged == xmlNoFreedom);
 
+        // 1.2 運糧馬/騾子 (Wagon) defaultcmd 與 FORMATIONS.XML 陣形修改邏輯測試
+        string wagonVanillaXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"Wagon\" parent=\"Unit\">\r\n  <properties max_load=\"1000\" feeds=\"0\"/>\r\n  <nodefcmdinherit/>\r\n  <defaultcmd target=\"Unit\">\r\n    <cmd name=\"follow\"/>\r\n  </defaultcmd>\r\n</class>\r\n";
+        Check("GameRulesModifier.HasMuleHeroArmy 初始為 false", !GameRulesModifier.HasMuleHeroArmy(wagonVanillaXml));
+        string wagonApplied = GameRulesModifier.ApplyMuleHeroArmy(wagonVanillaXml);
+        Check("ApplyMuleHeroArmy 成功加入 defaultcmd target=Hero attach",
+            GameRulesModifier.HasMuleHeroArmy(wagonApplied) && wagonApplied.Contains("target=\"Hero\""));
+        string wagonAppliedTwice = GameRulesModifier.ApplyMuleHeroArmy(wagonApplied);
+        Check("ApplyMuleHeroArmy 具備冪等性", wagonAppliedTwice == wagonApplied);
+        string wagonRestored = GameRulesModifier.RemoveMuleHeroArmy(wagonApplied);
+        Check("RemoveMuleHeroArmy 精確還原回原版（逐位元組相同）", wagonRestored == wagonVanillaXml);
+        string wagonRestoredTwice = GameRulesModifier.RemoveMuleHeroArmy(wagonRestored);
+        Check("RemoveMuleHeroArmy 具備冪等性", wagonRestoredTwice == wagonVanillaXml);
+
+        string formationsVanillaXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<Formations>\r\n\t<Formation Name=\"Square\">\r\n\t\t<Class Name=\"Peasant\" CentralBlock=\"1\"/>\r\n\t\t<Class Name=\"Hero\" CentralBlock=\"1\"/>\r\n\t</Formation>\r\n</Formations>\r\n";
+        Check("GameRulesModifier.HasMuleFormation 初始為 false", !GameRulesModifier.HasMuleFormation(formationsVanillaXml));
+        string formationsApplied = GameRulesModifier.ApplyMuleFormation(formationsVanillaXml);
+        Check("ApplyMuleFormation 成功加入 Wagon CentralBlock",
+            GameRulesModifier.HasMuleFormation(formationsApplied) && formationsApplied.Contains("<Class Name=\"Wagon\" CentralBlock=\"1\"/>"));
+        string formationsAppliedTwice = GameRulesModifier.ApplyMuleFormation(formationsApplied);
+        Check("ApplyMuleFormation 具備冪等性", formationsAppliedTwice == formationsApplied);
+        string formationsRestored = GameRulesModifier.RemoveMuleFormation(formationsApplied);
+        Check("RemoveMuleFormation 精確還原回原版（逐位元組相同）", formationsRestored == formationsVanillaXml);
+        string formationsRestoredTwice = GameRulesModifier.RemoveMuleFormation(formationsRestored);
+        Check("RemoveMuleFormation 具備冪等性", formationsRestoredTwice == formationsVanillaXml);
+
+        // WagonCapacity10k 純字串轉換測試
+        Check("GameRulesModifier.HasWagonCapacity10k 初始為 false", !GameRulesModifier.HasWagonCapacity10k(wagonVanillaXml));
+        string wagon10kApplied = GameRulesModifier.ApplyWagonMaxLoad10k(wagonVanillaXml);
+        Check("ApplyWagonMaxLoad10k 成功修改 max_load 為 10000",
+            GameRulesModifier.HasWagonCapacity10k(wagon10kApplied) && wagon10kApplied.Contains("max_load=\"10000\""));
+        string wagon10kAppliedTwice = GameRulesModifier.ApplyWagonMaxLoad10k(wagon10kApplied);
+        Check("ApplyWagonMaxLoad10k 具備冪等性", wagon10kAppliedTwice == wagon10kApplied);
+        string wagon10kRestored = GameRulesModifier.RemoveWagonMaxLoad10k(wagon10kApplied);
+        Check("RemoveWagonMaxLoad10k 精確還原回原版（逐位元組相同）", wagon10kRestored == wagonVanillaXml);
+        string wagon10kRestoredTwice = GameRulesModifier.RemoveWagonMaxLoad10k(wagon10kRestored);
+        Check("RemoveWagonMaxLoad10k 具備冪等性", wagon10kRestoredTwice == wagonVanillaXml);
+
+        string vsFoodVanilla = "// void, Obj This\r\nwagon = .CreateMuleFood(1000);\r\n";
+        string vsFoodApplied = GameRulesModifier.ApplyCreateFoodMuleBig(vsFoodVanilla);
+        Check("ApplyCreateFoodMuleBig 成功修改為 10000", vsFoodApplied.Contains(".CreateMuleFood(10000)"));
+        Check("RemoveCreateFoodMuleBig 精確還原回原版", GameRulesModifier.RemoveCreateFoodMuleBig(vsFoodApplied) == vsFoodVanilla);
+
+        string vsGoldVanilla = "// void, Obj This\r\nwagon = .CreateMuleGold(1000);\r\n";
+        string vsGoldApplied = GameRulesModifier.ApplyCreateGoldMuleBig(vsGoldVanilla);
+        Check("ApplyCreateGoldMuleBig 成功修改為 10000", vsGoldApplied.Contains(".CreateMuleGold(10000)"));
+        Check("RemoveCreateGoldMuleBig 精確還原回原版", GameRulesModifier.RemoveCreateGoldMuleBig(vsGoldApplied) == vsGoldVanilla);
+
+        string vsLoadFoodVanilla = "// void, Obj This\r\nif(.IsValid()) .LoadFood(1000);\r\n";
+        string vsLoadFoodApplied = GameRulesModifier.ApplyWagonLoadFoodBig(vsLoadFoodVanilla);
+        Check("ApplyWagonLoadFoodBig 成功修改為 10000", vsLoadFoodApplied.Contains(".LoadFood(10000)"));
+        Check("RemoveWagonLoadFoodBig 精確還原回原版", GameRulesModifier.RemoveWagonLoadFoodBig(vsLoadFoodApplied) == vsLoadFoodVanilla);
+
+        string vsLoadGoldVanilla = "// void, Obj This\r\nif(.IsValid()) .LoadGold(1000);\r\n";
+        string vsLoadGoldApplied = GameRulesModifier.ApplyWagonLoadGoldBig(vsLoadGoldVanilla);
+        Check("ApplyWagonLoadGoldBig 成功修改為 10000", vsLoadGoldApplied.Contains(".LoadGold(10000)"));
+        Check("RemoveWagonLoadGoldBig 精確還原回原版", GameRulesModifier.RemoveWagonLoadGoldBig(vsLoadGoldApplied) == vsLoadGoldVanilla);
+
+        string cmdVanilla = "<commands>\r\n\t<cmd rollover=\"Create mule with 1000 food\">\r\n\t<cmd rollover=\"Create mule loaded with 1000 gold\">\r\n\t<cmd rollover=\"Load 1000 food\"\r\n\t<cmd rollover=\"Load 1000 gold\"\r\n</commands>\r\n";
+        string cmdApplied = GameRulesModifier.ApplyCommandsMule10k(cmdVanilla);
+        Check("ApplyCommandsMule10k 成功修改提示文字為 10000",
+            cmdApplied.Contains("10000 food") && cmdApplied.Contains("10000 gold") && !cmdApplied.Contains("1000 food") && !cmdApplied.Contains("1000 gold"));
+        Check("RemoveCommandsMule10k 精確還原回原版", GameRulesModifier.RemoveCommandsMule10k(cmdApplied) == cmdVanilla);
+
+        // InstantHeroAttach 純文字轉換與二進位修補測試
+        string vsAttachVanilla = "\tif( !.InHolder && !hero.InHolder && .posRH.Dist(hero.posRH) < 1500 )\r\n\tif(.AttachTo(hero)) break;//success\r\n";
+        Check("GameRulesModifier.HasInstantHeroAttach 初始為 false", !GameRulesModifier.HasInstantHeroAttach(vsAttachVanilla));
+        string vsAttachApplied = GameRulesModifier.ApplyInstantHeroAttach(vsAttachVanilla);
+        Check("ApplyInstantHeroAttach 成功修改為瞬時編入與自動靠攏",
+            GameRulesModifier.HasInstantHeroAttach(vsAttachApplied) &&
+            vsAttachApplied.Contains(".AttachTo(hero)") &&
+            vsAttachApplied.Contains(".Goto(hero.posRH + ptoffset") &&
+            !vsAttachApplied.Contains(".posRH.Dist(hero.posRH) < 1500"));
+        string vsAttachAppliedTwice = GameRulesModifier.ApplyInstantHeroAttach(vsAttachApplied);
+        Check("ApplyInstantHeroAttach 具備冪等性", vsAttachAppliedTwice == vsAttachApplied);
+        string vsAttachRestored = GameRulesModifier.RemoveInstantHeroAttach(vsAttachApplied);
+        Check("RemoveInstantHeroAttach 精確還原回原版（逐位元組相同）", vsAttachRestored == vsAttachVanilla);
+        string vsAttachRestoredTwice = GameRulesModifier.RemoveInstantHeroAttach(vsAttachRestored);
+        Check("RemoveInstantHeroAttach 具備冪等性", vsAttachRestoredTwice == vsAttachVanilla);
+
+        // InstantHeroAttachPatch 二進位 PE 測試
+        byte[] exeDummy = CreateSyntheticExe32();
+        Check("InstantHeroAttachPatch 初始為 Original 且非 Applied",
+            InstantHeroAttachPatch.IsOriginal(exeDummy) && !InstantHeroAttachPatch.IsApplied(exeDummy));
+        byte[] exePatchedDummy = (byte[])exeDummy.Clone();
+        InstantHeroAttachPatch.Apply(ref exePatchedDummy, true);
+        Check("InstantHeroAttachPatch.Apply(true) 成功套用 NOP",
+            InstantHeroAttachPatch.IsApplied(exePatchedDummy) && !InstantHeroAttachPatch.IsOriginal(exePatchedDummy));
+        byte[] exePatchedDummyTwice = (byte[])exePatchedDummy.Clone();
+        InstantHeroAttachPatch.Apply(ref exePatchedDummyTwice, true);
+        Check("InstantHeroAttachPatch.Apply 具備冪等性", exePatchedDummyTwice.SequenceEqual(exePatchedDummy));
+        InstantHeroAttachPatch.Apply(ref exePatchedDummy, false);
+        Check("InstantHeroAttachPatch.Apply(false) 精確還原回原版",
+            InstantHeroAttachPatch.IsOriginal(exePatchedDummy) && !InstantHeroAttachPatch.IsApplied(exePatchedDummy) && exePatchedDummy.SequenceEqual(exeDummy));
+
         // 2. data.pak 合成安裝與逐位元組精確反轉測試
         string vikingLordXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"GVikingLord\" parent=\"Military\" speciality=\"vampire, freedom\">\r\n\t<health value=\"800\"/>\r\n</class>\r\n";
         string liberatusXml = "<?xml version=\"1.0\" encoding=\"windows-1252\"?>\r\n<class id=\"RLiberatus\" parent=\"Military\" speciality=\"trample, freedom\">\r\n\t<health value=\"600\"/>\r\n</class>\r\n";
+        string wagonXml = wagonVanillaXml;
+        string formationsXml = formationsVanillaXml;
 
         var pak = CreateSyntheticDataPak();
         pak.WriteText(GameRulesModifier.VikingLordClassPath, vikingLordXml);
         pak.WriteText(GameRulesModifier.LiberatusClassPath, liberatusXml);
+        pak.WriteText(GameRulesModifier.WagonClassPath, wagonXml);
+        pak.WriteText(GameRulesModifier.FormationsPath, formationsXml);
+        pak.WriteText(GameRulesModifier.CreateFoodMuleBigScriptPath, vsFoodVanilla);
+        pak.WriteText(GameRulesModifier.CreateGoldMuleBigScriptPath, vsGoldVanilla);
+        pak.WriteText(GameRulesModifier.WagonLoadFoodBigScriptPath, vsLoadFoodVanilla);
+        pak.WriteText(GameRulesModifier.WagonLoadGoldBigScriptPath, vsLoadGoldVanilla);
+        pak.WriteText(GameRulesModifier.CommandsXmlPath, cmdVanilla);
+        pak.WriteText(GameRulesModifier.UnitAttachScriptPath, vsAttachVanilla);
         byte[] vanillaBytes = pak.ToBytes();
 
         Check("初始合成 data.pak 為原版", PatchState.Inspect(GameFile.DataPak, vanillaBytes).IsVanilla);
@@ -7061,6 +7548,7 @@ internal static class Program
         var configViking = ToolkitConfig.CreateDefault();
         configViking.GameSettings.AllowVikingLordHeroArmy = true;
         configViking.GameSettings.AllowLiberatiHeroArmy = false;
+        configViking.GameSettings.AllowMuleHeroArmy = false;
 
         var patchedPak1 = HmmPak.FromBytes(vanillaBytes);
         TrainerInstaller.Install(patchedPak1, configViking.Trainer, configViking.GameSettings);
@@ -7072,9 +7560,9 @@ internal static class Program
 
         var marker1 = TrainerInstaller.ReadMarker(patchedPak1);
         Check("TrainerMarker 包含 allow_viking_lord_army",
-            marker1 is not null && marker1.GameSettings.Contains("allow_viking_lord_army") && !marker1.GameSettings.Contains("allow_liberati_army"));
+            marker1 is not null && marker1.GameSettings.Contains("allow_viking_lord_army") && !marker1.GameSettings.Contains("allow_liberati_army") && !marker1.GameSettings.Contains("allow_mule_army"));
         Check("TrainerMarker.Originals 只記錄有變動的檔案",
-            marker1 is not null && marker1.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+            marker1 is not null && marker1.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath) && !marker1.Originals.ContainsKey(GameRulesModifier.WagonClassPath));
 
         string currentVikingXml = patchedPak1.ReadText(GameRulesModifier.VikingLordClassPath)!;
         string currentLiberatusXml = patchedPak1.ReadText(GameRulesModifier.LiberatusClassPath)!;
@@ -7091,43 +7579,180 @@ internal static class Program
         Check("PatchState.Normalise 單獨維京領主後與原版逐位元組相同",
             normalised1.Success && normalised1.Value is not null && normalised1.Value.SequenceEqual(vanillaBytes));
 
-        // 同時套用維京領主與自由鬥士
-        var configBoth = ToolkitConfig.CreateDefault();
-        configBoth.GameSettings.AllowVikingLordHeroArmy = true;
-        configBoth.GameSettings.AllowLiberatiHeroArmy = true;
+        // 套用單獨運糧馬編隊
+        var configMule = ToolkitConfig.CreateDefault();
+        configMule.GameSettings.AllowMuleHeroArmy = true;
 
-        var patchedPakBoth = HmmPak.FromBytes(vanillaBytes);
-        TrainerInstaller.Install(patchedPakBoth, configBoth.Trainer, configBoth.GameSettings);
-        byte[] patchedBytesBoth = patchedPakBoth.ToBytes();
+        var patchedPakMule = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakMule, configMule.Trainer, configMule.GameSettings);
+        byte[] patchedBytesMule = patchedPakMule.ToBytes();
 
-        var markerBoth = TrainerInstaller.ReadMarker(patchedPakBoth);
-        Check("TrainerMarker 包含兩項遊戲設定",
-            markerBoth is not null &&
-            markerBoth.GameSettings.Contains("allow_viking_lord_army") &&
-            markerBoth.GameSettings.Contains("allow_liberati_army"));
-        Check("TrainerMarker.Originals 包含兩個原始檔案",
-            markerBoth is not null &&
-            markerBoth.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
-            markerBoth.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath));
+        var stateMule = PatchState.Inspect(GameFile.DataPak, patchedBytesMule);
+        Check("套用運糧馬後 data.pak 辨識為 PatchedByUs",
+            stateMule.IsPatched && stateMule.AppliedPatches.Contains("trainer_marker"));
 
-        var uninstalledBoth = HmmPak.FromBytes(patchedBytesBoth);
-        TrainerInstaller.Uninstall(uninstalledBoth);
-        byte[] restoredBytesBoth = uninstalledBoth.ToBytes();
-        Check("Uninstall 兩項設定後與原版逐位元組相同", restoredBytesBoth.SequenceEqual(vanillaBytes));
+        var markerMule = TrainerInstaller.ReadMarker(patchedPakMule);
+        Check("TrainerMarker 包含 allow_mule_army",
+            markerMule is not null && markerMule.GameSettings.Contains("allow_mule_army"));
+        Check("TrainerMarker.Originals 包含 Wagon 與 Formations 原始檔案",
+            markerMule is not null &&
+            markerMule.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            markerMule.Originals.ContainsKey(GameRulesModifier.FormationsPath));
 
-        var normalisedBoth = PatchState.Normalise(GameFile.DataPak, patchedBytesBoth);
-        Check("PatchState.Normalise 兩項設定後與原版逐位元組相同",
-            normalisedBoth.Success && normalisedBoth.Value is not null && normalisedBoth.Value.SequenceEqual(vanillaBytes));
+        string currentWagonXml = patchedPakMule.ReadText(GameRulesModifier.WagonClassPath)!;
+        string currentFormationsXml = patchedPakMule.ReadText(GameRulesModifier.FormationsPath)!;
+        Check("data.pak 內 Wagon 已加入 attach 預設指令", GameRulesModifier.HasMuleHeroArmy(currentWagonXml));
+        Check("data.pak 內 FORMATIONS.XML 已加入 Wagon CentralBlock", GameRulesModifier.HasMuleFormation(currentFormationsXml));
+
+        var uninstalledMule = HmmPak.FromBytes(patchedBytesMule);
+        TrainerInstaller.Uninstall(uninstalledMule);
+        byte[] restoredBytesMule = uninstalledMule.ToBytes();
+        Check("Uninstall 單獨運糧馬後與原版逐位元組相同", restoredBytesMule.SequenceEqual(vanillaBytes));
+
+        var normalisedMule = PatchState.Normalise(GameFile.DataPak, patchedBytesMule);
+        Check("PatchState.Normalise 單獨運糧馬後與原版逐位元組相同",
+            normalisedMule.Success && normalisedMule.Value is not null && normalisedMule.Value.SequenceEqual(vanillaBytes));
+
+        // 套用單獨運糧馬 10k 容量
+        var configWagon10k = ToolkitConfig.CreateDefault();
+        configWagon10k.GameSettings.WagonCapacity10k = true;
+
+        var patchedPak10k = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPak10k, configWagon10k.Trainer, configWagon10k.GameSettings);
+        byte[] patchedBytes10k = patchedPak10k.ToBytes();
+
+        var state10k = PatchState.Inspect(GameFile.DataPak, patchedBytes10k);
+        Check("套用運糧馬 10k 容量後 data.pak 辨識為 PatchedByUs",
+            state10k.IsPatched && state10k.AppliedPatches.Contains("trainer_marker"));
+
+        var marker10k = TrainerInstaller.ReadMarker(patchedPak10k);
+        Check("TrainerMarker 包含 wagon_capacity_10k",
+            marker10k is not null && marker10k.GameSettings.Contains("wagon_capacity_10k"));
+        Check("TrainerMarker.Originals 包含 6 個相關檔案",
+            marker10k is not null &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CreateFoodMuleBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CreateGoldMuleBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonLoadFoodBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.WagonLoadGoldBigScriptPath) &&
+            marker10k.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath));
+
+        string currentWagon10kXml = patchedPak10k.ReadText(GameRulesModifier.WagonClassPath)!;
+        Check("data.pak 內 Wagon max_load 已為 10000", GameRulesModifier.HasWagonCapacity10k(currentWagon10kXml));
+
+        var uninstalled10k = HmmPak.FromBytes(patchedBytes10k);
+        TrainerInstaller.Uninstall(uninstalled10k);
+        byte[] restoredBytes10k = uninstalled10k.ToBytes();
+        Check("Uninstall 單獨運糧馬 10k 後與原版逐位元組相同", restoredBytes10k.SequenceEqual(vanillaBytes));
+
+        var normalised10k = PatchState.Normalise(GameFile.DataPak, patchedBytes10k);
+        Check("PatchState.Normalise 單獨運糧馬 10k 後與原版逐位元組相同",
+            normalised10k.Success && normalised10k.Value is not null && normalised10k.Value.SequenceEqual(vanillaBytes));
+
+        // 套用單獨瞬時編入英雄
+        var configAttach = ToolkitConfig.CreateDefault();
+        configAttach.GameSettings.InstantHeroAttach = true;
+
+        var patchedPakAttach = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakAttach, configAttach.Trainer, configAttach.GameSettings);
+        byte[] patchedBytesAttach = patchedPakAttach.ToBytes();
+
+        var stateAttach = PatchState.Inspect(GameFile.DataPak, patchedBytesAttach);
+        Check("套用瞬時編入英雄後 data.pak 辨識為 PatchedByUs",
+            stateAttach.IsPatched && stateAttach.AppliedPatches.Contains("trainer_marker"));
+
+        var markerAttach = TrainerInstaller.ReadMarker(patchedPakAttach);
+        Check("TrainerMarker 包含 instant_hero_attach",
+            markerAttach is not null && markerAttach.GameSettings.Contains("instant_hero_attach"));
+        Check("TrainerMarker.Originals 包含 UNIT_ATTACH.VS",
+            markerAttach is not null && markerAttach.Originals.ContainsKey(GameRulesModifier.UnitAttachScriptPath));
+
+        string currentAttachVs = patchedPakAttach.ReadText(GameRulesModifier.UnitAttachScriptPath)!;
+        Check("data.pak 內 UNIT_ATTACH.VS 已套用瞬時編入", GameRulesModifier.HasInstantHeroAttach(currentAttachVs));
+
+        var uninstalledAttach = HmmPak.FromBytes(patchedBytesAttach);
+        TrainerInstaller.Uninstall(uninstalledAttach);
+        byte[] restoredBytesAttach = uninstalledAttach.ToBytes();
+        Check("Uninstall 單獨瞬時編入英雄後與原版逐位元組相同", restoredBytesAttach.SequenceEqual(vanillaBytes));
+
+        var normalisedAttach = PatchState.Normalise(GameFile.DataPak, patchedBytesAttach);
+        Check("PatchState.Normalise 單獨瞬時編入英雄後與原版逐位元組相同",
+            normalisedAttach.Success && normalisedAttach.Value is not null && normalisedAttach.Value.SequenceEqual(vanillaBytes));
+
+        // EXE 端對端：TrainerModule.ApplyExe 與 PatchState.Normalise
+        byte[] exeForAttach = CreateSyntheticExe32();
+        var trainerMod = new TrainerModule();
+        trainerMod.ApplyExe(ref exeForAttach, configAttach);
+        var exeStateAttach = PatchState.Inspect(GameFile.Exe, exeForAttach);
+        Check("套用 InstantHeroAttach 後 Exe 辨識出 instant_hero_attach 旗標",
+            exeStateAttach.IsPatched && exeStateAttach.AppliedPatches.Contains("instant_hero_attach"));
+        var normExeAttach = PatchState.Normalise(GameFile.Exe, exeForAttach);
+        Check("PatchState.Normalise Exe 成功還原 instant_hero_attach",
+            normExeAttach.Success && normExeAttach.Value!.SequenceEqual(CreateSyntheticExe32()));
+
+        // 同時套用五項遊戲設定 (維京領主、自由鬥士、運糧馬編隊、運糧馬 10k 容量、瞬時編入英雄)
+        var configAll = ToolkitConfig.CreateDefault();
+        configAll.GameSettings.AllowVikingLordHeroArmy = true;
+        configAll.GameSettings.AllowLiberatiHeroArmy = true;
+        configAll.GameSettings.AllowMuleHeroArmy = true;
+        configAll.GameSettings.WagonCapacity10k = true;
+        configAll.GameSettings.InstantHeroAttach = true;
+
+        var patchedPakAll = HmmPak.FromBytes(vanillaBytes);
+        TrainerInstaller.Install(patchedPakAll, configAll.Trainer, configAll.GameSettings);
+        byte[] patchedBytesAll = patchedPakAll.ToBytes();
+
+        var markerAll = TrainerInstaller.ReadMarker(patchedPakAll);
+        Check("TrainerMarker 包含五項遊戲設定",
+            markerAll is not null &&
+            markerAll.GameSettings.Contains("allow_viking_lord_army") &&
+            markerAll.GameSettings.Contains("allow_liberati_army") &&
+            markerAll.GameSettings.Contains("allow_mule_army") &&
+            markerAll.GameSettings.Contains("wagon_capacity_10k") &&
+            markerAll.GameSettings.Contains("instant_hero_attach"));
+        Check("TrainerMarker.Originals 包含全部十個原始檔案",
+            markerAll is not null &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.VikingLordClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.LiberatusClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonClassPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.FormationsPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CreateFoodMuleBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CreateGoldMuleBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadFoodBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.WagonLoadGoldBigScriptPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.CommandsXmlPath) &&
+            markerAll.Originals.ContainsKey(GameRulesModifier.UnitAttachScriptPath));
+
+        var uninstalledAll = HmmPak.FromBytes(patchedBytesAll);
+        TrainerInstaller.Uninstall(uninstalledAll);
+        byte[] restoredBytesAll = uninstalledAll.ToBytes();
+        Check("Uninstall 五項設定後與原版逐位元組相同", restoredBytesAll.SequenceEqual(vanillaBytes));
+
+        var normalisedAll = PatchState.Normalise(GameFile.DataPak, patchedBytesAll);
+        Check("PatchState.Normalise 五項設定後與原版逐位元組相同",
+            normalisedAll.Success && normalisedAll.Value is not null && normalisedAll.Value.SequenceEqual(vanillaBytes));
 
         // 3. PatchPipeline 端對端驗證 (TrainerMarkerMatchesConfig)
         Check("PatchPipeline.TrainerMarkerMatchesConfig: 正確比對符合的設定",
-            PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configBoth));
+            PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configAll));
 
         var configMismatched = ToolkitConfig.CreateDefault();
         configMismatched.GameSettings.AllowVikingLordHeroArmy = true;
-        configMismatched.GameSettings.AllowLiberatiHeroArmy = false;
+        configMismatched.GameSettings.AllowLiberatiHeroArmy = true;
+        configMismatched.GameSettings.AllowMuleHeroArmy = false;
+        configMismatched.GameSettings.WagonCapacity10k = true;
+        configMismatched.GameSettings.InstantHeroAttach = true;
         Check("PatchPipeline.TrainerMarkerMatchesConfig: 設定不符時回報 false",
-            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesBoth, configMismatched));
+            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configMismatched));
+
+        var configMismatchedAttach = ToolkitConfig.CreateDefault();
+        configMismatchedAttach.GameSettings.AllowVikingLordHeroArmy = true;
+        configMismatchedAttach.GameSettings.AllowLiberatiHeroArmy = true;
+        configMismatchedAttach.GameSettings.AllowMuleHeroArmy = true;
+        configMismatchedAttach.GameSettings.WagonCapacity10k = true;
+        configMismatchedAttach.GameSettings.InstantHeroAttach = false;
+        Check("PatchPipeline.TrainerMarkerMatchesConfig: InstantHeroAttach 不符時回報 false",
+            !PatchPipeline.TrainerMarkerMatchesConfig(patchedBytesAll, configMismatchedAttach));
 
         // 4. CLI settings get / set 測試
         string tempConfigDir = Path.Combine(Path.GetTempPath(), "ckselftest_settings_cli_" + Guid.NewGuid().ToString("N"));
@@ -7141,12 +7766,65 @@ internal static class Program
             var getInitial = RunCli("settings", "get", "--config", cliConfigFile, "--json");
             Check("`settings get --json` 成功執行", getInitial.Code == ExitCodes.Success && getInitial.Envelope is { Ok: true });
 
+            var getTypo = RunCli("settings", "get", "--typo", "--config", cliConfigFile, "--json");
+            Check("`settings get` 拒絕未知選項", getTypo.Code == ExitCodes.InvalidArgs && getTypo.Envelope is { Ok: false });
+
+            var help = RunCli("--help", "--json");
+            Check("CLI help 契約包含 settings get/set",
+                help.Code == ExitCodes.Success && help.Raw.Contains("settings get", StringComparison.Ordinal) &&
+                help.Raw.Contains("settings set", StringComparison.Ordinal));
+
             var setBoth = RunCli("settings", "set", "--viking-army=on", "--liberati-army=on", "--config", cliConfigFile, "--json");
             Check("`settings set --viking-army=on --liberati-army=on` 成功執行", setBoth.Code == ExitCodes.Success && setBoth.Envelope is { Ok: true });
 
             var loadedCfg = ToolkitConfig.Load(cliConfigFile);
             Check("CLI settings set 成功寫入設定檔",
                 loadedCfg.GameSettings.AllowVikingLordHeroArmy && loadedCfg.GameSettings.AllowLiberatiHeroArmy);
+
+            var setMule = RunCli("settings", "set", "--mule-army=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --mule-army=on` 成功執行", setMule.Code == ExitCodes.Success && setMule.Envelope is { Ok: true });
+
+            var loadedCfg3 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 AllowMuleHeroArmy=true", loadedCfg3.GameSettings.AllowMuleHeroArmy);
+
+            var getUpdated = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 allowMuleHeroArmy 欄位",
+                getUpdated.Code == ExitCodes.Success && getUpdated.Raw.Contains("\"allowMuleHeroArmy\": true"));
+
+            var setMuleOff = RunCli("settings", "set", "--mule-army=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --mule-army=off` 成功關閉選項", setMuleOff.Code == ExitCodes.Success);
+            var loadedCfg4 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 AllowMuleHeroArmy=false", !loadedCfg4.GameSettings.AllowMuleHeroArmy);
+
+            var setWagon10k = RunCli("settings", "set", "--wagon-10k=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --wagon-10k=on` 成功執行", setWagon10k.Code == ExitCodes.Success && setWagon10k.Envelope is { Ok: true });
+
+            var loadedCfg5 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 WagonCapacity10k=true", loadedCfg5.GameSettings.WagonCapacity10k);
+
+            var getUpdated10k = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 wagonCapacity10k 欄位",
+                getUpdated10k.Code == ExitCodes.Success && getUpdated10k.Raw.Contains("\"wagonCapacity10k\": true"));
+
+            var setWagon10kOff = RunCli("settings", "set", "--wagon-10k=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --wagon-10k=off` 成功關閉選項", setWagon10kOff.Code == ExitCodes.Success);
+            var loadedCfg6 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 WagonCapacity10k=false", !loadedCfg6.GameSettings.WagonCapacity10k);
+
+            var setAttach = RunCli("settings", "set", "--instant-attach=on", "--config", cliConfigFile, "--json");
+            Check("`settings set --instant-attach=on` 成功執行", setAttach.Code == ExitCodes.Success && setAttach.Envelope is { Ok: true });
+
+            var loadedCfg7 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 InstantHeroAttach=true", loadedCfg7.GameSettings.InstantHeroAttach);
+
+            var getUpdatedAttach = RunCli("settings", "get", "--config", cliConfigFile, "--json");
+            Check("`settings get --json` 包含 instantHeroAttach 欄位且為 true",
+                getUpdatedAttach.Code == ExitCodes.Success && getUpdatedAttach.Raw.Contains("\"instantHeroAttach\": true"));
+
+            var setAttachOff = RunCli("settings", "set", "--instant-hero-attach=off", "--config", cliConfigFile, "--json");
+            Check("`settings set --instant-hero-attach=off` 成功關閉選項", setAttachOff.Code == ExitCodes.Success);
+            var loadedCfg8 = ToolkitConfig.Load(cliConfigFile);
+            Check("設定檔已更新 InstantHeroAttach=false", !loadedCfg8.GameSettings.InstantHeroAttach);
 
             var setVikingOff = RunCli("settings", "set", "--viking-army=off", "--config", cliConfigFile, "--json");
             Check("`settings set --viking-army=off` 成功修改單一項目", setVikingOff.Code == ExitCodes.Success);
