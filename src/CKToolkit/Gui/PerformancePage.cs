@@ -1,29 +1,30 @@
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Perf;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
 
-public sealed class PerformancePage : UserControl
+public sealed class PerformancePage : ScrollPage
 {
-    private readonly GroupBox _compatGroup = new();
+    private readonly Card _compatGroup = new();
     private readonly CheckBox _laa = new();
     private readonly CheckBox _videoFix = new();
     private readonly CheckBox _keepResolution = new();
-    private readonly GroupBox _resolutionGroup = new();
+    private readonly Card _resolutionGroup = new();
     private readonly CheckBox _hires = new();
     private readonly Label _capacityLabel = new();
     private readonly NumericUpDown _capacity = new();
     private readonly Label _resolutionLabel = new();
-    private readonly ComboBox _resolution = new();
+    private readonly ComboBox _resolution = new UiComboBox();
     private readonly Button _autoDetectBtn = new();
     private readonly RadioButton _autoSwitch = new();
     private readonly RadioButton _suppressDisplay = new();
     private readonly Label _warning = new();
-    private readonly GroupBox _animationGroup = new();
+    private readonly Card _animationGroup = new();
     private readonly CheckBox _noObjectAnimations = new();
     private readonly CheckBox _noWaterAnimation = new();
-    private readonly GroupBox _stabilityGroup = new();
+    private readonly Card _stabilityGroup = new();
     private readonly CheckBox _stabilityProtection = new();
     private readonly Label _stabilityDescription = new();
     private readonly CheckBox _experimentalStability = new();
@@ -33,140 +34,65 @@ public sealed class PerformancePage : UserControl
 
     public PerformancePage()
     {
-        AutoScroll = true;
-        BackColor = Color.White;
-        Padding = new Padding(18);
         BuildUi();
     }
 
+    /// <summary>
+    /// 版面（ISSUE-081）：四張卡片全部由內容決定高度。寬螢幕上「相容性修補」與「降低軟體光柵化負載」
+    /// 並排，窄螢幕上自動改成上下排；說明文字依卡片寬度換行。以前的 26/30/44 百分比列高與
+    /// 150/185/245px 的最小高度全部拿掉了——那些數字是照開發機的字型高度猜的，換到字比較大的
+    /// 螢幕上，說明文字就被群組框切掉半行。
+    /// </summary>
     private void BuildUi()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 3 };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+        var top = new ColumnsPanel { Margin = Padding.Empty };
+        top.Controls.Add(_compatGroup);
+        top.Controls.Add(_animationGroup);
+        _compatGroup.Add(Ui.Option(_laa));
+        _compatGroup.Add(Ui.Option(_videoFix));
+        _compatGroup.Add(Ui.Option(_keepResolution));
+        _animationGroup.Add(Ui.Option(_noObjectAnimations));
+        _animationGroup.Add(Ui.Option(_noWaterAnimation));
+        Content.Add(top);
 
-        ConfigureGroup(_compatGroup);
-        var compat = Stack(_laa, _videoFix, _keepResolution);
-        _compatGroup.Controls.Add(compat);
-
-        ConfigureGroup(_animationGroup);
-        _animationGroup.Controls.Add(Stack(_noObjectAnimations, _noWaterAnimation));
-
-        ConfigureGroup(_stabilityGroup);
-        _stabilityGroup.MinimumSize = new Size(0, 185);
-        var stability = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(10)
-        };
-        _stabilityProtection.AutoSize = true;
-        _stabilityProtection.Font = new Font(Font, FontStyle.Bold);
+        _stabilityGroup.Add(Ui.Option(_stabilityProtection, bold: true));
         _stabilityProtection.CheckedChanged += (_, _) => RefreshEnabledState();
-        ConfigureDescription(_stabilityDescription, Color.FromArgb(71, 85, 105));
-        _experimentalStability.AutoSize = true;
-        _experimentalStability.Font = new Font(Font, FontStyle.Bold);
-        _experimentalStability.Margin = new Padding(3, 12, 3, 2);
-        ConfigureDescription(_experimentalDescription, Color.FromArgb(180, 83, 9));
-        stability.Controls.Add(_stabilityProtection, 0, 0);
-        stability.Controls.Add(_stabilityDescription, 0, 1);
-        stability.Controls.Add(_experimentalStability, 0, 2);
-        stability.Controls.Add(_experimentalDescription, 0, 3);
-        _stabilityGroup.Controls.Add(stability);
+        _stabilityGroup.Add(Ui.Description(_stabilityDescription, Ui.TextSecondary));
+        _stabilityGroup.Add(Ui.Option(_experimentalStability, bold: true)).Margin = new Padding(0, 8, 0, 2);
+        _stabilityGroup.Add(Ui.Description(_experimentalDescription, Ui.Warning));
+        Content.Add(_stabilityGroup);
 
-        ConfigureGroup(_resolutionGroup);
-        _resolutionGroup.MinimumSize = new Size(0, 245);
-        var res = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(8) };
-        res.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        res.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _hires.AutoSize = true;
+        _resolutionGroup.Add(Ui.Option(_hires));
         _hires.CheckedChanged += (_, _) => RefreshEnabledState();
-        res.Controls.Add(_hires, 0, 0);
-        res.SetColumnSpan(_hires, 2);
-        _capacityLabel.AutoSize = true;
-        _capacityLabel.Anchor = AnchorStyles.Left;
-        res.Controls.Add(_capacityLabel, 0, 1);
+
         _capacity.Minimum = 1600;
         _capacity.Maximum = CellGridPatch.MaxSurfaceWidth;
         _capacity.Increment = 160;
-        _capacity.Width = 120;
-        res.Controls.Add(_capacity, 1, 1);
-        _resolutionLabel.AutoSize = true;
-        _resolutionLabel.Anchor = AnchorStyles.Left;
-        res.Controls.Add(_resolutionLabel, 0, 2);
+        _capacity.Width = 110;
 
-        var resPanel = new FlowLayoutPanel
-        {
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0)
-        };
         _resolution.DropDownStyle = ComboBoxStyle.DropDown;
         _resolution.Items.AddRange(["1024x768", "1152x864", "1280x1024", "1600x1200", "1920x1080", "2560x1440", "3840x2160"]);
-        _resolution.Width = 180;
+        _resolution.Width = 170;
+        _resolution.Margin = new Padding(0, 0, 8, 0);
         _resolution.SelectedIndexChanged += (_, _) => OnResolutionChanged();
         _resolution.TextChanged += (_, _) => OnResolutionChanged();
-
         _autoDetectBtn.AutoSize = true;
-        _autoDetectBtn.Margin = new Padding(6, 0, 0, 0);
+        _autoDetectBtn.UseMnemonic = false;
+        _autoDetectBtn.Margin = Padding.Empty;
         _autoDetectBtn.Click += (_, _) => AutoDetectScreenResolution();
+        var resolutionCell = Ui.ButtonRow(_resolution, _autoDetectBtn);
+        resolutionCell.Margin = Padding.Empty;
 
-        resPanel.Controls.Add(_resolution);
-        resPanel.Controls.Add(_autoDetectBtn);
-        res.Controls.Add(resPanel, 1, 2);
+        var fields = Ui.FieldTable();
+        Ui.AddRow(fields, _capacityLabel, _capacity);
+        Ui.AddRow(fields, _resolutionLabel, resolutionCell);
+        fields.Margin = new Padding(0, 4, 0, 6);
+        _resolutionGroup.Add(fields);
 
-        _autoSwitch.AutoSize = true;
-        _suppressDisplay.AutoSize = true;
-        res.Controls.Add(_autoSwitch, 0, 3);
-        res.SetColumnSpan(_autoSwitch, 2);
-        res.Controls.Add(_suppressDisplay, 0, 4);
-        res.SetColumnSpan(_suppressDisplay, 2);
-        _warning.AutoSize = true;
-        _warning.MaximumSize = new Size(760, 0);
-        _warning.ForeColor = Color.FromArgb(180, 83, 9);
-        _warning.Padding = new Padding(0, 10, 0, 0);
-        res.Controls.Add(_warning, 0, 5);
-        res.SetColumnSpan(_warning, 2);
-        _resolutionGroup.Controls.Add(res);
-
-        root.Controls.Add(_compatGroup, 0, 0);
-        root.Controls.Add(_animationGroup, 1, 0);
-        root.Controls.Add(_stabilityGroup, 0, 1);
-        root.SetColumnSpan(_stabilityGroup, 2);
-        root.Controls.Add(_resolutionGroup, 0, 2);
-        root.SetColumnSpan(_resolutionGroup, 2);
-        Controls.Add(root);
-    }
-
-    private static void ConfigureDescription(Label label, Color color)
-    {
-        label.AutoSize = true;
-        label.MaximumSize = new Size(900, 0);
-        label.ForeColor = color;
-        label.Margin = new Padding(22, 0, 3, 4);
-    }
-
-    private static FlowLayoutPanel Stack(params Control[] controls)
-    {
-        var panel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown,
-            WrapContents = false, AutoScroll = true, Padding = new Padding(10)
-        };
-        foreach (Control control in controls)
-        {
-            control.AutoSize = true;
-            control.Margin = new Padding(3, 5, 3, 7);
-            panel.Controls.Add(control);
-        }
-        return panel;
-    }
-
-    private static void ConfigureGroup(GroupBox group)
-    {
-        group.Dock = DockStyle.Fill;
-        group.Padding = new Padding(10);
-        group.Margin = new Padding(6);
-        group.MinimumSize = new Size(0, 150);
+        _resolutionGroup.Add(Ui.Option(_autoSwitch));
+        _resolutionGroup.Add(Ui.Option(_suppressDisplay));
+        _resolutionGroup.Add(Ui.Text(_warning, Ui.Warning)).Margin = new Padding(0, 8, 0, 0);
+        Content.Add(_resolutionGroup);
     }
 
     public void LoadConfig(PerfConfig config)
@@ -227,11 +153,11 @@ public sealed class PerformancePage : UserControl
 
     public void ApplyLanguage()
     {
-        _compatGroup.Text = Strings.Get("Gui_Perf_Compatibility");
+        _compatGroup.Title = Strings.Get("Gui_Perf_Compatibility");
         _laa.Text = Strings.Get("Gui_Perf_Laa");
         _videoFix.Text = Strings.Get("Gui_Perf_VideoFix");
         _keepResolution.Text = Strings.Get("Gui_Perf_KeepResolution");
-        _resolutionGroup.Text = Strings.Get("Gui_Perf_ResolutionGroup");
+        _resolutionGroup.Title = Strings.Get("Gui_Perf_ResolutionGroup");
         _hires.Text = Strings.Get("Gui_Perf_Hires");
         _capacityLabel.Text = Strings.Get("Gui_Perf_Capacity");
         _resolutionLabel.Text = Strings.Get("Gui_Perf_Resolution");
@@ -239,10 +165,10 @@ public sealed class PerformancePage : UserControl
         _autoSwitch.Text = Strings.Get("Gui_Perf_AutoSwitch");
         _suppressDisplay.Text = Strings.Get("Gui_Perf_SuppressDisplay");
         _warning.Text = Strings.Get("Perf_HdCeilingNote");
-        _animationGroup.Text = Strings.Get("Gui_Perf_Animations");
+        _animationGroup.Title = Strings.Get("Gui_Perf_Animations");
         _noObjectAnimations.Text = Strings.Get("Gui_Perf_NoObjectAnimations");
         _noWaterAnimation.Text = Strings.Get("Gui_Perf_NoWaterAnimation");
-        _stabilityGroup.Text = Strings.Get("Gui_Perf_StabilityGroup");
+        _stabilityGroup.Title = Strings.Get("Gui_Perf_StabilityGroup");
         _stabilityProtection.Text = Strings.Get("Gui_Perf_StabilityProtection");
         _stabilityDescription.Text = Strings.Get("Gui_Perf_StabilityProtectionDesc");
         _experimentalStability.Text = Strings.Get("Gui_Perf_ExperimentalStability");

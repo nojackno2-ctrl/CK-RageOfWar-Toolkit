@@ -11,6 +11,25 @@
 
 整合完成後三個前身專案會被刪除，本儲存庫必須自給自足。
 
+## 交接事項：2026-10-04 GUI 重做——跨電腦版面永久修正（ISSUE-081）與設定存遊戲資料夾（ISSUE-080 擴充）
+
+> ⏳ **已修碼 · 待實測（2026-10-04）**：
+> - 使用者：「重作UI，只要換電腦介面就會亂掉，我要永久解決這個問題，所有的分頁都是」。根因三個（實驗證實）：表單的 DPI 自動縮放從未生效（缺 `AutoScaleDimensions`、設定時機錯）；高度用百分比列與寫死 `MinimumSize` 猜；`DataGridView` 欄寬列高、`TableLayoutPanel` Absolute 樣式、`ComboBox` 實際高度都不會被正確縮放。
+> - **新版面規則在 `src/CKToolkit/Gui/Layout/`**（`StackPanel`、`ScrollPage`、`Card`、`ColumnsPanel`、`UniformGrid`、`ContentTabControl`、`GridMetrics`、`UiComboBox`、`Ui`）。**改 GUI 的鐵律**：①表單建構以 `Ui.BeginForm`／`Ui.EndForm` 包住，所有尺寸寫 96 DPI 邏輯像素；②分頁繼承 `ScrollPage`，內容加到 `Content`；③不要用 `RowStyle(Percent)`、`SizeType.Absolute`、寫死高度的 `MinimumSize`、`GroupBox`、`AutoScroll` 的 TableLayoutPanel；④`DataGridView` 加完欄位呼叫 `GridMetrics.Apply`；⑤下拉選單用 `UiComboBox`，自然寬度的呼叫 `Ui.FitComboToItems`；⑥EndForm 之後才動態建立的控制項，尺寸要用 `LogicalToDeviceUnits`。
+> - **SelfTest 第 49 組 GUI 版面稽核**（`src/CKToolkit.SelfTest/LayoutAudit.cs`）：96 DPI 與本機 DPI × 字型 100～200% × 三語 × 三種視窗大小，檢查不裁切／文字完整／不重疊／表格列高。子行程以 `CKToolkit.SelfTest.exe --layout-audit <unaware|permonitor> <scale>` 執行，設環境變數 `CK_LAYOUT_AUDIT_LOG=<路徑>` 可輸出完整違規清單。
+> - 使用者另要求「設定記錄檔應放在遊戲資料夾，工具換位置才抓得到」：GUI 平常存設定時也寫遊戲資料夾（`MainForm.SaveToGameDirQuietly`），本次執行中還原過的目錄在下次套用前不寫。CLI 維持零寫入遊戲目錄。ISSUE-080 先前未登記於 ISSUES.md，已補登；第 48 組錯誤期望（`Numpad1`）已修正為 `F1`。
+> - 注意：2026-09-20 的 ISSUE-079／080 工作原本就未 commit（工作樹含 `ToolkitConfig.cs`、`PatchPipeline.cs`、`CliHost.Config.cs` 等）。本次未 commit。
+> - **驗證**：Release build 0 警告 0 錯誤；完整 SelfTest 全綠（1332 項）。仍須使用者在其他電腦／縮放比例／多螢幕實測。
+
+## 交接事項：2026-09-20 GUI 版面自適應（ISSUE-079）
+
+> ⏳ **已修碼 · 待實測（2026-09-20）**：
+> - 使用者需求「我要讓UI會自動調整」，附最大化視窗截圖：效能分頁的四個區塊擠在上緣、區塊內出現小捲軸、說明文字被裁掉半行，下方近千像素空白。
+> - **根因**：①`PerformancePage` 根面板是 `Dock = Top + AutoSize`，只取內容自然高度；②各 `GroupBox` 內容面板開了 `AutoScroll`，導致對外回報的偏好尺寸極小，外層只配得出 `MinimumSize` 的高度，內容因此被裁切；③七個分頁的說明文字都用寫死的 `MaximumSize`（760～1600px）決定換行點；④主視窗記錄區是固定 130px 的絕對列。
+> - **修復**：新增 `Gui/ResponsiveLayout.cs` 提供兩條共用規則——`WrapToContainer`（換行寬度跟著容器走，上限 1100 邏輯像素可讀行寬，橫幅可傳 `maximumWidth: 0` 填滿）與 `FillOrScroll`（根面板填滿分頁，放不下才由分頁出捲軸；停靠子控制項不會產生捲動範圍，所以用 `AutoScrollMinSize` 明講，並取已依 DPI 換算過的 `root.MinimumSize` 當來源）。`PerformancePage` 三列改 26/30/44 百分比並移除內層 `AutoScroll`；`MainForm` 分頁／記錄區改 78% / 22%。
+> - 順手修掉 `GameSettingsPage` 重設按鈕查不存在的鍵 `Gui_ResetDefaults`（按鈕上直接印鍵名），改為新增的三語 `GameSettings_ResetDefaults`。
+> - **驗證**：build 零警告；SelfTest 47 組全綠；於 200% DPI 以最大化／1900x1400／1000x800 三種尺寸實際擷取七個分頁畫面核對。仍須使用者在自己的螢幕與 DPI 下確認。
+
 ## 交接事項：2026-09-05 額外戰役／劇本對話與任務說明 100% 翻譯缺漏修復（ISSUE-078）
 
 > ⏳ **已修碼 · 待實測（2026-09-05）**：

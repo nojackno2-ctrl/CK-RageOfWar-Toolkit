@@ -82,6 +82,10 @@ internal static class Program
         Console.OutputEncoding = utf8;
         Console.InputEncoding = utf8;
 
+        // 第 49 組的子行程：DPI 模式只能在建立第一個視窗前設定，所以版面稽核要在獨立行程裡跑。
+        if (args.Length >= 3 && args[0] == LayoutAudit.ChildSwitch)
+            return LayoutAudit.RunChild(args[1], float.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture));
+
         Console.WriteLine("=== CK-RageOfWar-Toolkit 自我驗證測試 (Phase 1–4 & Phase 6) ===\n");
 
         // Phase 1 核心測試
@@ -147,6 +151,8 @@ internal static class Program
         RunGroup("45. CliOptionStrictness", TestCliOptionStrictness);
         RunGroup("46. RuntimeScriptChannel", TestRuntimeScriptChannel);
         RunGroup("47. GameRulesModifierAndHeroArmyReversal", TestGameRulesModifierAndHeroArmyReversal);
+        RunGroup("48. GameDirSettingsRoundTrip", TestGameDirSettingsRoundTrip);
+        RunGroup("49. GuiLayoutAudit", TestGuiLayoutAudit);
 
         Console.WriteLine();
         if (_failures == 0)
@@ -162,6 +168,22 @@ internal static class Program
             Console.WriteLine($"測試完成，共有 {_failures} 項失敗。");
             Console.ResetColor();
             return 1;
+        }
+    }
+
+    // --- 49. GUI 版面稽核（ISSUE-081）---------------------------------------
+    /// <summary>
+    /// 每個分頁與對話框在三語、多種視窗大小與字型放大倍率下，於 96 DPI 與本機實際 DPI
+    /// 各跑一次：不裁切、文字完整、不重疊、表格列高足夠。詳見 <see cref="LayoutAudit"/>。
+    /// </summary>
+    private static void TestGuiLayoutAudit()
+    {
+        Console.WriteLine("49. GUI 版面稽核（不裁切／文字完整／不重疊；三語 × 字型 100%～200% × 96 DPI 與本機 DPI）");
+        foreach ((string mode, int exitCode, string output) in LayoutAudit.RunChildren())
+        {
+            string summary = output.Split(Environment.NewLine.ToCharArray(), StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(l => l.StartsWith("dpi=", StringComparison.Ordinal))?.Trim() ?? output.Trim();
+            Check($"版面稽核（{mode}）零違規", exitCode == 0, summary);
+            if (exitCode != 0) Console.WriteLine(output);
         }
     }
 
@@ -5969,7 +5991,8 @@ internal static class Program
             using var panelForm = new InGamePanelForm(testTrainerConfig);
             _ = panelForm.Handle;
             string expectedCheatName = strings[TrainerStrings.CheatNameKey("gold_fill")];
-            Button? goldBtn = Descendants(panelForm).OfType<Button>().FirstOrDefault();
+            Button? goldBtn = Descendants(panelForm).OfType<Button>()
+                .FirstOrDefault(b => b.Parent is CKToolkit.Gui.Layout.StackPanel);
             bool panelMatches = goldBtn is not null && goldBtn.Text.StartsWith(expectedCheatName) && panelForm.AutoScaleMode == AutoScaleMode.Dpi && spawnUnitDialog.AutoScaleMode == AutoScaleMode.Dpi;
 
             return adaptersMatch &&
@@ -6307,10 +6330,9 @@ internal static class Program
     }
 
     /// <summary>數面板上有幾顆作弊按鈕。面板的按鈕都放在唯一那個 TableLayoutPanel 裡。</summary>
+    // 作弊按鈕直接放在面板的捲動堆疊裡（ISSUE-081）；速度列的「套用」按鈕在自己的 FlowLayoutPanel，不計入。
     private static int CountPanelCheatButtons(InGamePanelForm panel) =>
-        panel.Controls.OfType<TableLayoutPanel>()
-             .SelectMany(t => t.Controls.OfType<Button>())
-             .Count();
+        Descendants(panel).OfType<Button>().Count(b => b.Parent is CKToolkit.Gui.Layout.StackPanel);
 
     /// <summary>
     /// 從目前執行目錄往上找出儲存庫內的檔案。SelfTest 是從 bin 底下跑的，
@@ -7063,6 +7085,164 @@ internal static class Program
         try { envelope = JsonSerializer.Deserialize<JsonEnvelope>(raw); }
         catch (JsonException) { }
         return (code, envelope, raw);
+    }
+
+    /// <summary>
+    /// 48. 遊戲資料夾設定往返測試（ISSUE-080）。
+    ///
+    /// 這一組鎖住的是「使用者不必一直重新設定」這件事本身：套用之後設定留在遊戲資料夾、
+    /// 換一份工具包（設定檔不存在）時讀得回來、還原原版時不留痕跡。
+    /// </summary>
+    private static void TestGameDirSettingsRoundTrip()
+    {
+        Console.WriteLine("\n48. 遊戲資料夾設定往返、採用規則與還原清痕跡測試");
+
+        string tempGameDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cfg_" + Guid.NewGuid().ToString("N")[..8]);
+        string tempConfigDir = Path.Combine(Path.GetTempPath(), "cktoolkit_cfgl_" + Guid.NewGuid().ToString("N")[..8]);
+
+        try
+        {
+            Directory.CreateDirectory(tempGameDir);
+            Directory.CreateDirectory(tempConfigDir);
+            string localConfigPath = Path.Combine(tempConfigDir, "cktoolkit.json");
+
+            byte[] vanillaExeBytes = CreateSyntheticExe32();
+            byte[] vanillaLauncherBytes = CreateSyntheticLauncher64();
+            byte[] vanillaDataPakBytes = CreateSyntheticDataPak().ToBytes();
+            byte[] vanillaLocalPakBytes = HmmPak.CreateEmpty().ToBytes();
+            byte[] vanillaVxBytes = Encoding.GetEncoding(1252).GetBytes(CreateSyntheticVxSettings());
+
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName), vanillaExeBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), vanillaLauncherBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName), vanillaDataPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LocalPakFileName), vanillaLocalPakBytes);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.VxSettingsFileName), vanillaVxBytes);
+
+            string gameDirConfigPath = ToolkitConfig.GameDirConfigPath(tempGameDir);
+            Check("套用前遊戲資料夾沒有設定檔", !File.Exists(gameDirConfigPath));
+
+            // 一份「使用者真的調過」的設定：作弊、按鍵、參數、數值與遊戲規則都動過，
+            // 才能證明回讀的是完整設定，而不是只有幾個旗標。
+            // （合成 data.pak 只有 VXCONST.INI 與 SCDEBUG.XML，所以數值與遊戲規則這兩項
+            //   走的是直接往返，不經過需要 CLASSES\*.SC.XML 的套用管線。）
+            var config = ToolkitConfig.CreateDefault();
+            config.GameDir = tempGameDir;
+            config.Perf.Resolution = "2560x1440";
+            config.Perf.Hires = 2560;
+            config.Perf.AddRes = ["2560x1440"];
+            config.Trainer.Enabled = true;
+            config.Trainer.NumpadKeys = true;
+            config.Trainer.Cheats =
+            [
+                new CheatConfig { Id = "gold_fill", Enabled = true, Key = "F1" },
+                new CheatConfig
+                {
+                    Id = "population_boost",
+                    Enabled = true,
+                    Key = "F11",
+                    Parameters = new Dictionary<string, string>(StringComparer.Ordinal) { ["amount"] = "750" }
+                }
+            ];
+
+            var richConfig = ToolkitConfig.FromJson(config.ToJson());
+            richConfig.Trainer.Tweaks["hero_max_army"] = 40m;
+            richConfig.GameSettings.AllowVikingLordHeroArmy = true;
+            Check("直接寫入遊戲資料夾成功", richConfig.SaveToGameDir(tempGameDir, applied: true).Success);
+            var richBack = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? richError);
+            Check("含數值與遊戲規則的完整設定可原樣讀回",
+                richError is null &&
+                richBack?.Trainer.Tweaks["hero_max_army"] == 40m &&
+                richBack.GameSettings.AllowVikingLordHeroArmy);
+            File.Delete(gameDirConfigPath);
+
+            var pipeline = PatchPipeline.CreateDefault();
+            var apply = pipeline.ApplyAll(tempGameDir, config);
+            Check("ApplyAll 執行成功", apply.Success, apply.ErrorMessage);
+            Check("ApplyAll 回報寫出的設定檔路徑", apply.Value?.SettingsFile == gameDirConfigPath);
+            Check("套用後遊戲資料夾出現設定檔", File.Exists(gameDirConfigPath));
+
+            // 1. 遊戲資料夾那份帶著 appliedAt，而且不帶絕對路徑（換台電腦才不會指到不存在的目錄）
+            var fromGameDir = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? parseError);
+            Check("遊戲資料夾設定可正常解析", fromGameDir is not null && parseError is null);
+            Check("遊戲資料夾設定帶有 appliedAt", fromGameDir?.AppliedAt is not null);
+            Check("遊戲資料夾設定的 gameDir 由讀取端補上而非寫死絕對路徑",
+                fromGameDir?.GameDir == tempGameDir);
+
+            // 2. 完整往返：作弊、按鍵、參數、數值、遊戲規則、效能設定都要回得來
+            Check("回讀的作弊清單完全相同",
+                fromGameDir?.Trainer.Cheats.Count == 2 &&
+                fromGameDir.Trainer.Cheats[0].Id == "gold_fill" &&
+                // 按鍵以名稱儲存（F1），小鍵盤模式只在修補 EXE 時換算鍵碼（KeyMap），
+                // 設定檔裡不會出現「Numpad1」這種名稱。
+                fromGameDir.Trainer.Cheats[0].Key == "F1" &&
+                fromGameDir.Trainer.NumpadKeys &&
+                fromGameDir.Trainer.Cheats[1].Parameters["amount"] == "750",
+                string.Join(" | ", fromGameDir?.Trainer.Cheats.Select(c => $"{c.Id}:{c.Key}") ?? []));
+            Check("回讀的效能設定完全相同",
+                fromGameDir?.Perf.Resolution == "2560x1440" && fromGameDir.Perf.Hires == 2560);
+
+            // 3. 採用規則：全新工具包（沒有設定檔）一律採用遊戲資料夾那份
+            var freshLocal = ToolkitConfig.CreateDefault();
+            Check("沒有本機設定時採用遊戲資料夾設定", freshLocal.ShouldAdopt(fromGameDir!));
+
+            // 4. 採用規則：本機設定比較新時不得被蓋掉（使用者改了還沒套用的設定要留住）
+            var newerLocal = ToolkitConfig.CreateDefault();
+            newerLocal.Save(localConfigPath);
+            Check("本機設定比較新時不採用遊戲資料夾設定", !newerLocal.ShouldAdopt(fromGameDir!));
+
+            // 5. 壞掉的遊戲資料夾設定：回報訊息而不是丟例外，也不得靜默退回預設值
+            File.WriteAllText(gameDirConfigPath, "{ this is not json");
+            var broken = ToolkitConfig.TryLoadFromGameDir(tempGameDir, out string? brokenError);
+            Check("損壞的遊戲資料夾設定回傳 null 並帶出錯誤訊息",
+                broken is null && !string.IsNullOrWhiteSpace(brokenError));
+
+            // 6. CLI config show / pull / push
+            var pushResult = RunCli("config", "push", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config push` 成功執行", pushResult.Code == ExitCodes.Success);
+            Check("`config push` 之後遊戲資料夾設定可再次解析",
+                ToolkitConfig.TryLoadFromGameDir(tempGameDir, out _) is not null);
+            Check("`config push` 不會蓋上 appliedAt（它沒有套用任何檔案）",
+                ToolkitConfig.TryLoadFromGameDir(tempGameDir, out _)?.AppliedAt is null);
+
+            var showResult = RunCli("config", "show", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config show` 成功執行且回傳 ok", showResult.Code == ExitCodes.Success && showResult.Envelope?.Ok == true);
+
+            File.Delete(localConfigPath);
+            var pullResult = RunCli("config", "pull", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`config pull` 成功執行", pullResult.Code == ExitCodes.Success);
+            Check("`config pull` 之後本機設定檔存在", File.Exists(localConfigPath));
+
+            var badSub = RunCli("config", "bogus", "--game", tempGameDir, "--json");
+            Check("`config` 未知子指令被拒絕", badSub.Code == ExitCodes.InvalidArgs);
+            var noSub = RunCli("config", "--game", tempGameDir, "--json");
+            Check("`config` 缺少子指令時拒絕", noSub.Code == ExitCodes.InvalidArgs);
+
+            // 7. status 是唯讀的：不得因為這個功能而在遊戲資料夾生出設定檔
+            File.Delete(gameDirConfigPath);
+            var statusResult = RunCli("status", "--game", tempGameDir, "--config", localConfigPath, "--json");
+            Check("`status` 成功執行", statusResult.Code == ExitCodes.Success);
+            Check("`status` 不在遊戲資料夾建立設定檔", !File.Exists(gameDirConfigPath));
+
+            // 8. 還原原版必須把設定檔一併清掉，遊戲資料夾不留痕跡
+            var applyAgain = pipeline.ApplyAll(tempGameDir, config);
+            Check("再次套用成功且重新寫出設定檔", applyAgain.Success && File.Exists(gameDirConfigPath));
+
+            var restore = pipeline.RestoreAll(tempGameDir);
+            Check("RestoreAll 執行成功", restore.Success);
+            Check("RestoreAll 回報已移除設定檔", restore.Value?.SettingsFileRemoved == true);
+            Check("還原後遊戲資料夾不留設定檔", !File.Exists(gameDirConfigPath));
+            Check("還原後遊戲資料夾只剩五個原版檔案",
+                Directory.GetFiles(tempGameDir).Length == 5);
+            Check("還原後 Celtic kings.exe 與原版逐位元組相同",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.ExeFileName)).SequenceEqual(vanillaExeBytes));
+            Check("還原後 data.pak 與原版逐位元組相同",
+                File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.DataPakFileName)).SequenceEqual(vanillaDataPakBytes));
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempGameDir)) Directory.Delete(tempGameDir, true); } catch { }
+            try { if (Directory.Exists(tempConfigDir)) Directory.Delete(tempConfigDir, true); } catch { }
+        }
     }
 
     private static void TestGameRulesModifierAndHeroArmyReversal()

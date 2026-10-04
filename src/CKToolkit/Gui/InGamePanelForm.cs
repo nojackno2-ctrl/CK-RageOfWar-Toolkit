@@ -6,6 +6,7 @@ using CKToolkit.Core.Common;
 using CKToolkit.Core.Perf;
 using CKToolkit.Core.Runtime;
 using CKToolkit.Core.Trainer;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -50,7 +51,9 @@ public sealed class InGamePanelForm : Form
     private readonly FlowLayoutPanel _speedRow = new();
     private readonly NumericUpDown _speed = new();
     private readonly Button _speedApply = new();
-    private readonly TableLayoutPanel _buttons = new();
+    private readonly ScrollPage _page = new() { Dock = DockStyle.Fill, Padding = Padding.Empty, MinimumContentLogicalWidth = 120 };
+    private StackPanel _buttons => _page.Content;
+    private readonly ToolTip _buttonTips = new();
     private readonly List<Button> _cheatButtons = [];
     private readonly System.Windows.Forms.Timer _timer = new();
     private readonly bool _hasCursorCheats;
@@ -108,32 +111,27 @@ public sealed class InGamePanelForm : Form
 
     public InGamePanelForm(TrainerConfig config)
     {
+        // 所有尺寸都是 96 DPI 的邏輯像素，建構結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        Ui.BeginForm(this);
         // 可縮放：作弊數量差很多，固定尺寸不是太擠就是浪費畫面。
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
-        AutoScaleMode = AutoScaleMode.Dpi;
         MinimumSize = new Size(150, 120);
         TopMost = true;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         Text = Strings.Get("Gui_Panel_Title");
         BackColor = Color.FromArgb(248, 250, 252);
-        Font = new Font("Microsoft JhengHei UI", 9F);
         Padding = new Padding(8);
         Width = 260;
 
-        _status.Dock = DockStyle.Top;
         _status.AutoSize = true;
+        _status.UseMnemonic = false;
         _status.Padding = new Padding(4, 4, 4, 8);
-        _status.Font = new Font(Font, FontStyle.Bold);
+        _status.Font = Ui.UiFont(9F, FontStyle.Bold);
 
-        // 單欄 100% 寬的表格：視窗縮放時按鈕跟著伸縮，不像 FlowLayoutPanel 會被
-        // 按鈕的固定寬度卡住。列高 AutoSize，超出高度就捲動。
-        _buttons.Dock = DockStyle.Fill;
-        _buttons.ColumnCount = 1;
-        _buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        _buttons.AutoScroll = true;
-        _buttons.Padding = new Padding(0);
-        _buttons.Margin = new Padding(0);
+        // 版面（ISSUE-081）：狀態、生成位置、速度列、作弊按鈕全部放在同一個可捲動的堆疊裡。
+        // 按鈕撐滿寬度、高度跟著字型；視窗縮到再小，最多就是捲動，不會有東西被擠到視窗外。
+        _page.BackColor = BackColor;
 
         _playerExpression = Cheats.PlayerExpression(config.PlayerMode, config.FixedPlayer);
 
@@ -179,9 +177,12 @@ public sealed class InGamePanelForm : Form
             {
                 Text = label,
                 Tag = vk,
-                Dock = DockStyle.Fill,
+                // 高度跟著字型長：高 DPI 下不會被切掉一半；面板很窄時名稱以省略號收尾，
+                // 完整名稱放在提示裡（ISSUE-081）。
                 AutoSize = false,
-                Height = 30,
+                AutoEllipsis = true,
+                MinimumSize = new Size(0, 30),
+                UseMnemonic = false,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.White,
                 ForeColor = Color.FromArgb(15, 23, 42),
@@ -196,9 +197,9 @@ public sealed class InGamePanelForm : Form
             var captured = selection;
             btn.Click += async (_, _) => await TriggerCheatAsync(captured, cheatDef, vk, needsCursor);
 
-            _buttons.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            _buttonTips.SetToolTip(btn, label);
             _cheatButtons.Add(btn);
-            _buttons.Controls.Add(btn, 0, buttonCount);
+            _buttons.Add(btn);
             buttonCount++;
         }
 
@@ -211,20 +212,22 @@ public sealed class InGamePanelForm : Form
                 ForeColor = Color.FromArgb(100, 116, 139),
                 Padding = new Padding(4, 8, 4, 8)
             };
-            _buttons.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            _buttons.Controls.Add(noCheatsLabel, 0, 0);
+            _buttons.Add(noCheatsLabel);
         }
 
         int targetHeight = Math.Clamp(60 + Math.Max(1, buttonCount) * 38, 120, 600);
         Height = targetHeight;
 
-        Controls.Add(_buttons);
-        Controls.Add(_speedRow);
-        Controls.Add(_spawnPoint);
-        Controls.Add(_status);
+        _buttons.Controls.Add(_status);
+        _buttons.Controls.Add(_spawnPoint);
+        _buttons.Controls.Add(_speedRow);
+        _buttons.Controls.SetChildIndex(_status, 0);
+        _buttons.Controls.SetChildIndex(_spawnPoint, 1);
+        _buttons.Controls.SetChildIndex(_speedRow, 2);
+        Controls.Add(_page);
 
-        _spawnPoint.Dock = DockStyle.Top;
         _spawnPoint.AutoSize = true;
+        _spawnPoint.UseMnemonic = false;
         _spawnPoint.Padding = new Padding(4, 0, 4, 8);
         _spawnPoint.ForeColor = Color.FromArgb(71, 85, 105);
         _spawnPoint.Visible = _hasCursorCheats;
@@ -235,9 +238,8 @@ public sealed class InGamePanelForm : Form
         // 存進變數，而是配置一個命令物件、把速度放進 [obj+0xC]，再丟進 0x0056FE10 的
         // 命令佇列。GetSpeed 讀的 [[0x008AA6C8] + 0xC58] 只是結果。直接寫那個位址會
         // 繞過引擎的簿記，值不會真的改變節奏。所以讓引擎自己跑一次 SetSpeed。
-        _speedRow.Dock = DockStyle.Top;
         _speedRow.AutoSize = true;
-        _speedRow.WrapContents = false;
+        _speedRow.WrapContents = true;
         _speedRow.Padding = new Padding(4, 0, 4, 8);
         _speedRow.Margin = new Padding(0);
 
@@ -276,6 +278,7 @@ public sealed class InGamePanelForm : Form
         };
 
         RefreshConnection();
+        Ui.EndForm(this);
     }
 
     /// <summary>
@@ -289,6 +292,7 @@ public sealed class InGamePanelForm : Form
         {
             _timer.Stop();
             _timer.Dispose();
+            _buttonTips.Dispose();
             CancelActiveSpawn();
             ReleaseMemory();
         }

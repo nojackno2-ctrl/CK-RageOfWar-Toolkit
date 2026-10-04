@@ -1,16 +1,17 @@
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
 
-public sealed class LanguagePage : UserControl
+public sealed class LanguagePage : ScrollPage
 {
     private readonly CheckBox _enabled = new();
     private readonly Label _packLabel = new();
-    private readonly ComboBox _pack = new();
+    private readonly ComboBox _pack = new UiComboBox();
     private readonly Label _fontLabel = new();
-    private readonly ComboBox _font = new();
+    private readonly ComboBox _font = new UiComboBox();
     private readonly Label _details = new();
     private readonly Button _importBtn = new();
     private readonly Button _exportBtn = new();
@@ -26,110 +27,42 @@ public sealed class LanguagePage : UserControl
 
     public LanguagePage()
     {
-        AutoScroll = true;
-        BackColor = Color.White;
-        Padding = new Padding(24);
         BuildUi();
         ReloadPacks();
     }
 
+    /// <summary>版面（ISSUE-081）：一張卡片，欄位表＋說明文字，全部由內容決定高度。</summary>
     private void BuildUi()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 2,
-            Padding = new Padding(16),
-            BackColor = Color.FromArgb(248, 250, 252)
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-        _enabled.AutoSize = true;
-        _enabled.Font = new Font(Font, FontStyle.Bold);
+        var card = new Card();
+        card.Add(Ui.Option(_enabled, bold: true));
         _enabled.CheckedChanged += (_, _) => RefreshEnabledState();
-        panel.Controls.Add(_enabled, 0, 0);
-        panel.SetColumnSpan(_enabled, 2);
 
-        _packLabel.AutoSize = true;
-        _packLabel.Anchor = AnchorStyles.Left;
-        _packLabel.Margin = new Padding(0, 14, 12, 0);
-        panel.Controls.Add(_packLabel, 0, 1);
         _pack.DropDownStyle = ComboBoxStyle.DropDownList;
-        _pack.Width = 360;
-        _pack.Margin = new Padding(0, 10, 0, 0);
         _pack.SelectedIndexChanged += (_, _) => ShowPackDetails();
-        panel.Controls.Add(_pack, 1, 1);
-
-        _fontLabel.AutoSize = true;
-        _fontLabel.Anchor = AnchorStyles.Left;
-        _fontLabel.Margin = new Padding(0, 14, 12, 0);
-        panel.Controls.Add(_fontLabel, 0, 2);
         _font.DropDownStyle = ComboBoxStyle.DropDown;
         _font.Items.AddRange(["微軟正黑體", "Microsoft JhengHei", "Noto Sans CJK TC", "Arial Unicode MS"]);
-        _font.Width = 360;
-        _font.Margin = new Padding(0, 10, 0, 0);
-        panel.Controls.Add(_font, 1, 2);
+        var fields = Ui.FieldTable();
+        fields.Margin = new Padding(0, 8, 0, 8);
+        Ui.AddRow(fields, _packLabel, _pack);
+        Ui.AddRow(fields, _fontLabel, _font);
+        _pack.Margin = _font.Margin = new Padding(0, 3, 0, 3);
+        // 下拉選單用固定的邏輯寬度（隨 DPI 換算）並靠左，不被表格撐到整列寬。
+        _pack.Anchor = _font.Anchor = AnchorStyles.Left;
+        _pack.Width = _font.Width = 360;
+        card.Add(fields);
 
-        _details.AutoSize = true;
-        _details.MaximumSize = new Size(800, 0);
-        _details.ForeColor = Color.FromArgb(51, 65, 85);
-        _details.Margin = new Padding(0, 16, 0, 0);
-        panel.Controls.Add(_details, 0, 3);
-        panel.SetColumnSpan(_details, 2);
+        card.Add(Ui.Text(_details, Color.FromArgb(51, 65, 85))).Margin = new Padding(0, 4, 0, 10);
 
-        // 工具列按鈕區：匯入語言包 與 匯出翻譯範本
-        var actionsPanel = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false,
-            Margin = new Padding(0, 16, 0, 0)
-        };
-
-        ConfigureToolbarButton(_importBtn, Color.White, Color.FromArgb(37, 99, 235));
-        ConfigureToolbarButton(_exportBtn, Color.White, Color.FromArgb(71, 85, 105));
-
+        Ui.Button(_importBtn, Color.White, Ui.Accent, bold: true, minWidth: 120);
+        Ui.Button(_exportBtn, Color.White, Ui.TextSecondary, bold: true, minWidth: 120);
         _importBtn.Click += (_, _) => HandleImportPack();
         _exportBtn.Click += (_, _) => HandleExportTemplate();
+        card.Add(Ui.ButtonRow(_importBtn, _exportBtn));
 
-        actionsPanel.Controls.Add(_importBtn);
-        actionsPanel.Controls.Add(_exportBtn);
-        panel.Controls.Add(actionsPanel, 0, 4);
-        panel.SetColumnSpan(actionsPanel, 2);
-
-        // 擴充說明
-        _extensionHint.AutoSize = true;
-        _extensionHint.MaximumSize = new Size(800, 0);
-        _extensionHint.ForeColor = Color.FromArgb(71, 85, 105);
-        _extensionHint.Margin = new Padding(0, 16, 0, 0);
-        panel.Controls.Add(_extensionHint, 0, 5);
-        panel.SetColumnSpan(_extensionHint, 2);
-
-        // 相容性說明
-        _compatHint.AutoSize = true;
-        _compatHint.MaximumSize = new Size(800, 0);
-        _compatHint.ForeColor = Color.FromArgb(100, 116, 139);
-        _compatHint.Margin = new Padding(0, 8, 0, 0);
-        panel.Controls.Add(_compatHint, 0, 6);
-        panel.SetColumnSpan(_compatHint, 2);
-
-        Controls.Add(panel);
-    }
-
-    private static void ConfigureToolbarButton(Button btn, Color back, Color fore)
-    {
-        btn.AutoSize = true;
-        btn.MinimumSize = new Size(130, 34);
-        btn.FlatStyle = FlatStyle.Flat;
-        btn.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
-        btn.BackColor = back;
-        btn.ForeColor = fore;
-        btn.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold);
-        btn.Margin = new Padding(0, 0, 10, 0);
-        btn.Cursor = Cursors.Hand;
+        card.Add(Ui.Text(_extensionHint)).Margin = new Padding(0, 8, 0, 6);
+        card.Add(Ui.Text(_compatHint, Ui.TextMuted));
+        Content.Add(card);
     }
 
     private void ReloadPacks()
@@ -350,7 +283,7 @@ internal sealed class ExportTemplateDialog : Form
     private readonly Label _headerTitle = new();
     private readonly Label _headerDesc = new();
     private readonly Label _langLabel = new();
-    private readonly ComboBox _langCombo = new();
+    private readonly ComboBox _langCombo = new UiComboBox();
     private readonly Label _dirLabel = new();
     private readonly TextBox _dirBox = new();
     private readonly Button _browseBtn = new();
@@ -367,16 +300,17 @@ internal sealed class ExportTemplateDialog : Form
 
     private void BuildUi()
     {
-        AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(560, 330);
-        MinimumSize = new Size(500, 310);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 可縮放：英文說明比中文長，固定大小的對話框會把按鈕擠出畫面。
+        Ui.BeginForm(this);
+        ClientSize = new Size(560, 340);
+        MinimumSize = new Size(500, 320);
+        FormBorderStyle = FormBorderStyle.Sizable;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
         BackColor = Color.FromArgb(248, 250, 252);
-        Font = new Font("Microsoft JhengHei UI", 9F);
 
         var layout = new TableLayoutPanel
         {
@@ -397,7 +331,7 @@ internal sealed class ExportTemplateDialog : Form
 
         // 標題
         _headerTitle.AutoSize = true;
-        _headerTitle.Font = new Font(Font.FontFamily, 12F, FontStyle.Bold);
+        _headerTitle.Font = Ui.UiFont(12F, FontStyle.Bold);
         _headerTitle.ForeColor = Color.FromArgb(15, 23, 42);
         layout.Controls.Add(_headerTitle, 0, 0);
         layout.SetColumnSpan(_headerTitle, 3);
@@ -469,7 +403,7 @@ internal sealed class ExportTemplateDialog : Form
         _exportBtn.FlatAppearance.BorderColor = Color.FromArgb(37, 99, 235);
         _exportBtn.BackColor = Color.FromArgb(37, 99, 235);
         _exportBtn.ForeColor = Color.White;
-        _exportBtn.Font = new Font(Font, FontStyle.Bold);
+        _exportBtn.Font = Ui.UiFont(9F, FontStyle.Bold);
         _exportBtn.Margin = new Padding(0, 0, 10, 0);
         _exportBtn.Click += (_, _) => DoExport();
 
@@ -483,6 +417,8 @@ internal sealed class ExportTemplateDialog : Form
 
         AcceptButton = _exportBtn;
         CancelButton = _cancelBtn;
+        Ui.EndForm(this);
+        Load += (_, _) => Ui.FitToScreen(this);
     }
 
     private void ApplyLanguage()

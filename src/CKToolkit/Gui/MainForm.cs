@@ -1,5 +1,6 @@
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Runtime;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -16,6 +17,9 @@ public sealed class MainForm : Form
     private readonly PatchPipeline _pipeline = PatchPipeline.CreateDefault();
     private bool _busy;
     private bool _initialising = true;
+    // 這一次執行中被「還原原版」過的遊戲目錄：之後不再自動寫設定檔進去，直到下一次套用。
+    private string? _restoredGameDir;
+    private bool _gameDirSaveWarned;
 
     private readonly Label _title = new();
     private readonly Label _subtitle = new();
@@ -23,7 +27,7 @@ public sealed class MainForm : Form
     private readonly TextBox _gamePath = new();
     private readonly Button _browse = new();
     private readonly Label _pathStatus = new();
-    private readonly ComboBox _uiLanguage = new();
+    private readonly ComboBox _uiLanguage = new UiComboBox();
     private readonly TabControl _tabs = new();
     private readonly TabPage _perfTab = new();
     private readonly TabPage _langTab = new();
@@ -63,101 +67,101 @@ public sealed class MainForm : Form
         FormClosing += (_, _) => PersistCurrentUiSilently();
     }
 
+    /// <summary>
+    /// 主視窗外框（ISSUE-081）：標題列、分頁、按鈕列、記錄區由上而下堆疊，分頁吃掉剩餘高度。
+    /// 記錄區的高度以「幾行字」表示，不再是百分比或寫死的像素。
+    /// 所有尺寸都是 96 DPI 的邏輯像素，由 <see cref="Ui.EndForm"/> 一次換算到實際 DPI。
+    /// </summary>
     private void InitializeComponent()
     {
-        AutoScaleMode = AutoScaleMode.Dpi;
-        MinimumSize = new Size(900, 650);
-        Size = new Size(1100, 800);
+        Ui.BeginForm(this);
+        MinimumSize = new Size(760, 540);
+        Size = new Size(1120, 820);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Surface;
-        Font = new Font("Microsoft JhengHei UI", 9F);
 
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3,
-            BackColor = Surface, Padding = new Padding(12)
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 130F));
-        root.Controls.Add(BuildHeader(), 0, 0);
-        root.Controls.Add(BuildTabs(), 0, 1);
-        root.Controls.Add(BuildBottomArea(), 0, 2);
-        Controls.Add(root);
+        // 整個外框也是可捲動的堆疊：正常情況下分頁吃掉剩餘高度、什麼都不捲；
+        // 只有在字特別大又把視窗縮到最小時，才由外框捲動，記錄區不會被擠出視窗。
+        var frame = new ScrollPage { Dock = DockStyle.Fill, BackColor = Surface, Padding = new Padding(12), MinimumContentLogicalWidth = 600 };
+        StackPanel root = frame.Content;
+        root.Add(BuildHeader());
+        root.AddFill(BuildTabs(), 220);
+        root.Add(BuildActions());
+        root.AddLines(BuildLog(), 5);
+        Controls.Add(frame);
         AcceptButton = _apply;
+        Ui.EndForm(this);
+        Load += (_, _) => Ui.FitToScreen(this);
     }
 
     private Control BuildHeader()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 5, RowCount = 3,
-            BackColor = Color.White, Padding = new Padding(14, 10, 14, 10),
-            Margin = new Padding(0, 0, 0, 8)
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var panel = new StackPanel { BackColor = Color.White, Padding = new Padding(14, 10, 14, 10), Margin = new Padding(0, 0, 0, 8) };
 
+        // 第一列：標題（可換行）＋介面語言。
+        var titleRow = Ui.FieldTable(2);
+        titleRow.ColumnStyles[0] = new ColumnStyle(SizeType.Percent, 100F);
+        titleRow.ColumnStyles[1] = new ColumnStyle(SizeType.AutoSize);
+        titleRow.Margin = Padding.Empty;
         _title.AutoSize = true;
-        _title.Font = new Font(Font.FontFamily, 17F, FontStyle.Bold);
+        _title.UseMnemonic = false;
+        _title.Font = Ui.UiFont(16F, FontStyle.Bold);
         _title.ForeColor = Color.FromArgb(15, 23, 42);
-        panel.Controls.Add(_title, 0, 0);
-        panel.SetColumnSpan(_title, 3);
-
-        _subtitle.AutoSize = true;
-        _subtitle.ForeColor = Color.FromArgb(71, 85, 105);
-        _subtitle.Margin = new Padding(0, 2, 0, 8);
-        panel.Controls.Add(_subtitle, 0, 1);
-        panel.SetColumnSpan(_subtitle, 3);
-
+        _title.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        _title.Margin = new Padding(0, 0, 12, 0);
         _uiLanguage.DropDownStyle = ComboBoxStyle.DropDownList;
-        _uiLanguage.Width = 110;
+        _uiLanguage.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _uiLanguage.Margin = new Padding(0, 4, 0, 0);
         _uiLanguage.Items.AddRange([
             new LanguageChoice("zh-TW", "繁體中文"),
             new LanguageChoice("zh-CN", "简体中文"),
             new LanguageChoice("en", "English")
         ]);
         _uiLanguage.SelectedIndexChanged += (_, _) => ChangeUiLanguage();
-        panel.Controls.Add(_uiLanguage, 4, 0);
+        Ui.FitComboToItems(_uiLanguage);
+        titleRow.RowCount = 1;
+        titleRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        titleRow.Controls.Add(_title, 0, 0);
+        titleRow.Controls.Add(_uiLanguage, 1, 0);
+        panel.Add(titleRow);
 
-        _pathLabel.AutoSize = true;
-        _pathLabel.Anchor = AnchorStyles.Left;
-        _pathLabel.Margin = new Padding(0, 5, 10, 0);
-        panel.Controls.Add(_pathLabel, 0, 2);
+        Ui.Text(_subtitle).Margin = new Padding(0, 2, 0, 8);
+        panel.Add(_subtitle);
 
-        _gamePath.Dock = DockStyle.Fill;
-        _gamePath.Margin = new Padding(0, 2, 8, 0);
+        // 第二列：遊戲目錄。狀態文字放在輸入框下面一行，不跟輸入框搶寬度。
+        var pathRow = Ui.FieldTable(3);
+        pathRow.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, 100F);
+        pathRow.ColumnStyles[2] = new ColumnStyle(SizeType.AutoSize);
+        pathRow.Margin = Padding.Empty;
         _gamePath.TextChanged += (_, _) => RefreshPathStatus();
-        panel.Controls.Add(_gamePath, 1, 2);
-
+        _gamePath.Margin = new Padding(0, 0, 8, 0);
         _browse.AutoSize = true;
-        _browse.Margin = new Padding(0, 1, 8, 0);
+        _browse.UseMnemonic = false;
+        _browse.Margin = Padding.Empty;
         _browse.Click += (_, _) => BrowseGameDirectory();
-        panel.Controls.Add(_browse, 2, 2);
-
+        Ui.AddRow(pathRow, _pathLabel, _gamePath, _browse);
         _pathStatus.AutoSize = true;
-        _pathStatus.Anchor = AnchorStyles.Left;
-        _pathStatus.Margin = new Padding(0, 5, 0, 0);
-        panel.Controls.Add(_pathStatus, 3, 2);
-        panel.SetColumnSpan(_pathStatus, 2);
+        _pathStatus.UseMnemonic = false;
+        _pathStatus.Margin = new Padding(0, 4, 0, 0);
+        Ui.AddRow(pathRow, null, _pathStatus);
+        pathRow.SetColumnSpan(_pathStatus, 2);
+        panel.Add(pathRow);
         return panel;
     }
 
     private Control BuildTabs()
     {
-        _tabs.Dock = DockStyle.Fill;
-        _tabs.Padding = new Point(18, 7);
+        _tabs.Padding = new Point(14, 5);
+        _tabs.Margin = Padding.Empty;
         _tabs.Controls.AddRange([_perfTab, _langTab, _trainerTab, _settingsTab, _saveTab, _profilerTab, _aboutTab]);
-        _performancePage.Dock = DockStyle.Fill;
-        _languagePage.Dock = DockStyle.Fill;
-        _trainerPage.Dock = DockStyle.Fill;
-        _gameSettingsPage.Dock = DockStyle.Fill;
-        _savePage.Dock = DockStyle.Fill;
-        _profilerPage.Dock = DockStyle.Fill;
-        _aboutPage.Dock = DockStyle.Fill;
+        foreach (Control page in new Control[] { _performancePage, _languagePage, _trainerPage, _gameSettingsPage, _savePage, _profilerPage, _aboutPage })
+            page.Dock = DockStyle.Fill;
+        foreach (TabPage tab in _tabs.TabPages)
+        {
+            tab.Padding = Padding.Empty;
+            tab.BackColor = Color.White;
+            tab.UseVisualStyleBackColor = false;
+        }
         _perfTab.Controls.Add(_performancePage);
         _langTab.Controls.Add(_languagePage);
         _trainerTab.Controls.Add(_trainerPage);
@@ -176,58 +180,43 @@ public sealed class MainForm : Form
         return _tabs;
     }
 
-    private Control BuildBottomArea()
+    private Control BuildActions()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
-            Margin = new Padding(0, 12, 0, 0)
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        var actions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = false, Padding = new Padding(0, 0, 0, 8)
-        };
-        ConfigureActionButton(_apply, Accent, Color.White);
-        ConfigureActionButton(_restore, Color.White, Danger);
-        _apply.Click += async (_, _) => await ApplyAsync();
-        _restore.Click += async (_, _) => await RestoreAsync();
-        _operationStatus.AutoSize = true;
-        _operationStatus.Anchor = AnchorStyles.Left;
-        _operationStatus.Margin = new Padding(18, 10, 0, 0);
-        _operationStatus.ForeColor = Color.FromArgb(71, 85, 105);
-        actions.Controls.AddRange([_apply, _restore, _operationStatus]);
-        panel.Controls.Add(actions, 0, 0);
-
         // 這裡以前還有一排診斷按鈕（帶診斷啟動 / 掛載 / 常駐監看）。它們被整合進分析器
         // 分頁的「怎麼開始」卡片了：三者的差別從來只有「遊戲是誰開的」，那是一個選項，
         // 不是三顆按鈕；而且舊的那條路只做 ckperf.dll 注入，不會啟動取樣器與偵錯器，
         // 使用者按了卻以為分析器在記錄，實際上少掉半份證據。
-        _log.Dock = DockStyle.Fill;
+        Ui.Button(_apply, Accent, Color.White, bold: true, minWidth: 120);
+        Ui.Button(_restore, Color.White, Danger, bold: true, minWidth: 120);
+        _apply.Click += async (_, _) => await ApplyAsync();
+        _restore.Click += async (_, _) => await RestoreAsync();
+        _operationStatus.AutoSize = true;
+        _operationStatus.UseMnemonic = false;
+        _operationStatus.Margin = new Padding(10, 8, 0, 0);
+        _operationStatus.ForeColor = Color.FromArgb(71, 85, 105);
+        // 狀態訊息可能很長（錯誤訊息），給它上限寬度讓它換行，而不是把按鈕列撐寬。
+        var row = Ui.ButtonRow(_apply, _restore, _operationStatus);
+        row.Margin = new Padding(0, 10, 0, 4);
+        row.Layout += (_, _) =>
+        {
+            int max = Math.Max(row.Font.Height * 6, row.ClientSize.Width - _apply.Width - _restore.Width - row.LogicalToDeviceUnits(40));
+            if (_operationStatus.MaximumSize.Width != max) _operationStatus.MaximumSize = new Size(max, 0);
+        };
+        return row;
+    }
+
+    private Control BuildLog()
+    {
         _log.Multiline = true;
         _log.ReadOnly = true;
         _log.ScrollBars = ScrollBars.Vertical;
         _log.BackColor = Color.FromArgb(15, 23, 42);
         _log.ForeColor = Color.FromArgb(226, 232, 240);
-        _log.Font = new Font("Cascadia Mono", 8.5F);
+        _log.Font = Ui.MonoFont(8.5F);
         _log.BorderStyle = BorderStyle.None;
         _log.WordWrap = false;
-        panel.Controls.Add(_log, 0, 1);
-        return panel;
-    }
-
-    private static void ConfigureActionButton(Button button, Color back, Color fore)
-    {
-        button.AutoSize = true;
-        button.MinimumSize = new Size(120, 38);
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderColor = fore == Color.White ? back : Color.FromArgb(203, 213, 225);
-        button.BackColor = back;
-        button.ForeColor = fore;
-        button.Font = new Font(button.Font, FontStyle.Bold);
-        button.Margin = new Padding(0, 0, 8, 0);
+        _log.Margin = Padding.Empty;
+        return _log;
     }
 
     private void LoadConfigurationIntoControls()
@@ -253,7 +242,44 @@ public sealed class MainForm : Form
             AppendLog(Strings.Get("Gui_Log_AutoDetected", detected));
         }
         RefreshPathStatus();
+        AdoptGameDirConfig(_gamePath.Text.Trim());
         AppendLog(Strings.Get("Gui_Log_Ready"));
+    }
+
+    /// <summary>
+    /// 讀回遊戲資料夾裡那份「上次套用的設定」（ISSUE-080）。
+    ///
+    /// 只有在它比手上這份新的時候才改用它——手上這份沒有時間戳（重新下載工具包、
+    /// 或設定檔還是舊版格式）也算。這樣「使用者改了但還沒套用」的設定不會被
+    /// 遊戲資料夾裡較舊的那份蓋掉，而換一份工具包、換一台電腦時設定會自己回來。
+    /// </summary>
+    private void AdoptGameDirConfig(string gameDir, bool force = false)
+    {
+        if (_busy || !GamePaths.IsGameDir(gameDir)) return;
+
+        ToolkitConfig? fromGameDir = ToolkitConfig.TryLoadFromGameDir(gameDir, out string? error);
+        if (error is not null) AppendLog(error);
+        if (fromGameDir is null || !(force || _config.ShouldAdopt(fromGameDir))) return;
+
+        // 介面語言是這台電腦的偏好，不屬於某一份遊戲安裝，不跟著搬。
+        fromGameDir.UiLanguage = _config.UiLanguage;
+        fromGameDir.GameDir = gameDir;
+        _config = fromGameDir;
+
+        bool wasInitialising = _initialising;
+        _initialising = true;
+        try
+        {
+            LoadConfigurationIntoControls();
+        }
+        finally
+        {
+            _initialising = wasInitialising;
+        }
+
+        foreach (string migration in _config.MigrationsApplied) AppendLog(migration);
+        AppendLog(Strings.Get("Gui_Log_ConfigLoadedFromGameDir",
+            ToolkitConfig.GameDirConfigPath(gameDir)));
     }
 
     private void ApplyLanguage()
@@ -302,7 +328,12 @@ public sealed class MainForm : Form
         };
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
+            string previous = _config.GameDir ?? string.Empty;
             _gamePath.Text = dialog.SelectedPath;
+            // 換到另一份遊戲安裝時，那一份安裝自己的設定才是權威，不比時間直接採用
+            // （ISSUE-080）。指回原本那一份時就照常比時間。
+            bool switched = !string.Equals(previous, _gamePath.Text.Trim(), StringComparison.OrdinalIgnoreCase);
+            AdoptGameDirConfig(_gamePath.Text.Trim(), force: switched);
             PersistCurrentUiSilently();
         }
     }
@@ -367,6 +398,14 @@ public sealed class MainForm : Form
             string files = result.Value is null || result.Value.FilesWritten.Count == 0
                 ? Strings.Get("Gui_NoFilesChanged") : string.Join(", ", result.Value.FilesWritten);
             AppendLog(Strings.Get("Gui_Log_ApplyComplete", files));
+            if (result.Value?.SettingsFile is string settingsFile)
+            {
+                // 套用時 ApplyAll 把設定寫進了遊戲資料夾，順手把工具包旁邊那份也更新，
+                // 兩份的時間戳才會一致，下次啟動不會誤判誰比較新（ISSUE-080）。
+                AppendLog(Strings.Get("Cli_Config_GameDirPath", settingsFile));
+                try { _config.Save(); } catch { /* 套用已經成功，存設定失敗只是可惜 */ }
+            }
+            _restoredGameDir = null;
             ShowOperationSuccess(Strings.Get("Apply_Success"));
             return true;
         }
@@ -458,6 +497,7 @@ public sealed class MainForm : Form
             string files = result.Value is null || result.Value.RestoredFiles.Count == 0
                 ? Strings.Get("Gui_NoFilesChanged") : string.Join(", ", result.Value.RestoredFiles);
             AppendLog(Strings.Get("Gui_Log_RestoreComplete", files));
+            _restoredGameDir = gameDir;
             ShowOperationSuccess(Strings.Get("Restore_Success"));
         }
         catch (Exception ex) { ShowOperationError(Strings.Get("Error_GeneralFailure", ex.Message)); }
@@ -567,11 +607,35 @@ public sealed class MainForm : Form
         try
         {
             _config = SnapshotConfiguration();
+            SaveToGameDirQuietly(_config.GameDir ?? string.Empty);
             _config.Save();
         }
         catch (Exception ex)
         {
             AppendLog(Strings.Get("Gui_Log_Error", Strings.Get("Error_GeneralFailure", ex.Message)));
+        }
+    }
+
+    /// <summary>
+    /// 平常改的設定也存一份到遊戲資料夾（使用者需求，2026-10-04）。
+    ///
+    /// 以前只有「一鍵套用」成功時才寫遊戲資料夾那份（ISSUE-080），改了還沒套用就把工具包
+    /// 搬到別的資料夾，那些修改就跟著舊位置的 cktoolkit.json 一起留在原地。現在遊戲資料夾
+    /// 那份永遠是最新的設定，工具包放到哪裡、重新下載幾次，打開都會讀回來。
+    ///
+    /// 例外是「還原原版」之後：還原的承諾是遊戲資料夾不留任何本工具的檔案，
+    /// 所以直到下一次套用或換了遊戲目錄之前都不再寫入。
+    /// 寫不進去（唯讀、權限）只在記錄區提示一次，不打擾使用者。
+    /// </summary>
+    private void SaveToGameDirQuietly(string gameDir)
+    {
+        if (!GamePaths.IsGameDir(gameDir)) return;
+        if (string.Equals(_restoredGameDir, gameDir, StringComparison.OrdinalIgnoreCase)) return;
+        Result saved = _config.SaveToGameDir(gameDir, applied: false);
+        if (!saved.Success && !_gameDirSaveWarned)
+        {
+            _gameDirSaveWarned = true;
+            AppendLog(Strings.Get("Gui_Log_Warning", saved.ErrorMessage ?? string.Empty));
         }
     }
 

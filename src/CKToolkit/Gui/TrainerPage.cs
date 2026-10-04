@@ -2,22 +2,23 @@ using System.Globalization;
 using System.Linq;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Trainer;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
 
-public sealed class TrainerPage : UserControl
+public sealed class TrainerPage : ScrollPage
 {
     private readonly CheckBox _enabled = new();
     private readonly Label _modeLabel = new();
-    private readonly ComboBox _mode = new();
+    private readonly ComboBox _mode = new UiComboBox();
     private readonly CheckBox _numpad = new();
     private readonly CheckBox _keepVanilla = new();
     private readonly Label _playerModeLabel = new();
-    private readonly ComboBox _playerMode = new();
+    private readonly ComboBox _playerMode = new UiComboBox();
     private readonly Label _fixedPlayerLabel = new();
     private readonly NumericUpDown _fixedPlayer = new();
-    private readonly TabControl _subTabs = new();
+    private readonly ContentTabControl _subTabs = new();
     private readonly TabPage _cheatsTab = new();
     private readonly TabPage _tweaksTab = new();
     private readonly KeyCaptureGrid _cheats = new();
@@ -60,117 +61,112 @@ public sealed class TrainerPage : UserControl
 
     public TrainerPage()
     {
-        BackColor = Color.White;
         Padding = new Padding(12);
         BuildUi();
         PopulateDefinitions();
     }
 
+    /// <summary>
+    /// 版面（ISSUE-081）：設定列、風險橫幅、說明、子分頁、啟動列由上而下。
+    /// 子分頁吃掉剩餘高度，但至少是它最高那一頁內容需要的高度（<see cref="ContentTabControl"/>
+    /// 量出來的，不是猜的）；視窗再矮就由分頁捲動，表格不會被壓扁到看不見。
+    /// </summary>
     private void BuildUi()
     {
-        // root 填滿整個分頁：只有分頁表格那一列吃掉剩餘高度，其餘列 AutoSize。
-        // 這樣視窗放大時表格會跟著長高，不會在下方留一大塊空白。
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
         var settings = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill, AutoSize = true, WrapContents = true,
-            Padding = new Padding(6), BackColor = Color.FromArgb(248, 250, 252)
+            AutoSize = true, WrapContents = true, Margin = new Padding(0, 0, 0, 8),
+            Padding = new Padding(8, 6, 8, 6), BackColor = Color.FromArgb(248, 250, 252)
         };
-        _enabled.AutoSize = true;
-        _enabled.Font = new Font(Font, FontStyle.Bold);
+        Ui.Option(_enabled, bold: true).Margin = new Padding(0, 6, 16, 6);
         _enabled.CheckedChanged += (_, _) => { RefreshEnabledState(); UpdateRiskBanner(); };
 
-        _modeLabel.AutoSize = true;
-        _modeLabel.Margin = new Padding(12, 8, 4, 0);
+        ConfigureInlineLabel(_modeLabel);
         _mode.DropDownStyle = ComboBoxStyle.DropDownList;
-        _mode.Width = 200;
+        _mode.Margin = new Padding(0, 3, 16, 3);
         _mode.Items.AddRange(["both", "patch", "panel"]);
         _mode.SelectedIndexChanged += (_, _) => { RefreshEnabledState(); UpdateRiskBanner(); };
 
-        _numpad.AutoSize = true;
+        Ui.Option(_numpad).Margin = new Padding(0, 6, 16, 6);
         _numpad.CheckedChanged += (_, _) => NumpadModeChanged();
-        _keepVanilla.AutoSize = true;
-        _playerModeLabel.AutoSize = true;
-        _playerModeLabel.Margin = new Padding(18, 8, 4, 0);
+        Ui.Option(_keepVanilla).Margin = new Padding(0, 6, 16, 6);
+        ConfigureInlineLabel(_playerModeLabel);
         _playerMode.DropDownStyle = ComboBoxStyle.DropDownList;
-        _playerMode.Width = 140;
+        _playerMode.Margin = new Padding(0, 3, 16, 3);
         _playerMode.Items.AddRange(["auto", "fixed"]);
         _playerMode.SelectedIndexChanged += (_, _) => RefreshEnabledState();
-        _fixedPlayerLabel.AutoSize = true;
-        _fixedPlayerLabel.Margin = new Padding(12, 8, 4, 0);
+        Ui.FitComboToItems(_mode);
+        Ui.FitComboToItems(_playerMode);
+        ConfigureInlineLabel(_fixedPlayerLabel);
         _fixedPlayer.Minimum = 1;
         _fixedPlayer.Maximum = 16;
         _fixedPlayer.Width = 64;
-        settings.Controls.AddRange([_enabled, _modeLabel, _mode, _numpad, _keepVanilla, _playerModeLabel, _playerMode, _fixedPlayerLabel, _fixedPlayer]);
-        root.Controls.Add(settings, 0, 0);
+        _fixedPlayer.Margin = new Padding(0, 3, 0, 3);
+        // 標籤與它的輸入框包成一組，換行時不會被拆開。
+        settings.Controls.AddRange([_enabled, Pair(_modeLabel, _mode), _numpad, _keepVanilla,
+            Pair(_playerModeLabel, _playerMode), Pair(_fixedPlayerLabel, _fixedPlayer)]);
+        Content.Add(settings);
 
-        _riskBanner.AutoSize = true;
-        _riskBanner.Dock = DockStyle.Fill;
-        _riskBanner.MaximumSize = new Size(1050, 0);
-        _riskBanner.Font = new Font(Font, FontStyle.Bold);
-        _riskBanner.Padding = new Padding(12, 9, 12, 9);
-        _riskBanner.Margin = new Padding(6, 6, 6, 4);
-        root.Controls.Add(_riskBanner, 0, 1);
+        // 橫幅有底色，跟著列寬填滿；顏色由 UpdateRiskBanner 依風險等級設定。
+        Ui.Banner(_riskBanner, Color.FromArgb(255, 247, 237), Color.FromArgb(180, 83, 9), bold: true);
+        Content.Add(_riskBanner);
+
+        Content.Add(Ui.Text(_hint)).Margin = new Padding(2, 0, 0, 8);
+
+        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
+        _subTabs.Margin = new Padding(0, 0, 0, 8);
+        BuildCheatsTab();
+        BuildTweaksTab();
+        Content.AddGrow(_subTabs);
 
         // 「啟動遊戲」放在作弊／數值設定的下方：先完成調整，再一鍵套用現在的設定並
         // 帶診斷層啟動，操作順序由上而下。
-        var launchRow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill, AutoSize = true, WrapContents = false,
-            Padding = new Padding(6, 6, 6, 2)
-        };
-        _launchGame.AutoSize = true;
-        _launchGame.MinimumSize = new Size(140, 34);
-        _launchGame.FlatStyle = FlatStyle.Flat;
-        _launchGame.BackColor = Color.FromArgb(37, 99, 235);
-        _launchGame.ForeColor = Color.White;
-        _launchGame.FlatAppearance.BorderColor = Color.FromArgb(37, 99, 235);
-        _launchGame.Font = new Font(Font, FontStyle.Bold);
-        _launchGame.Margin = new Padding(0, 0, 12, 0);
+        Ui.Button(_launchGame, Color.FromArgb(37, 99, 235), Color.White, bold: true, minWidth: 140);
         _launchGame.Click += (_, _) => LaunchGameRequested?.Invoke();
-
-        _openPanel.AutoSize = true;
-        _openPanel.MinimumSize = new Size(140, 34);
-        _openPanel.FlatStyle = FlatStyle.Flat;
-        _openPanel.BackColor = Color.FromArgb(241, 245, 249);
-        _openPanel.ForeColor = Color.FromArgb(30, 41, 59);
-        _openPanel.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
-        _openPanel.Margin = new Padding(0, 0, 12, 0);
+        Ui.Button(_openPanel, Color.FromArgb(241, 245, 249), Color.FromArgb(30, 41, 59), minWidth: 140);
         _openPanel.Click += (_, _) => OpenPanelRequested?.Invoke();
-
         _launchHint.AutoSize = true;
-        _launchHint.Anchor = AnchorStyles.Left;
+        _launchHint.UseMnemonic = false;
+        // 提示文字在按鈕旁換行，寬度上限以邏輯像素給定（隨 DPI 換算），不會把整列撐寬。
+        _launchHint.MaximumSize = new Size(440, 0);
         _launchHint.ForeColor = Color.FromArgb(100, 116, 139);
-        _launchHint.Margin = new Padding(0, 10, 0, 0);
-        launchRow.Controls.AddRange([_launchGame, _openPanel, _launchHint]);
+        _launchHint.Margin = new Padding(4, 8, 0, 0);
+        var launchRow = Ui.ButtonRow(_launchGame, _openPanel, _launchHint);
+        Content.Add(launchRow);
+    }
 
-        _hint.AutoSize = true;
-        _hint.MaximumSize = new Size(1000, 0);
-        _hint.ForeColor = Color.FromArgb(71, 85, 105);
-        _hint.Padding = new Padding(8, 6, 8, 8);
-        root.Controls.Add(_hint, 0, 2);
+    private static void ConfigureInlineLabel(Label label)
+    {
+        label.AutoSize = true;
+        label.UseMnemonic = false;
+        label.Margin = new Padding(0, 7, 6, 0);
+    }
 
-        _subTabs.Dock = DockStyle.Fill;
-        _subTabs.MinimumSize = new Size(0, 240);
-        _subTabs.Controls.AddRange([_cheatsTab, _tweaksTab]);
-        BuildCheatsTab();
-        BuildTweaksTab();
-        root.Controls.Add(_subTabs, 0, 3);
-        root.Controls.Add(launchRow, 0, 4);
-        Controls.Add(root);
+    /// <summary>標籤＋輸入框一組，在自動換行的設定列裡保持同一行。</summary>
+    private static FlowLayoutPanel Pair(Label label, Control input)
+    {
+        var pair = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
+            Margin = Padding.Empty, Padding = Padding.Empty, BackColor = Color.Transparent
+        };
+        pair.Controls.AddRange([label, input]);
+        return pair;
+    }
+
+    private static StackPanel TabRoot(TabPage tab)
+    {
+        tab.Padding = Padding.Empty;
+        tab.BackColor = Color.White;
+        tab.UseVisualStyleBackColor = false;
+        var root = new StackPanel { Dock = DockStyle.Fill, AutoSize = false, Padding = new Padding(6) };
+        tab.Controls.Add(root);
+        return root;
     }
 
     private void BuildCheatsTab()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var panel = TabRoot(_cheatsTab);
         ConfigureGrid(_cheats);
         _cheats.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", Width = 72 });
         _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = 230 });
@@ -180,104 +176,62 @@ public sealed class TrainerPage : UserControl
             Name = "ClearKey", Text = "×", UseColumnTextForButtonValue = true,
             Width = 36, MinimumWidth = 36, FlatStyle = FlatStyle.Popup,
         });
-        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Parameters", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, ReadOnly = true });
+        _cheats.Columns.Add(new DataGridViewTextBoxColumn { Name = "Parameters", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, ReadOnly = true, MinimumWidth = 120 });
         _cheats.Columns.Add(new DataGridViewButtonColumn
         {
             Name = "ConfigParams", Width = 85, MinimumWidth = 85, FlatStyle = FlatStyle.Popup,
         });
+        GridMetrics.Apply(_cheats);
         _cheats.CellToolTipTextNeeded += CheatsCellToolTipTextNeeded;
         _cheats.CellClick += CheatsCellClick;
         _cheats.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
         _cheats.KeyCaptured += OnKeyCaptured;
         _cheats.Leave += (_, _) => CancelCapture();
 
-        var btnRow = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            WrapContents = true,
-            Margin = new Padding(0),
-            Padding = new Padding(2, 6, 2, 2)
-        };
-        _enableAllCheats.AutoSize = true;
-        _enableAllCheats.Margin = new Padding(2, 2, 6, 2);
+        foreach (Button button in new[] { _enableAllCheats, _disableAllCheats, _clearAllKeys, _resetCheats })
+            Ui.Button(button, Color.White, Color.FromArgb(51, 65, 85));
         _enableAllCheats.Click += (_, _) => EnableAllCheats();
-
-        _disableAllCheats.AutoSize = true;
-        _disableAllCheats.Margin = new Padding(2, 2, 6, 2);
         _disableAllCheats.Click += (_, _) => DisableAllCheats();
-
-        _clearAllKeys.AutoSize = true;
-        _clearAllKeys.Margin = new Padding(2, 2, 6, 2);
         _clearAllKeys.Click += (_, _) => ClearAllKeys();
-
-        _resetCheats.AutoSize = true;
-        _resetCheats.Margin = new Padding(2, 2, 6, 2);
         _resetCheats.Click += (_, _) => ResetCheatsToDefaults();
 
-        btnRow.Controls.AddRange([_enableAllCheats, _disableAllCheats, _clearAllKeys, _resetCheats]);
-
-        panel.Controls.Add(_cheats, 0, 0);
-        panel.Controls.Add(btnRow, 0, 1);
-        _cheatsTab.Controls.Add(panel);
+        panel.AddFill(_cheats, 220);
+        panel.Add(Ui.ButtonRow(_enableAllCheats, _disableAllCheats, _clearAllKeys, _resetCheats)).Margin = new Padding(0, 8, 0, 0);
     }
 
     private void BuildTweaksTab()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 6,
-            Padding = new Padding(4)
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 30F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 70F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var panel = TabRoot(_tweaksTab);
 
         // 多人失效提示：本頁只要有值被路由到 .cktw，多人連線就會退回原版數值。
         // 樣式沿用分流子分頁的藍色資訊框，但不加粗，以免蓋過上面的橘色風險警告。
-        _tweaksScopeNotice.AutoSize = true;
-        _tweaksScopeNotice.Dock = DockStyle.Fill;
-        _tweaksScopeNotice.MaximumSize = new Size(1600, 0);
-        _tweaksScopeNotice.Padding = new Padding(10, 8, 10, 8);
-        _tweaksScopeNotice.Margin = new Padding(2, 2, 2, 6);
-        _tweaksScopeNotice.BackColor = Color.FromArgb(239, 246, 255);
-        _tweaksScopeNotice.ForeColor = Color.FromArgb(30, 64, 175);
-        panel.Controls.Add(_tweaksScopeNotice, 0, 0);
+        Ui.Banner(_tweaksScopeNotice, Color.FromArgb(239, 246, 255), Color.FromArgb(30, 64, 175));
+        _tweaksScopeNotice.Margin = new Padding(0, 0, 0, 6);
+        panel.Add(_tweaksScopeNotice);
 
         ConfigureSectionLabel(_tweaksGlobalLabel);
-        panel.Controls.Add(_tweaksGlobalLabel, 0, 1);
+        panel.Add(_tweaksGlobalLabel);
 
         ConfigureGrid(_tweaks);
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Group", ReadOnly = true, Width = 120 });
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Name", ReadOnly = true, Width = 260 });
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Value", Width = 130 });
         _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Default", ReadOnly = true, Width = 100 });
-        _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Range", ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+        _tweaks.Columns.Add(new DataGridViewTextBoxColumn { Name = "Range", ReadOnly = true, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill, MinimumWidth = 100 });
+        GridMetrics.Apply(_tweaks);
         _tweaks.CellToolTipTextNeeded += TweaksCellToolTipTextNeeded;
         _tweaks.CellValueChanged += (_, _) => { if (!_loading) UpdateRiskBanner(); };
         _tweaks.CellEndEdit += (_, _) => UpdateRiskBanner();
-        panel.Controls.Add(_tweaks, 0, 2);
+        panel.AddFill(_tweaks, 150, weight: 3);
 
-        _resetTweaks.AutoSize = true;
-        _resetTweaks.Margin = new Padding(2, 7, 2, 2);
+        Ui.Button(_resetTweaks, Color.White, Color.FromArgb(51, 65, 85));
+        _resetTweaks.Margin = new Padding(0, 6, 0, 6);
         _resetTweaks.Click += (_, _) => ResetAllTweaks();
-        panel.Controls.Add(_resetTweaks, 0, 3);
+        panel.AddNatural(_resetTweaks);
 
-        // 兩個分流表格改為左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
-        var split = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            Margin = new Padding(0)
-        };
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
-        split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 56F));
+        // 兩個分流表格左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
+        // 寬度不夠時自動改成上下排（ColumnsPanel），兩張表都保有可用的寬度（ISSUE-081）。
+        var split = new ColumnsPanel { MinimumColumnLogicalWidth = 420 };
 
         ConfigureGrid(_scopedSimple);
         AddScopedIdentityColumns(_scopedSimple, nameWidth: 200);
@@ -285,6 +239,7 @@ public sealed class TrainerPage : UserControl
         AddScopedValueColumn(_scopedSimple, "Enemy", 104);
         AddScopedTailColumns(_scopedSimple);
         ConfigureScopedGrid(_scopedSimple);
+        GridMetrics.Apply(_scopedSimple);
 
         ConfigureGrid(_scopedSettlement);
         AddScopedIdentityColumns(_scopedSettlement, nameWidth: 170);
@@ -294,42 +249,33 @@ public sealed class TrainerPage : UserControl
         AddScopedValueColumn(_scopedSettlement, "EnemyVillage", 96);
         AddScopedTailColumns(_scopedSettlement);
         ConfigureScopedGrid(_scopedSettlement);
+        GridMetrics.Apply(_scopedSettlement);
 
-        split.Controls.Add(BuildScopedColumn(_scopedSimpleLabel, _scopedSimple), 0, 0);
-        split.Controls.Add(BuildScopedColumn(_scopedSettlementLabel, _scopedSettlement), 1, 0);
-        panel.Controls.Add(split, 0, 4);
+        split.Add(BuildScopedColumn(_scopedSimpleLabel, _scopedSimple), weight: 44);
+        split.Add(BuildScopedColumn(_scopedSettlementLabel, _scopedSettlement), weight: 56);
+        panel.AddFill(split, 200, weight: 7);
 
-        _resetScopedTweaks.AutoSize = true;
-        _resetScopedTweaks.Margin = new Padding(2, 7, 2, 2);
+        Ui.Button(_resetScopedTweaks, Color.White, Color.FromArgb(51, 65, 85));
+        _resetScopedTweaks.Margin = new Padding(0, 6, 0, 0);
         _resetScopedTweaks.Click += (_, _) => ResetAllScopedTweaks();
-        panel.Controls.Add(_resetScopedTweaks, 0, 5);
-
-        _tweaksTab.Controls.Add(panel);
+        panel.AddNatural(_resetScopedTweaks);
     }
 
     /// <summary>一個分流欄：上方區段標題、下方填滿的表格。</summary>
     private static Control BuildScopedColumn(Label label, DataGridView grid)
     {
-        var column = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(2, 0, 2, 0)
-        };
-        column.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        column.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        var column = new StackPanel { Margin = Padding.Empty, BackColor = Color.White };
         ConfigureSectionLabel(label);
-        column.Controls.Add(label, 0, 0);
-        column.Controls.Add(grid, 0, 1);
+        column.Add(label);
+        column.AddFill(grid, 160);
         return column;
     }
 
     private static void ConfigureSectionLabel(Label label)
     {
         label.AutoSize = true;
-        label.Dock = DockStyle.Fill;
-        label.Font = new Font(label.Font, FontStyle.Bold);
+        label.UseMnemonic = false;
+        label.Font = Ui.UiFont(9f, FontStyle.Bold);
         label.ForeColor = Color.FromArgb(51, 65, 85);
         label.Padding = new Padding(2, 3, 2, 3);
         label.Margin = new Padding(2, 2, 2, 3);
@@ -410,9 +356,8 @@ public sealed class TrainerPage : UserControl
         grid.EnableHeadersVisualStyles = false;
         grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(241, 245, 249);
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(51, 65, 85);
-        grid.ColumnHeadersDefaultCellStyle.Font = new Font(grid.Font, FontStyle.Bold);
-        grid.ColumnHeadersHeight = 34;
-        grid.RowTemplate.Height = 30;
+        grid.ColumnHeadersDefaultCellStyle.Font = Ui.UiFont(9f, FontStyle.Bold);
+        // 欄寬與列高由 GridMetrics 依 DPI 與字型換算（ISSUE-081），這裡不再寫死像素。
         grid.GridColor = Color.FromArgb(226, 232, 240);
         grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
         grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(15, 23, 42);
@@ -796,6 +741,7 @@ public sealed class TrainerPage : UserControl
         _mode.Items.Add(Strings.Get("Gui_Trainer_ModePatch"));
         _mode.Items.Add(Strings.Get("Gui_Trainer_ModePanel"));
         _mode.SelectedIndex = selected;
+        Ui.FitComboToItems(_mode);
     }
 
     private void RefreshPlayerModeItems()
@@ -805,6 +751,7 @@ public sealed class TrainerPage : UserControl
         _playerMode.Items.Add(Strings.Get("Gui_Trainer_PlayerAuto"));
         _playerMode.Items.Add(Strings.Get("Gui_Trainer_PlayerFixed"));
         _playerMode.SelectedIndex = selected;
+        Ui.FitComboToItems(_playerMode);
     }
 
     private void RefreshEnabledState()

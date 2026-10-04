@@ -1,5 +1,6 @@
 using System.Globalization;
 using CKToolkit.Core.Trainer;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -20,9 +21,9 @@ public sealed class CheatParamsDialog : Form
     private readonly List<CheckBox> _itemCheckBoxes = [];
     private readonly HashSet<string> _selectedUnits = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _selectedItems = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, (TableLayoutPanel Panel, List<CheckBox> AllBoxes)> _unitCategoryGrids = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (TableLayoutPanel Panel, List<CheckBox> AllBoxes)> _itemCategoryGrids = new(StringComparer.Ordinal);
-    private TableLayoutPanel? _itemsGrid;
+    private readonly Dictionary<string, (UniformGrid Panel, List<CheckBox> AllBoxes)> _unitCategoryGrids = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (UniformGrid Panel, List<CheckBox> AllBoxes)> _itemCategoryGrids = new(StringComparer.Ordinal);
+    private UniformGrid? _itemsGrid;
     private Label? _unitCountLabel;
     private Label? _itemCountLabel;
     private TextBox? _searchBox;
@@ -51,123 +52,80 @@ public sealed class CheatParamsDialog : Form
     {
         string cheatTitle = TrainerStrings.GetCheatName(_cheat.Id, _cheat.Name);
         Text = Strings.Get("Gui_Trainer_DialogTitle", cheatTitle);
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 改成可縮放：英文或高 DPI 下內容比預期長時，使用者可以自己拉大，
+        // 中間區塊放不下也會出捲軸，而不是被固定大小的對話框切掉。
+        Ui.BeginForm(this);
         StartPosition = FormStartPosition.CenterParent;
-        AutoScaleMode = AutoScaleMode.Dpi;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        FormBorderStyle = FormBorderStyle.Sizable;
         MaximizeBox = false;
         MinimizeBox = false;
         ShowInTaskbar = false;
-        Font = new Font("Microsoft JhengHei UI", 9F);
         BackColor = Color.White;
 
         bool isSpawnUnit = _cheat.Id == Cheats.SpawnUnitId;
         bool isSpawnItem = _cheat.Id == Cheats.SpawnItemId;
         Size = (isSpawnUnit || isSpawnItem) ? new Size(820, 720) : new Size(560, 380);
-        MinimumSize = Size;
+        MinimumSize = (isSpawnUnit || isSpawnItem) ? new Size(640, 520) : new Size(460, 320);
 
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            Padding = new Padding(16),
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        // 版面（ISSUE-081）：標題與說明在上、按鈕列在下，兩者高度由內容決定；
+        // 中間的參數區吃掉剩餘高度，放不下就自己捲動，按鈕永遠看得到。
+        // 外框本身也是可捲動的堆疊：對話框被縮到比內容最小需求還小時改成整體捲動，按鈕列不會被擠出去。
+        var frame = new ScrollPage { Dock = DockStyle.Fill, Padding = new Padding(16), MinimumContentLogicalWidth = 360 };
+        StackPanel root = frame.Content;
 
-        // 頂部：名稱與說明
-        var header = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 3,
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 10),
-        };
-        header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        header.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        header.RowStyles.Add(new RowStyle(SizeType.Absolute, 10F));
+        var titleLabel = Ui.Text(new Label { Text = cheatTitle }, Color.FromArgb(30, 41, 59), 9F, FontStyle.Bold);
+        titleLabel.Margin = new Padding(0, 0, 0, 4);
+        root.Add(titleLabel);
+        var descLabel = Ui.Text(new Label { Text = TrainerStrings.GetCheatDescription(_cheat.Id, _cheat.Description) });
+        root.Add(descLabel);
+        var divider = new Panel { BackColor = Color.FromArgb(226, 232, 240), Margin = new Padding(0, 4, 0, 10) };
+        root.AddFixed(divider, 1);
 
-        var titleLabel = new Label
-        {
-            Text = cheatTitle,
-            Font = new Font(Font, FontStyle.Bold),
-            ForeColor = Color.FromArgb(30, 41, 59),
-            AutoSize = true,
-            Margin = new Padding(0, 0, 0, 4),
-        };
-        var descLabel = new Label
-        {
-            Text = TrainerStrings.GetCheatDescription(_cheat.Id, _cheat.Description),
-            ForeColor = Color.FromArgb(71, 85, 105),
-            AutoSize = true,
-            MaximumSize = new Size((isSpawnUnit || isSpawnItem) ? 770 : 510, 0),
-            Margin = new Padding(0, 0, 0, 6),
-        };
-        var divider = new Panel
-        {
-            Dock = DockStyle.Bottom,
-            Height = 1,
-            BackColor = Color.FromArgb(226, 232, 240),
-        };
-
-        header.Controls.Add(titleLabel, 0, 0);
-        header.Controls.Add(descLabel, 0, 1);
-        header.Controls.Add(divider, 0, 2);
-        root.Controls.Add(header, 0, 0);
-
-        // 中間內容
         if (isSpawnUnit)
-            root.Controls.Add(BuildSpawnUnitContent(), 0, 1);
+            root.AddGrow(ToStack((TableLayoutPanel)BuildSpawnUnitContent(), 220));
         else if (isSpawnItem)
-            root.Controls.Add(BuildSpawnItemContent(), 0, 1);
+            root.AddGrow(ToStack((TableLayoutPanel)BuildSpawnItemContent(), 220));
         else
-            root.Controls.Add(BuildGenericContent(), 0, 1);
+        {
+            var scroll = new ScrollPage { Padding = Padding.Empty, MinimumContentLogicalWidth = 300 };
+            scroll.Content.Add(BuildGenericContent());
+            root.AddFill(scroll, 100);
+        }
 
-        // 底部按鈕
-        root.Controls.Add(BuildBottomButtons(), 0, 2);
+        root.Add(BuildBottomButtons());
 
-        Controls.Add(root);
+        Controls.Add(frame);
+        Ui.EndForm(this);
+        Load += (_, _) => Ui.FitToScreen(this);
     }
 
     private Control BuildGenericContent()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            AutoScroll = true,
-            Padding = new Padding(4),
-        };
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
-        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        // 由上而下的表單：參數名稱、輸入、範圍說明各佔一行（ISSUE-081）。以前是三欄的
+        // TableLayoutPanel，量出來的高度與實際排版對不上，字一大最後一個參數就被切掉。
+        var panel = new StackPanel { Padding = new Padding(4), BackColor = Color.White };
 
-        int row = 0;
         foreach (var param in _cheat.Parameters.Where(p => !p.Hidden))
         {
-            panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
             var lbl = new Label
             {
                 Text = TrainerStrings.GetCheatParamLabel(_cheat.Id, param),
                 AutoSize = true,
                 Anchor = AnchorStyles.Left,
-                Font = new Font(Font, FontStyle.Bold),
-                Margin = new Padding(4, 8, 12, 8),
+                Font = Ui.UiFont(9F, FontStyle.Bold),
+                Margin = new Padding(0, 8, 0, 4),
             };
 
-            panel.Controls.Add(lbl, 0, row);
+            panel.Add(lbl);
 
             if (param.HasOptions)
             {
                 var choices = new FlowLayoutPanel
                 {
-                    Dock = DockStyle.Fill,
                     AutoSize = true,
                     WrapContents = true,
-                    Margin = new Padding(4, 4, 4, 6),
+                    Margin = new Padding(0, 0, 0, 6),
                 };
                 string configured = _parameters.TryGetValue(param.Name, out string? optionValue)
                     ? optionValue
@@ -206,8 +164,7 @@ public sealed class CheatParamsDialog : Form
 
                 _genericOptionControls[param.Name] = optionControls;
                 _inputControls[param.Name] = choices;
-                panel.Controls.Add(choices, 1, row);
-                panel.SetColumnSpan(choices, 2);
+                panel.Add(choices);
             }
             else
             {
@@ -216,8 +173,7 @@ public sealed class CheatParamsDialog : Form
                     Minimum = param.Minimum,
                     Maximum = param.Maximum,
                     ThousandsSeparator = true,
-                    Anchor = AnchorStyles.Left | AnchorStyles.Right,
-                    Margin = new Padding(4, 6, 12, 6),
+                    Margin = new Padding(0, 0, 0, 4),
                 };
 
                 if (_parameters.TryGetValue(param.Name, out string? valStr) &&
@@ -240,14 +196,16 @@ public sealed class CheatParamsDialog : Form
                         param.Maximum.ToString("N0", CultureInfo.CurrentCulture)),
                     ForeColor = Color.FromArgb(100, 116, 139),
                     AutoSize = true,
-                    Anchor = AnchorStyles.Left,
-                    Margin = new Padding(4, 8, 4, 8),
+                    UseMnemonic = false,
                 };
 
-                panel.Controls.Add(num, 1, row);
-                panel.Controls.Add(hint, 2, row);
+                // 輸入框與範圍提示上下排：並排時提示文字只分到剩下的那一點寬度，
+                // 在字大或英文時會被擠成一像素寬（ISSUE-081）。
+                num.Width = 180;
+                hint.Margin = new Padding(0, 0, 0, 10);
+                panel.AddNatural(num);
+                panel.Add(hint);
             }
-            row++;
         }
 
         return panel;
@@ -278,6 +236,8 @@ public sealed class CheatParamsDialog : Form
             ColumnCount = 1,
             RowCount = 3,
         };
+        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-081）。
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -287,7 +247,7 @@ public sealed class CheatParamsDialog : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
-            WrapContents = false,
+            WrapContents = true,
             Margin = new Padding(0, 0, 0, 8),
         };
 
@@ -300,7 +260,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = isZh ? $"{countLabelText}：" : $"{countLabelText}:",
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
         };
         var countRange = RangeOf("count", 5);
@@ -328,7 +288,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = isZh ? $"{levelLabelText}：" : $"{levelLabelText}:",
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
         };
         var levelRange = RangeOf("level", 1);
@@ -351,7 +311,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = Strings.Get("Gui_Trainer_UnitCount", 0, Cheats.MaxUnitListLength),
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             ForeColor = Color.FromArgb(37, 99, 235),
             Margin = new Padding(4, 4, 16, 4),
         };
@@ -360,7 +320,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = Strings.Get("Gui_Trainer_ItemCount", 0, Cheats.MaxItemListLength),
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             ForeColor = Color.FromArgb(16, 185, 129),
             Margin = new Padding(4, 4, 0, 4),
         };
@@ -458,7 +418,7 @@ public sealed class CheatParamsDialog : Form
             _unitCategoryGrids[key] = (grid, boxList);
             PopulateGrid(grid, boxList, 3);
 
-            tab.Controls.Add(grid);
+            tab.Controls.Add(Scrollable(grid));
             tabs.Controls.Add(tab);
         }
 
@@ -485,7 +445,7 @@ public sealed class CheatParamsDialog : Form
         }
 
         PopulateGrid(_itemsGrid, _itemCheckBoxes, 2);
-        itemsTab.Controls.Add(_itemsGrid);
+        itemsTab.Controls.Add(Scrollable(_itemsGrid));
         tabs.Controls.Add(itemsTab);
 
         panel.Controls.Add(tabs, 0, 2);
@@ -504,6 +464,8 @@ public sealed class CheatParamsDialog : Form
             ColumnCount = 1,
             RowCount = 3,
         };
+        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-081）。
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
@@ -513,7 +475,7 @@ public sealed class CheatParamsDialog : Form
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
-            WrapContents = false,
+            WrapContents = true,
             Margin = new Padding(0, 0, 0, 8),
         };
 
@@ -526,7 +488,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = isZh ? $"{countLabelText}：" : $"{countLabelText}:",
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             Margin = new Padding(0, 4, 4, 4),
         };
         var countNum = new NumericUpDown
@@ -548,7 +510,7 @@ public sealed class CheatParamsDialog : Form
         {
             Text = Strings.Get("Gui_Trainer_SwitchableItemCount", 0, Cheats.MaxSwitchableItemListLength),
             AutoSize = true,
-            Font = new Font(Font, FontStyle.Bold),
+            Font = Ui.UiFont(9F, FontStyle.Bold),
             ForeColor = Color.FromArgb(37, 99, 235),
             Margin = new Padding(4, 4, 0, 4),
         };
@@ -635,7 +597,7 @@ public sealed class CheatParamsDialog : Form
             _itemCategoryGrids[key] = (grid, boxList);
             PopulateGrid(grid, boxList, 2);
 
-            tab.Controls.Add(grid);
+            tab.Controls.Add(Scrollable(grid));
             tabs.Controls.Add(tab);
         }
 
@@ -645,45 +607,54 @@ public sealed class CheatParamsDialog : Form
         return panel;
     }
 
-    private static TableLayoutPanel CreateGrid(int columns = 3)
+    /// <summary>
+    /// 勾選清單：等寬多欄，列高依字型量出來（ISSUE-081）。以前是 TableLayoutPanel 加固定 30px 列高，
+    /// 字一大勾選框的字就被切掉；而且它自己開 AutoScroll，捲動範圍在高 DPI 下算不準。
+    /// </summary>
+    private static UniformGrid CreateGrid(int columns = 3) => new()
     {
-        var table = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoScroll = true,
-            ColumnCount = columns,
-            Padding = new Padding(6),
-            BackColor = Color.FromArgb(248, 250, 252)
-        };
-        EnableDoubleBuffering(table);
-        float percent = 100F / columns;
-        for (int i = 0; i < columns; i++)
-            table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, percent));
-        return table;
+        Columns = columns,
+        Padding = new Padding(6),
+        BackColor = Color.FromArgb(248, 250, 252)
+    };
+
+    /// <summary>勾選清單放進可捲動的分頁容器。</summary>
+    private static ScrollPage Scrollable(UniformGrid grid)
+    {
+        var page = new ScrollPage { Dock = DockStyle.Fill, Padding = Padding.Empty, BackColor = grid.BackColor, MinimumContentLogicalWidth = 300 };
+        page.Content.Add(grid);
+        return page;
     }
 
-    private static void EnableDoubleBuffering(Control control)
+    private static void PopulateGrid(UniformGrid grid, IEnumerable<CheckBox> checkBoxes, int columns = 3)
     {
-        typeof(Control).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-            ?.SetValue(control, true);
+        grid.SuspendLayout();
+        grid.Columns = columns;
+        grid.Controls.Clear();
+        grid.Controls.AddRange(checkBoxes.ToArray<Control>());
+        grid.ResumeLayout();
     }
 
-    private static void PopulateGrid(TableLayoutPanel table, IEnumerable<CheckBox> checkBoxes, int columns = 3)
+    /// <summary>
+    /// 把「上面幾列自然高度、最後一列吃剩餘高度」的 TableLayoutPanel 轉成 <see cref="StackPanel"/>：
+    /// 百分比列在字變大時會被擠到 1 像素，堆疊則保證它至少有最小高度（ISSUE-081）。
+    /// </summary>
+    private static StackPanel ToStack(TableLayoutPanel table, int fillMinimumLogicalHeight)
     {
-        table.SuspendLayout();
-        table.Controls.Clear();
-        table.RowStyles.Clear();
-        int index = 0;
-        foreach (var cb in checkBoxes)
+        var stack = new StackPanel { Margin = Padding.Empty, BackColor = Color.White };
+        var cells = table.Controls.Cast<Control>()
+            .OrderBy(c => table.GetRow(c)).ThenBy(c => table.GetColumn(c)).ToList();
+        foreach (Control cell in cells)
         {
-            int col = index % columns;
-            int row = index / columns;
-            if (col == 0)
-                table.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F));
-            table.Controls.Add(cb, col, row);
-            index++;
+            int row = table.GetRow(cell);
+            bool fill = row < table.RowStyles.Count && table.RowStyles[row].SizeType == SizeType.Percent;
+            table.Controls.Remove(cell);
+            cell.Dock = DockStyle.None;
+            if (fill) stack.AddFill(cell, fillMinimumLogicalHeight);
+            else stack.Add(cell);
         }
-        table.ResumeLayout();
+        table.Dispose();
+        return stack;
     }
 
     private static string OptionLabelWithValue(string label, string value) =>

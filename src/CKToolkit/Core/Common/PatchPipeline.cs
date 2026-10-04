@@ -54,6 +54,13 @@ public sealed class ApplyReport
 
     [JsonPropertyName("files")]
     public Dictionary<string, FileApplyResult> Files { get; set; } = new();
+
+    /// <summary>
+    /// 套用成功後寫進遊戲資料夾的設定檔路徑；null 表示寫不進去（原因會出現在警告裡）。
+    /// 見 <see cref="ToolkitConfig.GameDirConfigPath"/>（ISSUE-080）。
+    /// </summary>
+    [JsonPropertyName("settingsFile")]
+    public string? SettingsFile { get; set; }
 }
 
 /// <summary>
@@ -84,6 +91,10 @@ public sealed class RestoreReport
 
     [JsonPropertyName("files")]
     public Dictionary<string, FileRestoreResult> Files { get; set; } = new();
+
+    /// <summary>還原時是否一併移除了遊戲資料夾裡的設定檔（ISSUE-080）。</summary>
+    [JsonPropertyName("settingsFileRemoved")]
+    public bool SettingsFileRemoved { get; set; }
 
     [JsonIgnore]
     public int Count => RestoredFiles.Count;
@@ -452,6 +463,13 @@ public sealed class PatchPipeline
             report.FilesWritten.Add(fileName);
         }
 
+        // 遊戲檔案都寫完了，最後把「這個遊戲安裝目前是照這份設定改的」留在遊戲資料夾
+        // （ISSUE-080）。寫不進去只是警告：檔案已經改好了，設定存不起來不該讓使用者
+        // 以為套用失敗而再按一次。
+        Result settingsSaved = config.SaveToGameDir(gameDir, applied: true);
+        if (settingsSaved.Success) report.SettingsFile = ToolkitConfig.GameDirConfigPath(gameDir);
+        else warnings.Add(settingsSaved.ErrorMessage!);
+
         return Result<ApplyReport>.Ok(report, warnings);
     }
 
@@ -718,6 +736,11 @@ public sealed class PatchPipeline
             report.Files[fileName].Restored = true;
             report.RestoredFiles.Add(fileName);
         }
+
+        // 還原原版之後不在遊戲資料夾留下任何痕跡（AGENTS.md §2.1）：遊戲資料夾裡那份
+        // 設定描述的是「已套用的狀態」，現在什麼都沒套用了，留著只會騙人（ISSUE-080）。
+        // 使用者的設定並沒有消失——工具旁邊那份還在。
+        report.SettingsFileRemoved = ToolkitConfig.DeleteFromGameDir(gameDir);
 
         return Result<RestoreReport>.Ok(report);
     }

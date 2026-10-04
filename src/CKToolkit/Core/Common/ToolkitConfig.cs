@@ -215,6 +215,25 @@ public sealed class ToolkitConfig
     [JsonPropertyName("gameSettings")]
     public GameSettingsConfig GameSettings { get; set; } = new();
 
+    /// <summary>
+    /// 這份設定最後一次被寫出的時間（UTC）。用來在「工具旁邊的設定」與
+    /// 「遊戲資料夾裡的設定」之間判斷誰比較新（ISSUE-080）。
+    /// 舊版設定檔沒有這個欄位，讀起來是 null，一律視為比有時間戳的那份舊。
+    /// </summary>
+    [JsonPropertyName("savedAt")]
+    public DateTimeOffset? SavedAt { get; set; }
+
+    /// <summary>
+    /// 這份設定最後一次真的被套用到遊戲檔案的時間（UTC）。
+    /// 只有遊戲資料夾裡那份會帶著它——它代表「這個遊戲安裝目前是照這份設定改的」。
+    /// </summary>
+    [JsonPropertyName("appliedAt")]
+    public DateTimeOffset? AppliedAt { get; set; }
+
+    /// <summary>寫出這份設定的工具包版本，僅供診斷。</summary>
+    [JsonPropertyName("toolkitVersion")]
+    public string? ToolkitVersion { get; set; }
+
     [JsonIgnore]
     public List<string> MigrationsApplied { get; set; } = [];
 
@@ -225,8 +244,26 @@ public sealed class ToolkitConfig
     [JsonIgnore]
     public string? LoadError { get; set; }
 
+    /// <summary>設定檔名稱。工具旁邊與遊戲資料夾裡用的是同一個名字與同一套結構。</summary>
+    public const string ConfigFileName = "cktoolkit.json";
+
     public static string DefaultConfigPath =>
-        Path.Combine(AppContext.BaseDirectory, "cktoolkit.json");
+        Path.Combine(AppContext.BaseDirectory, ConfigFileName);
+
+    /// <summary>
+    /// 遊戲資料夾裡那份設定的路徑（ISSUE-080）。
+    ///
+    /// 它是「這個遊戲安裝目前套用了什麼」的權威來源：套用成功時寫入、還原原版時刪除。
+    /// 換一台電腦、重新下載工具包、或把工具包放到別的資料夾，設定都還在遊戲旁邊，
+    /// 不必從頭再設一次。
+    ///
+    /// 這是本工具唯一會在遊戲資料夾建立的檔案（見 AGENTS.md §2.1）。它不是任何遊戲
+    /// 檔案的副本，也不參與可逆性保證——遊戲檔案的反轉一律靠正規化，與這個檔案無關。
+    /// </summary>
+    public static string GameDirConfigPath(string gameDir) => Path.Combine(gameDir, ConfigFileName);
+
+    private static string CurrentToolkitVersion =>
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
 
     public static ToolkitConfig CreateDefault() => new();
 
@@ -371,7 +408,98 @@ public sealed class ToolkitConfig
     public void Save(string? path = null)
     {
         string target = path ?? DefaultConfigPath;
+        SavedAt = DateTimeOffset.UtcNow;
+        ToolkitVersion = CurrentToolkitVersion;
         File.WriteAllText(target, ToJson());
+    }
+
+    /// <summary>
+    /// 把目前設定寫進遊戲資料夾（ISSUE-080）。<paramref name="applied"/> 為 true 表示
+    /// 這份設定剛剛真的被套用到遊戲檔案，會一併蓋上 <see cref="AppliedAt"/>。
+    ///
+    /// 失敗（唯讀目錄、權限不足、磁碟滿）一律以 Result 回報，絕不拋出：
+    /// 遊戲檔案那邊已經寫完了，設定存不存得起來不該把整個套用判定成失敗。
+    /// </summary>
+    public Result SaveToGameDir(string gameDir, bool applied)
+    {
+        if (!GamePaths.IsGameDir(gameDir))
+            return Result.Fail(Strings.Get("Error_GameNotFound"), ExitCodes.GameNotFound);
+
+        try
+        {
+            var snapshot = FromJson(ToJson());
+            // 絕對路徑對「換一台電腦」或「遊戲搬家」毫無意義，而且會蓋掉正確的偵測結果。
+            // 讀回來的時候本來就知道自己是從哪個資料夾讀的。
+            snapshot.GameDir = null;
+            snapshot.SavedAt = DateTimeOffset.UtcNow;
+            snapshot.AppliedAt = applied ? snapshot.SavedAt : AppliedAt;
+            snapshot.ToolkitVersion = CurrentToolkitVersion;
+            File.WriteAllText(GameDirConfigPath(gameDir), snapshot.ToJson());
+
+            SavedAt = snapshot.SavedAt;
+            AppliedAt = snapshot.AppliedAt;
+            return Result.Ok();
+        }
+        catch (Exception ex)
+        {
+            return Result.Fail(Strings.Get("Warning_GameDirConfigWriteFailed", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// 讀取遊戲資料夾裡的設定。沒有這個檔案時回傳 null 且不視為錯誤；
+    /// 有檔案但解析不了時回傳 null 並把訊息放進 <paramref name="error"/>——
+    /// 與 <see cref="Load"/> 同一條紀律：絕不靜默退回預設值。
+    /// </summary>
+    public static ToolkitConfig? TryLoadFromGameDir(string gameDir, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(gameDir)) return null;
+
+        string path;
+        try { path = GameDirConfigPath(gameDir); }
+        catch { return null; }
+
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            var config = FromJson(File.ReadAllText(path));
+            config.GameDir = gameDir;
+            return config;
+        }
+        catch (Exception ex)
+        {
+            error = Strings.Get("Warning_GameDirConfigParseFailed", path, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 遊戲資料夾那份是否比手上這份新，也就是「該不該改用它」。
+    /// 手上這份沒有時間戳（舊版設定檔，或根本沒有設定檔）時一律採用遊戲資料夾那份：
+    /// 那正是「重新下載工具包之後設定不見了」的情境，也是這個功能的主要目的。
+    /// </summary>
+    public bool ShouldAdopt(ToolkitConfig fromGameDir) =>
+        fromGameDir.SavedAt is { } theirs && (SavedAt is not { } mine || theirs > mine);
+
+    /// <summary>
+    /// 移除遊戲資料夾裡的設定檔。「還原原版」必須呼叫它：本工具還原之後不在遊戲
+    /// 資料夾留下任何痕跡（AGENTS.md §2.1）。回傳是否真的刪掉了東西。
+    /// </summary>
+    public static bool DeleteFromGameDir(string gameDir)
+    {
+        try
+        {
+            string path = GameDirConfigPath(gameDir);
+            if (!File.Exists(path)) return false;
+            File.Delete(path);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static ToolkitConfig Load(string? path = null)

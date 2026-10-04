@@ -1,5 +1,6 @@
 using CKToolkit.Core.Saves;
 using CKToolkit.Core.Trainer;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
@@ -14,15 +15,15 @@ public sealed class PlayerStatisticsDialog : Form
     private readonly NumericUpDown _multiGames = NewNumber(PlayerStatistics.MaxGameRecords);
     private readonly NumericUpDown _multiWins = NewNumber(PlayerStatistics.MaxGameRecords);
     private readonly NumericUpDown _hours = NewNumber(MaxHours);
-    private readonly ComboBox _favoriteNation = new();
+    private readonly ComboBox _favoriteNation = new UiComboBox();
     private readonly NumericUpDown _favoritePercent = NewNumber(100);
-    private readonly ComboBox _favoriteUnit = new();
+    private readonly ComboBox _favoriteUnit = new UiComboBox();
     private readonly NumericUpDown _gold = NewNumber(MaxAggregate);
     private readonly NumericUpDown _food = NewNumber(MaxAggregate);
     private readonly NumericUpDown _unitsKilled = NewNumber(MaxAggregate);
     private readonly NumericUpDown _unitsLost = NewNumber(MaxAggregate);
     private readonly NumericUpDown _health = NewNumber(MaxAggregate);
-    private readonly ComboBox _experiencedUnit = new();
+    private readonly ComboBox _experiencedUnit = new UiComboBox();
     private readonly NumericUpDown _maxLevel = NewNumber(PlayerStatistics.MaxUnitLevel);
     private readonly NumericUpDown _maxUnits = NewNumber(int.MaxValue);
     private readonly Label _derivedHint = new();
@@ -34,12 +35,12 @@ public sealed class PlayerStatisticsDialog : Form
 
     public PlayerStatisticsDialog(PlayerStatisticsSummary current)
     {
-        AutoScaleMode = AutoScaleMode.Dpi;
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        Ui.BeginForm(this);
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(760, 650);
+        MinimumSize = new Size(600, 440);
         Size = new Size(860, 760);
         BackColor = Color.White;
-        Font = new Font("Microsoft JhengHei UI", 9F);
 
         _favoriteNation.DropDownStyle = ComboBoxStyle.DropDownList;
         _favoriteNation.Items.AddRange([
@@ -52,74 +53,51 @@ public sealed class PlayerStatisticsDialog : Form
         ConfigureUnitCombo(_experiencedUnit);
         BuildUi();
         LoadCurrent(current);
+        Ui.EndForm(this);
+        Load += (_, _) => Ui.FitToScreen(this);
     }
 
+    /// <summary>
+    /// 版面（ISSUE-081）：說明、兩張欄位卡片（寬時並排、窄時上下排）、單位卡片、警告放在可捲動區，
+    /// 底部按鈕列固定。對話框再小也只會出捲軸，不會切掉欄位或按鈕。
+    /// </summary>
     private void BuildUi()
     {
         Text = Strings.Get("Gui_Save_Stats_Title");
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(16),
-            BackColor = Color.White
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var scroll = new ScrollPage { Padding = new Padding(16, 16, 16, 8), MinimumSize = Size.Empty };
 
-        _derivedHint.AutoSize = true;
-        _derivedHint.MaximumSize = new Size(800, 0);
-        _derivedHint.ForeColor = Color.FromArgb(71, 85, 105);
         _derivedHint.Text = Strings.Get("Gui_Save_Stats_DerivedHint");
-        _derivedHint.Margin = new Padding(0, 0, 0, 12);
-        root.Controls.Add(_derivedHint, 0, 0);
+        scroll.Content.Add(Ui.Text(_derivedHint)).Margin = new Padding(0, 0, 0, 12);
 
-        var content = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoScroll = true,
-            ColumnCount = 2,
-            RowCount = 2
-        };
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var columns = new ColumnsPanel { MinimumColumnLogicalWidth = 300 };
+        columns.Add(BuildResultsGroup());
+        columns.Add(BuildTotalsGroup());
+        scroll.Content.Add(columns);
+        scroll.Content.Add(BuildUnitsGroup());
 
-        content.Controls.Add(BuildResultsGroup(), 0, 0);
-        content.Controls.Add(BuildTotalsGroup(), 1, 0);
-        Control units = BuildUnitsGroup();
-        content.Controls.Add(units, 0, 1);
-        content.SetColumnSpan(units, 2);
-        root.Controls.Add(content, 0, 1);
-
-        _warning.AutoSize = true;
-        _warning.MaximumSize = new Size(800, 0);
-        _warning.ForeColor = Color.FromArgb(180, 83, 9);
         _warning.Text = Strings.Get("Gui_Save_Stats_RewriteWarning");
-        _warning.Margin = new Padding(0, 10, 0, 10);
-        root.Controls.Add(_warning, 0, 2);
+        scroll.Content.Add(Ui.Text(_warning, Ui.Warning)).Margin = new Padding(0, 4, 0, 4);
 
-        var actions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = false
-        };
         ConfigureButton(_save, Color.FromArgb(37, 99, 235), Color.White);
         ConfigureButton(_cancel, Color.White, Color.FromArgb(71, 85, 105));
         _save.Text = Strings.Get("Gui_Save_Stats_Save");
         _cancel.Text = Strings.Get("Gui_Save_Stats_Cancel");
         _save.Click += (_, _) => Accept();
         _cancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
+        var actions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = true,
+            Margin = Padding.Empty,
+            Padding = new Padding(16, 8, 16, 12)
+        };
         actions.Controls.AddRange([_save, _cancel]);
-        root.Controls.Add(actions, 0, 3);
 
-        Controls.Add(root);
+        var frame = new ScrollPage { Dock = DockStyle.Fill, Padding = Padding.Empty, MinimumContentLogicalWidth = 360 };
+        frame.Content.AddFill(scroll, 160);
+        frame.Content.Add(actions);
+        Controls.Add(frame);
         AcceptButton = _save;
         CancelButton = _cancel;
     }
@@ -250,38 +228,16 @@ public sealed class PlayerStatisticsDialog : Form
         control.Value = Math.Min(control.Maximum, Math.Max(control.Minimum, decimalValue));
     }
 
-    private static GroupBox NewGroup(string title) => new()
-    {
-        Text = title,
-        Dock = DockStyle.Top,
-        AutoSize = true,
-        Padding = new Padding(12),
-        Margin = new Padding(4)
-    };
+    private static Card NewGroup(string title) => new() { Title = title };
 
-    private static TableLayoutPanel NewFieldGrid()
-    {
-        var grid = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2 };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58F));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42F));
-        return grid;
-    }
+    private static TableLayoutPanel NewFieldGrid() => Ui.FieldTable();
 
     private static void AddField(TableLayoutPanel grid, string labelText, Control control)
     {
-        int row = grid.RowCount++;
-        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var label = new Label
-        {
-            Text = labelText,
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            Margin = new Padding(0, 7, 10, 5)
-        };
-        control.Dock = DockStyle.Fill;
         control.Margin = new Padding(0, 3, 0, 3);
-        grid.Controls.Add(label, 0, row);
-        grid.Controls.Add(control, 1, row);
+        Ui.AddRow(grid, new Label { Text = labelText, Margin = new Padding(0, 6, 12, 4) }, control);
+        control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        control.Dock = DockStyle.None;
     }
 
     private static void ConfigureUnitCombo(ComboBox combo)
@@ -309,7 +265,7 @@ public sealed class PlayerStatisticsDialog : Form
         button.FlatAppearance.BorderColor = fore == Color.White ? back : Color.FromArgb(203, 213, 225);
         button.BackColor = back;
         button.ForeColor = fore;
-        button.Font = new Font(button.Font, FontStyle.Bold);
+        button.Font = Ui.UiFont(9F, FontStyle.Bold);
         button.Margin = new Padding(8, 0, 0, 0);
     }
 

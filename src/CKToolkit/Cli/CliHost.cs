@@ -261,6 +261,9 @@ public static partial class CliHost
                     return HandleGameSettingsSet(commands.Skip(2).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
                 return OutputError("settings", Strings.Get("Error_InvalidArgs", $"未知的 settings 子指令 '{commands[1]}'"), ExitCodes.InvalidArgs, isJson, stdout, stderr);
 
+            case "config":
+                return HandleConfig(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
+
             case "save":
                 return HandleSave(commands.Skip(1).ToList(), gameDirOverride, configPathOverride, isJson, stdout, stderr);
 
@@ -298,6 +301,7 @@ public static partial class CliHost
             ("perf", "get") => 2,
             ("lang", "list" or "uninstall") => 2,
             ("trainer", "list-cheats" or "list-tweaks" or "apply") => 2,
+            ("config", "show" or "pull" or "push") => 2,
             _ => 0,
         };
     }

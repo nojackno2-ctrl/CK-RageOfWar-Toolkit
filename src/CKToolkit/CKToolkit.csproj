@@ -22,7 +22,6 @@
 
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
-    <ApplicationDefaultFont>Microsoft JhengHei UI, 9pt</ApplicationDefaultFont>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,24 +1,25 @@
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Saves;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
 
-public sealed class SavePage : UserControl
+public sealed class SavePage : ScrollPage
 {
     private static readonly Color Accent = Color.FromArgb(37, 99, 235);
     private static readonly Color Danger = Color.FromArgb(220, 38, 38);
 
     private readonly Label _hint = new();
-    private readonly GroupBox _playerGroup = new();
+    private readonly Card _playerGroup = new();
     private readonly Label _profileLabel = new();
-    private readonly ComboBox _profile = new();
+    private readonly ComboBox _profile = new UiComboBox();
     private readonly Label _playerNameLabel = new();
     private readonly TextBox _playerName = new();
     private readonly Label _colorLabel = new();
-    private readonly ComboBox _color = new();
+    private readonly ComboBox _color = new UiComboBox();
     private readonly Label _raceLabel = new();
-    private readonly ComboBox _race = new();
+    private readonly ComboBox _race = new UiComboBox();
     private readonly Label _games = new();
     private readonly Button _savePlayer = new();
     private readonly DataGridView _grid = new();
@@ -31,7 +32,7 @@ public sealed class SavePage : UserControl
     private readonly Button _import = new();
     private readonly Button _delete = new();
     private readonly Button _editStats = new();
-    private readonly GroupBox _previewGroup = new();
+    private readonly Card _previewGroup = new();
     private readonly PictureBox _preview = new();
     private readonly Label _details = new();
     private readonly Label _status = new();
@@ -49,126 +50,71 @@ public sealed class SavePage : UserControl
 
     public SavePage()
     {
-        BackColor = Color.White;
-        Padding = new Padding(18);
         BuildUi();
     }
 
+    /// <summary>
+    /// 版面（ISSUE-081）：說明、玩家資料卡片、存檔清單＋預覽、狀態列由上而下。
+    /// 清單與預覽在寬視窗並排、窄視窗上下排，並吃掉剩餘高度；最小高度是量出來的。
+    /// 玩家欄位以「標籤＋輸入框」為一組自動換行，不再是一條寫死欄寬的十欄表格。
+    /// </summary>
     private void BuildUi()
     {
-        var root = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 4,
-            BackColor = Color.White
-        };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-        _hint.AutoSize = true;
-        _hint.MaximumSize = new Size(1000, 0);
-        _hint.ForeColor = Color.FromArgb(71, 85, 105);
-        _hint.Margin = new Padding(0, 0, 0, 10);
-        root.Controls.Add(_hint, 0, 0);
+        Content.Add(Ui.Text(_hint)).Margin = new Padding(0, 0, 0, 10);
 
         BuildPlayerGroup();
-        root.Controls.Add(_playerGroup, 0, 1);
+        Content.Add(_playerGroup);
 
-        var content = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 2,
-            RowCount = 1,
-            Margin = new Padding(0, 10, 0, 8)
-        };
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68F));
-        content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32F));
-        content.Controls.Add(BuildSaveList(), 0, 0);
+        var columns = new ColumnsPanel { Margin = new Padding(0, 0, 0, 8) };
+        columns.Add(BuildSaveList(), weight: 68, minimumLogicalWidth: 380);
         BuildPreviewGroup();
-        _previewGroup.Margin = new Padding(10, 0, 0, 0);
-        content.Controls.Add(_previewGroup, 1, 0);
-        root.Controls.Add(content, 0, 2);
+        columns.Add(_previewGroup, weight: 32, minimumLogicalWidth: 220);
+        Content.AddGrow(columns);
 
-        _status.AutoSize = true;
-        _status.ForeColor = Color.FromArgb(71, 85, 105);
-        _status.Margin = new Padding(2, 2, 0, 0);
-        root.Controls.Add(_status, 0, 3);
-        Controls.Add(root);
+        Ui.Text(_status).Margin = new Padding(2, 0, 0, 0);
+        Content.Add(_status);
     }
 
     private void BuildPlayerGroup()
     {
-        _playerGroup.Dock = DockStyle.Top;
-        _playerGroup.AutoSize = true;
-        _playerGroup.Padding = new Padding(12, 8, 12, 12);
-        _playerGroup.Margin = new Padding(0);
-
-        var row = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 10,
-            RowCount = 1
-        };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-        ConfigureFieldLabel(_profileLabel);
-        ConfigureFieldLabel(_playerNameLabel);
-        ConfigureFieldLabel(_colorLabel);
-        ConfigureFieldLabel(_raceLabel);
-        _profile.Dock = DockStyle.Fill;
         _profile.DropDownStyle = ComboBoxStyle.DropDownList;
+        _profile.Width = 170;
         _profile.SelectedIndexChanged += (_, _) => { if (!_refreshing) LoadSelectedProfile(); };
-        _playerName.Dock = DockStyle.Fill;
+        _playerName.Width = 190;
         _playerName.MaxLength = 32;
-        _color.Dock = DockStyle.Fill;
         _color.DropDownStyle = ComboBoxStyle.DropDownList;
-        _race.Dock = DockStyle.Fill;
         _race.DropDownStyle = ComboBoxStyle.DropDownList;
         _games.AutoSize = true;
-        _games.Anchor = AnchorStyles.Left;
-        _games.Margin = new Padding(10, 6, 10, 0);
+        _games.UseMnemonic = false;
+        _games.Margin = new Padding(0, 7, 16, 0);
         ConfigureToolbarButton(_savePlayer, Accent, Color.White);
         _savePlayer.Click += async (_, _) => await SavePlayerAsync();
 
-        row.Controls.Add(_profileLabel, 0, 0);
-        row.Controls.Add(_profile, 1, 0);
-        row.Controls.Add(_playerNameLabel, 2, 0);
-        row.Controls.Add(_playerName, 3, 0);
-        row.Controls.Add(_colorLabel, 4, 0);
-        row.Controls.Add(_color, 5, 0);
-        row.Controls.Add(_raceLabel, 6, 0);
-        row.Controls.Add(_race, 7, 0);
-        row.Controls.Add(_games, 8, 0);
-        row.Controls.Add(_savePlayer, 9, 0);
-        _playerGroup.Controls.Add(row);
+        var row = Ui.ButtonRow(
+            Field(_profileLabel, _profile), Field(_playerNameLabel, _playerName),
+            Field(_colorLabel, _color), Field(_raceLabel, _race), _games, _savePlayer);
+        row.Margin = Padding.Empty;
+        _playerGroup.Add(row);
+    }
+
+    /// <summary>標籤＋輸入框一組，換行時不會被拆開。</summary>
+    private static FlowLayoutPanel Field(Label label, Control input)
+    {
+        ConfigureFieldLabel(label);
+        input.Margin = new Padding(0, 3, 16, 6);
+        var pair = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false,
+            Margin = Padding.Empty, Padding = Padding.Empty, BackColor = Color.Transparent
+        };
+        pair.Controls.AddRange([label, input]);
+        return pair;
     }
 
     private Control BuildSaveList()
     {
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            BackColor = Color.White
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        var panel = new StackPanel { Margin = Padding.Empty, AutoSize = true };
 
-        _grid.Dock = DockStyle.Fill;
         _grid.AllowUserToAddRows = false;
         _grid.AllowUserToDeleteRows = false;
         _grid.AllowUserToResizeRows = false;
@@ -176,7 +122,6 @@ public sealed class SavePage : UserControl
         _grid.BackgroundColor = Color.White;
         _grid.BorderStyle = BorderStyle.FixedSingle;
         _grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
-        _grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
         _grid.MultiSelect = false;
         _grid.ReadOnly = true;
         _grid.RowHeadersVisible = false;
@@ -185,22 +130,18 @@ public sealed class SavePage : UserControl
 
         _nameColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         _nameColumn.FillWeight = 42;
+        _nameColumn.MinimumWidth = 120;
         _modifiedColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         _modifiedColumn.FillWeight = 38;
+        _modifiedColumn.MinimumWidth = 100;
         _sizeColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
         _sizeColumn.FillWeight = 20;
+        _sizeColumn.MinimumWidth = 60;
         _previewColumn.AutoSizeMode = DataGridViewAutoSizeColumnMode.AllCells;
         _grid.Columns.AddRange(_nameColumn, _modifiedColumn, _sizeColumn, _previewColumn);
-        panel.Controls.Add(_grid, 0, 0);
+        GridMetrics.Apply(_grid);
+        panel.AddFill(_grid, 200);
 
-        var actions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents = true,
-            Padding = new Padding(0, 8, 0, 0)
-        };
         ConfigureToolbarButton(_refresh, Color.White, Color.FromArgb(71, 85, 105));
         ConfigureToolbarButton(_export, Color.White, Accent);
         ConfigureToolbarButton(_import, Accent, Color.White);
@@ -211,45 +152,30 @@ public sealed class SavePage : UserControl
         _import.Click += async (_, _) => await ImportAsync();
         _delete.Click += async (_, _) => await DeleteAsync();
         _editStats.Click += async (_, _) => await EditStatisticsAsync();
-        actions.Controls.AddRange([_refresh, _export, _import, _delete, _editStats]);
-        panel.Controls.Add(actions, 0, 1);
+        panel.Add(Ui.ButtonRow(_refresh, _export, _import, _delete, _editStats)).Margin = new Padding(0, 8, 0, 0);
         return panel;
     }
 
     private void BuildPreviewGroup()
     {
-        _previewGroup.Dock = DockStyle.Fill;
-        _previewGroup.Padding = new Padding(10);
-        var panel = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2
-        };
-        panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-        panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _preview.Dock = DockStyle.Fill;
+        _previewGroup.Margin = Padding.Empty;
         _preview.BackColor = Color.FromArgb(15, 23, 42);
         _preview.SizeMode = PictureBoxSizeMode.Zoom;
-        _details.AutoSize = true;
-        _details.MaximumSize = new Size(320, 0);
-        _details.ForeColor = Color.FromArgb(71, 85, 105);
-        _details.Margin = new Padding(0, 8, 0, 0);
-        panel.Controls.Add(_preview, 0, 0);
-        panel.Controls.Add(_details, 0, 1);
-        _previewGroup.Controls.Add(panel);
+        _preview.MinimumSize = new Size(120, 0);
+        _previewGroup.AddFill(_preview, 140);
+        _previewGroup.Add(Ui.Text(_details)).Margin = new Padding(0, 8, 0, 0);
     }
 
     public void ApplyLanguage()
     {
         _hint.Text = Strings.Get("Gui_Save_Hint");
-        _playerGroup.Text = Strings.Get("Gui_Save_PlayerGroup");
+        _playerGroup.Title = Strings.Get("Gui_Save_PlayerGroup");
         _profileLabel.Text = Strings.Get("Gui_Save_Profile");
         _playerNameLabel.Text = Strings.Get("Gui_Save_PlayerName");
         _colorLabel.Text = Strings.Get("Gui_Save_Color");
         _raceLabel.Text = Strings.Get("Gui_Save_Race");
         _savePlayer.Text = Strings.Get("Gui_Save_SavePlayer");
-        _previewGroup.Text = Strings.Get("Gui_Save_Preview");
+        _previewGroup.Title = Strings.Get("Gui_Save_Preview");
         _nameColumn.HeaderText = Strings.Get("Gui_Save_ColumnName");
         _modifiedColumn.HeaderText = Strings.Get("Gui_Save_ColumnModified");
         _sizeColumn.HeaderText = Strings.Get("Gui_Save_ColumnSize");
@@ -272,6 +198,8 @@ public sealed class SavePage : UserControl
         _race.Items.Add(new OptionChoice(1, Strings.Get("Gui_Save_RaceRoman")));
         _race.Items.Add(new OptionChoice(2, Strings.Get("Gui_Save_RaceRandom")));
         SelectOption(_race, raceId);
+        Ui.FitComboToItems(_color);
+        Ui.FitComboToItems(_race);
 
         if (_catalog is null) _status.Text = Strings.Get("Gui_Save_NotLoaded");
         else SetStatus(_gameRunning
@@ -640,21 +568,12 @@ public sealed class SavePage : UserControl
     private static void ConfigureFieldLabel(Label label)
     {
         label.AutoSize = true;
-        label.Anchor = AnchorStyles.Left;
-        label.Margin = new Padding(0, 6, 8, 0);
+        label.UseMnemonic = false;
+        label.Margin = new Padding(0, 7, 6, 0);
     }
 
-    private static void ConfigureToolbarButton(Button button, Color back, Color fore)
-    {
-        button.AutoSize = true;
-        button.MinimumSize = new Size(105, 34);
-        button.FlatStyle = FlatStyle.Flat;
-        button.FlatAppearance.BorderColor = fore == Color.White ? back : Color.FromArgb(203, 213, 225);
-        button.BackColor = back;
-        button.ForeColor = fore;
-        button.Font = new Font("Microsoft JhengHei UI", 9F, FontStyle.Bold);
-        button.Margin = new Padding(0, 0, 8, 0);
-    }
+    private static void ConfigureToolbarButton(Button button, Color back, Color fore) =>
+        Ui.Button(button, back, fore, bold: true, minWidth: 100);
 
     private static void SelectOption(ComboBox combo, int id)
     {

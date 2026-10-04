@@ -1,9 +1,10 @@
 using System.Reflection;
+using CKToolkit.Gui.Layout;
 using CKToolkit.I18n;
 
 namespace CKToolkit.Gui;
 
-public sealed class AboutPage : UserControl
+public sealed class AboutPage : ScrollPage
 {
     private readonly Label _name = new();
     private readonly Label _version = new();
@@ -14,31 +15,20 @@ public sealed class AboutPage : UserControl
 
     public AboutPage()
     {
-        AutoScroll = true;
-        BackColor = Color.White;
-        Padding = new Padding(32);
-        var panel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
+        Padding = new Padding(28, 24, 28, 24);
         _name.AutoSize = true;
-        _name.Font = new Font(Font.FontFamily, 21F, FontStyle.Bold);
-        _name.ForeColor = Color.FromArgb(15, 23, 42);
-        _version.AutoSize = true;
-        _version.ForeColor = Color.FromArgb(71, 85, 105);
-        _version.Margin = new Padding(0, 4, 0, 18);
+        _name.UseMnemonic = false;
+        _name.Font = Ui.UiFont(19F, FontStyle.Bold);
+        _name.ForeColor = Ui.TextPrimary;
+        Content.Add(_name);
+        Ui.Text(_version).Margin = new Padding(0, 4, 0, 18);
+        Content.Add(_version);
         foreach (Label label in new[] { _description, _features, _safety, _license })
         {
-            label.AutoSize = true;
-            label.MaximumSize = new Size(820, 0);
-            label.Margin = new Padding(0, 0, 0, 16);
+            Ui.Text(label, Ui.TextPrimary).Margin = new Padding(0, 0, 0, 16);
+            Content.Add(label);
         }
-        _safety.BackColor = Color.FromArgb(239, 246, 255);
-        _safety.Padding = new Padding(14);
-        panel.Controls.Add(_name);
-        panel.Controls.Add(_version);
-        panel.Controls.Add(_description);
-        panel.Controls.Add(_features);
-        panel.Controls.Add(_safety);
-        panel.Controls.Add(_license);
-        Controls.Add(panel);
+        Ui.Banner(_safety, Color.FromArgb(239, 246, 255), Color.FromArgb(30, 64, 175)).Margin = new Padding(0, 0, 0, 16);
     }
 
     public void ApplyLanguage()
