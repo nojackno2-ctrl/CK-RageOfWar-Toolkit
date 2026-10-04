@@ -5,7 +5,7 @@ using CKToolkit.I18n;
 namespace CKToolkit.Cli;
 
 /// <summary>
-/// `config` 指令：查看與搬移兩份設定（ISSUE-080）。
+/// `config` 指令：查看與搬移兩份設定（ISSUE-100）。
 ///
 /// 設定有兩個落腳處，語意不同：
 /// <list type="bullet">

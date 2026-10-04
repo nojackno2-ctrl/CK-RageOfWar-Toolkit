@@ -217,7 +217,7 @@ public sealed class ToolkitConfig
 
     /// <summary>
     /// 這份設定最後一次被寫出的時間（UTC）。用來在「工具旁邊的設定」與
-    /// 「遊戲資料夾裡的設定」之間判斷誰比較新（ISSUE-080）。
+    /// 「遊戲資料夾裡的設定」之間判斷誰比較新（ISSUE-100）。
     /// 舊版設定檔沒有這個欄位，讀起來是 null，一律視為比有時間戳的那份舊。
     /// </summary>
     [JsonPropertyName("savedAt")]
@@ -251,7 +251,7 @@ public sealed class ToolkitConfig
         Path.Combine(AppContext.BaseDirectory, ConfigFileName);
 
     /// <summary>
-    /// 遊戲資料夾裡那份設定的路徑（ISSUE-080）。
+    /// 遊戲資料夾裡那份設定的路徑（ISSUE-100）。
     ///
     /// 它是「這個遊戲安裝目前套用了什麼」的權威來源：套用成功時寫入、還原原版時刪除。
     /// 換一台電腦、重新下載工具包、或把工具包放到別的資料夾，設定都還在遊戲旁邊，
@@ -270,6 +270,14 @@ public sealed class ToolkitConfig
     public static ToolkitConfig FromJson(string json)
     {
         var config = JsonSerializer.Deserialize<ToolkitConfig>(json, JsonOpts) ?? new ToolkitConfig();
+        config.Perf ??= new();
+        config.Lang ??= new();
+        config.Trainer ??= new();
+        config.GameSettings ??= new();
+        config.Trainer.Cheats ??= [];
+        config.Trainer.Tweaks ??= [];
+        config.Trainer.ScopedTweaks ??= [];
+        config.MigrationsApplied ??= [];
         CleanRetiredTweaks(config);
         ClampTweakValues(config);
         ResolveConflictingTrainerBindings(config);
@@ -414,7 +422,7 @@ public sealed class ToolkitConfig
     }
 
     /// <summary>
-    /// 把目前設定寫進遊戲資料夾（ISSUE-080）。<paramref name="applied"/> 為 true 表示
+    /// 把目前設定寫進遊戲資料夾（ISSUE-100）。<paramref name="applied"/> 為 true 表示
     /// 這份設定剛剛真的被套用到遊戲檔案，會一併蓋上 <see cref="AppliedAt"/>。
     ///
     /// 失敗（唯讀目錄、權限不足、磁碟滿）一律以 Result 回報，絕不拋出：

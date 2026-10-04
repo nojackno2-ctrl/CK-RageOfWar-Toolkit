@@ -3,7 +3,7 @@ using System.Windows.Forms.Layout;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 等寬多欄的勾選清單（ISSUE-081）。
+/// 等寬多欄的勾選清單（ISSUE-101）。
 ///
 /// 取代「TableLayoutPanel + 固定 30px 列高」：列高改成每次排版時依該列內容在目前欄寬下的
 /// 偏好高度計算，字型、DPI、語言怎麼變都不會把勾選框的字切掉。子控制項依加入順序由左而右、

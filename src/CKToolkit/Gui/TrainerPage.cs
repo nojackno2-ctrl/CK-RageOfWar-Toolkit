@@ -67,7 +67,7 @@ public sealed class TrainerPage : ScrollPage
     }
 
     /// <summary>
-    /// 版面（ISSUE-081）：設定列、風險橫幅、說明、子分頁、啟動列由上而下。
+    /// 版面（ISSUE-101）：設定列、風險橫幅、說明、子分頁、啟動列由上而下。
     /// 子分頁吃掉剩餘高度，但至少是它最高那一頁內容需要的高度（<see cref="ContentTabControl"/>
     /// 量出來的，不是猜的）；視窗再矮就由分頁捲動，表格不會被壓扁到看不見。
     /// </summary>
@@ -230,7 +230,7 @@ public sealed class TrainerPage : ScrollPage
         panel.AddNatural(_resetTweaks);
 
         // 兩個分流表格左右並排：左為一般 self／enemy 項目，右為要塞／村莊四 scope。
-        // 寬度不夠時自動改成上下排（ColumnsPanel），兩張表都保有可用的寬度（ISSUE-081）。
+        // 寬度不夠時自動改成上下排（ColumnsPanel），兩張表都保有可用的寬度（ISSUE-101）。
         var split = new ColumnsPanel { MinimumColumnLogicalWidth = 420 };
 
         ConfigureGrid(_scopedSimple);
@@ -357,7 +357,7 @@ public sealed class TrainerPage : ScrollPage
         grid.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(241, 245, 249);
         grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(51, 65, 85);
         grid.ColumnHeadersDefaultCellStyle.Font = Ui.UiFont(9f, FontStyle.Bold);
-        // 欄寬與列高由 GridMetrics 依 DPI 與字型換算（ISSUE-081），這裡不再寫死像素。
+        // 欄寬與列高由 GridMetrics 依 DPI 與字型換算（ISSUE-101），這裡不再寫死像素。
         grid.GridColor = Color.FromArgb(226, 232, 240);
         grid.DefaultCellStyle.SelectionBackColor = Color.FromArgb(219, 234, 254);
         grid.DefaultCellStyle.SelectionForeColor = Color.FromArgb(15, 23, 42);

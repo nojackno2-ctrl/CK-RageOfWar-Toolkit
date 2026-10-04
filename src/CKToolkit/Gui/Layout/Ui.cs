@@ -1,7 +1,7 @@
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 跨電腦一致的版面規則集中在這裡（ISSUE-081）。
+/// 跨電腦一致的版面規則集中在這裡（ISSUE-101）。
 ///
 /// 「換一台電腦就亂掉」的根因有三個，這裡逐一封死：
 /// <list type="number">

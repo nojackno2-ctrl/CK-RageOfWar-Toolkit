@@ -19,7 +19,7 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             // 介面字型依這台電腦實際安裝的字型挑選（英文版 Windows 不一定有正黑體），
-            // 不寫死在專案檔裡（ISSUE-081）。
+            // 不寫死在專案檔裡（ISSUE-101）。
             Application.SetDefaultFont(Gui.Layout.Ui.UiFont());
             Application.Run(new MainForm());
             return 0;

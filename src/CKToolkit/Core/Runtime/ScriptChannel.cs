@@ -127,7 +127,10 @@ public sealed class ScriptChannel : IDisposable
     /// 送一段 VS 腳本進遊戲執行。腳本必須是單行、已經跳脫完畢的成品——這個方法不做任何
     /// 語法處理，原文會原封不動交給引擎自己的編譯器。
     /// </summary>
-    public Result<ScriptRunOutcome> Run(string script, TimeSpan? timeout = null)
+    public Result<ScriptRunOutcome> Run(string script, TimeSpan? timeout = null) =>
+        RunAsync(script, timeout ?? DefaultTimeout).GetAwaiter().GetResult();
+
+    private async Task<Result<ScriptRunOutcome>> RunAsync(string script, TimeSpan wait)
     {
         if (string.IsNullOrWhiteSpace(script))
         {
@@ -143,20 +146,20 @@ public sealed class ScriptChannel : IDisposable
                 Strings.Get("Error_ScriptChannelTooLong", payload.Length, MaxScriptBytes));
         }
 
-        TimeSpan wait = timeout ?? DefaultTimeout;
-
         try
         {
+            using var deadline = new CancellationTokenSource(wait);
             using var pipe = new NamedPipeClientStream(
-                ".", PipeNameFor(_pid), PipeDirection.InOut, PipeOptions.None);
-            pipe.Connect((int)wait.TotalMilliseconds);
+                ".", PipeNameFor(_pid), PipeDirection.InOut, PipeOptions.Asynchronous);
+            await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
 
-            pipe.Write(BuildRequest(payload));
-            pipe.Flush();
+            await pipe.WriteAsync(BuildRequest(payload), deadline.Token).ConfigureAwait(false);
+            await pipe.FlushAsync(deadline.Token).ConfigureAwait(false);
 
-            return Result<ScriptRunOutcome>.Ok(ReadResponse(pipe));
+            return Result<ScriptRunOutcome>.Ok(
+                await ReadResponseAsync(pipe, deadline.Token).ConfigureAwait(false));
         }
-        catch (TimeoutException)
+        catch (OperationCanceledException)
         {
             return Result<ScriptRunOutcome>.Fail(Strings.Get("Error_ScriptChannelUnreachable"));
         }
@@ -183,8 +186,11 @@ public sealed class ScriptChannel : IDisposable
     public bool Probe()
     {
         var result = Run("int i; i = 1;", TimeSpan.FromSeconds(2));
-        return result.IsOk;
+        return result.IsOk && IsProbeReady(result.Value.Status);
     }
+
+    internal static bool IsProbeReady(ScriptStatus status) => status is
+        ScriptStatus.Ok or ScriptStatus.Scheduled or ScriptStatus.NotInGame;
 
     private byte[] BuildRequest(byte[] payload)
     {
@@ -202,10 +208,10 @@ public sealed class ScriptChannel : IDisposable
         return buffer;
     }
 
-    private static ScriptRunOutcome ReadResponse(Stream pipe)
+    private static async Task<ScriptRunOutcome> ReadResponseAsync(Stream pipe, CancellationToken cancel)
     {
         byte[] header = new byte[ResponseHeaderBytes];
-        pipe.ReadExactly(header);
+        await pipe.ReadExactlyAsync(header, cancel).ConfigureAwait(false);
 
         uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, 4));
         uint version = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, 4));
@@ -222,7 +228,7 @@ public sealed class ScriptChannel : IDisposable
         if (messageLength is > 0 and <= 4096)
         {
             byte[] body = new byte[messageLength];
-            pipe.ReadExactly(body);
+            await pipe.ReadExactlyAsync(body, cancel).ConfigureAwait(false);
             detail = Encoding.UTF8.GetString(body);
         }
 

@@ -682,6 +682,7 @@
   "Save_Error_PlayerRead": "读取玩家资料失败：{0}",
   "Save_Error_PlayerWrite": "写入玩家资料失败：{0}",
   "Save_Error_PlayerName": "玩家显示名称必须为 1 至 32 个字元，且不可包含换行、方括号或等号。",
+  "Save_Error_PlayerNameEncoding": "玩家显示名称包含游戏的 Windows-1252 编码无法保存的字元。",
   "Save_Error_PlayerColor": "玩家颜色必须介於 0 与 7。",
   "Save_Error_PlayerRace": "玩家种族必须是 0（高卢）、1（罗马）或 2（随机）。",
   "Save_Error_Preview": "无法读取存档预览图：{0}",
@@ -859,6 +860,10 @@
   "GameSettings_InstantHeroAttach_Label": "允许部队远距／全图瞬时编入英雄",
   "GameSettings_InstantHeroAttach_Desc": "右键点击友方英雄即可在任何距离立刻编入其队伍，解除 600 视野与 1500 脚本距离限制，部队将自动向英雄靠拢归队。",
   "Error_SettingsSubcommandRequired": "settings 指令必须指定 get 或 set 子指令。",
+  "Error_TrainerMarkerInvalid": "修改器还原清册无效；为避免损坏 data.pak，本次操作已拒绝。请使用 Steam 验证游戏档案完整性。",
+  "Error_BatchWriteFailedRolledBack": "批次写入失败，已将先前替换的档案还原：{0}",
+  "Error_BatchWriteRollbackFailed": "批次写入失败，且部分档案无法还原：{0}；还原错误：{1}",
+  "Cli_SettingsHelp": "游戏规则设定:\n  settings get        读取五项游戏规则设定\n  settings set        修改游戏规则设定（--viking-army/--liberati-army/--mule-army/--wagon-10k/--instant-attach on|off）",
   "GameSettings_Group_Logistics": "经济与运输规则",
   "GameSettings_WagonCapacity10k_Label": "运粮马／运金马运载上限提升至 10,000",
   "GameSettings_WagonCapacity10k_Desc": "将骡车实体负载容量提升至 10,000，并同步修改聚落“制造运粮马（大）”与“制造运金马（大）”按钮之出产装载量与中途装载指令。",
@@ -874,5 +879,3 @@
   "Cli_Config_Pushed": "已把工具包设定写进游戏资料夹：{0}",
   "Error_ConfigSubcommandRequired": "config 指令必须指定 show、pull 或 push 子指令。"
 }
-
-

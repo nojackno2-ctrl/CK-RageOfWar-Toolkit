@@ -111,7 +111,7 @@ public sealed class InGamePanelForm : Form
 
     public InGamePanelForm(TrainerConfig config)
     {
-        // 所有尺寸都是 96 DPI 的邏輯像素，建構結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 所有尺寸都是 96 DPI 的邏輯像素，建構結尾由 Ui.EndForm 一次換算（ISSUE-101）。
         Ui.BeginForm(this);
         // 可縮放：作弊數量差很多，固定尺寸不是太擠就是浪費畫面。
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
@@ -129,7 +129,7 @@ public sealed class InGamePanelForm : Form
         _status.Padding = new Padding(4, 4, 4, 8);
         _status.Font = Ui.UiFont(9F, FontStyle.Bold);
 
-        // 版面（ISSUE-081）：狀態、生成位置、速度列、作弊按鈕全部放在同一個可捲動的堆疊裡。
+        // 版面（ISSUE-101）：狀態、生成位置、速度列、作弊按鈕全部放在同一個可捲動的堆疊裡。
         // 按鈕撐滿寬度、高度跟著字型；視窗縮到再小，最多就是捲動，不會有東西被擠到視窗外。
         _page.BackColor = BackColor;
 
@@ -178,7 +178,7 @@ public sealed class InGamePanelForm : Form
                 Text = label,
                 Tag = vk,
                 // 高度跟著字型長：高 DPI 下不會被切掉一半；面板很窄時名稱以省略號收尾，
-                // 完整名稱放在提示裡（ISSUE-081）。
+                // 完整名稱放在提示裡（ISSUE-101）。
                 AutoSize = false,
                 AutoEllipsis = true,
                 MinimumSize = new Size(0, 30),

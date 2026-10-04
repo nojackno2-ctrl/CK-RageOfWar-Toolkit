@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.IO.Pipes;
 using CKToolkit.Cli;
 using CKToolkit.Core.Common;
 using CKToolkit.Core.Lang;
@@ -171,7 +172,7 @@ internal static class Program
         }
     }
 
-    // --- 49. GUI 版面稽核（ISSUE-081）---------------------------------------
+    // --- 49. GUI 版面稽核（ISSUE-101）---------------------------------------
     /// <summary>
     /// 每個分頁與對話框在三語、多種視窗大小與字型放大倍率下，於 96 DPI 與本機實際 DPI
     /// 各跑一次：不裁切、文字完整、不重疊、表格列高足夠。詳見 <see cref="LayoutAudit"/>。
@@ -311,6 +312,12 @@ internal static class Program
         Check("Trainer scopedTweaks 巢狀設定完整還原",
             restored.Trainer.ScopedTweaks["train_speed"]["enemy"] == 0.75m &&
             restored.Trainer.ScopedTweaks["gold_production"]["selfTownhall"] == 48m);
+
+        ToolkitConfig nullSections = ToolkitConfig.FromJson(
+            "{\"perf\":null,\"lang\":null,\"trainer\":null,\"gameSettings\":null}");
+        Check("合法 JSON 的 null 子設定會安全正規化",
+            nullSections.Perf is not null && nullSections.Lang is not null &&
+            nullSections.Trainer is not null && nullSections.GameSettings is not null);
 
         string legacyWithRetiredJson = """
         {
@@ -934,6 +941,15 @@ internal static class Program
                 PlaceholderCount(cn[key]) == PlaceholderCount(en[key]));
         }
 
+        using var languagePage = new LanguagePage();
+        var customFontConfig = new LangConfig { Pack = "zh-TW", FontFace = "Noto Sans CJK TC" };
+        languagePage.LoadConfig(customFontConfig);
+        languagePage.ApplyLanguage();
+        var savedFontConfig = new LangConfig();
+        languagePage.SaveConfig(savedFontConfig);
+        Check("語言頁載入與切換 UI 語系後保留自訂字型",
+            savedFontConfig.FontFace == "Noto Sans CJK TC");
+
         static int PlaceholderCount(string value) =>
             System.Text.RegularExpressions.Regex.Matches(value, @"\{\d+\}").Count;
     }
@@ -1266,6 +1282,33 @@ internal static class Program
             Check("LocalPak 未被修改因此略過寫入 (written=false)", apply1.Value?.Files[GamePaths.LocalPakFileName].Written == false);
             Check("VxSettings 被寫入 (written=true)", apply1.Value?.Files[GamePaths.VxSettingsFileName].Written == true);
 
+            var beforeFailedBatch = Enum.GetValues<GameFile>().ToDictionary(
+                file => file,
+                file => File.ReadAllBytes(Path.Combine(tempGameDir, PatchState.GetFileName(file))));
+            config.Perf.Laa = false;
+            config.Perf.DesktopMode = "suppress";
+            config.Perf.Hires = 1600;
+            config.Perf.Resolution = "1600x900";
+            config.Perf.AddRes = ["1600x900"];
+            config.Perf.NoWaterAnimation = true;
+            PatchPipeline.BatchWriteFailureForTests = name =>
+                name.Equals(GamePaths.DataPakFileName, StringComparison.OrdinalIgnoreCase);
+            Result<ApplyReport> failedBatch;
+            try { failedBatch = pipeline.ApplyAll(tempGameDir, config); }
+            finally { PatchPipeline.BatchWriteFailureForTests = null; }
+            Check("批次寫入中段失敗會回報失敗", failedBatch.IsError);
+            Check("批次寫入失敗會回滾所有已替換檔案",
+                Enum.GetValues<GameFile>().All(file => File.ReadAllBytes(
+                    Path.Combine(tempGameDir, PatchState.GetFileName(file))).SequenceEqual(beforeFailedBatch[file])));
+            Check("批次寫入失敗不殘留交易暫存檔",
+                !Directory.EnumerateFiles(tempGameDir, "*.cktmp-*", SearchOption.TopDirectoryOnly).Any());
+            config.Perf.Laa = true;
+            config.Perf.DesktopMode = "autoSwitch";
+            config.Perf.Hires = 1920;
+            config.Perf.Resolution = "1920x1080";
+            config.Perf.AddRes = ["1920x1080"];
+            config.Perf.NoWaterAnimation = false;
+
             // 2. 再次 ApplyAll（相同設定）：所有檔案內容均未變更，全部略過寫入
             var apply2 = pipeline.ApplyAll(tempGameDir, config);
             Check("再次 ApplyAll 執行成功", apply2.Success);
@@ -1549,6 +1592,22 @@ internal static class Program
 
             var currentFiles = Directory.GetFileSystemEntries(tempGameDir, "*", SearchOption.AllDirectories).OrderBy(x => x).ToList();
             Check("verify 執行後遊戲目錄 100% 零變更 (零寫入保證)", initialFiles.SequenceEqual(currentFiles));
+
+            var expectedConfig = ToolkitConfig.CreateDefault();
+            var pipeline = PatchPipeline.CreateDefault();
+            Check("verify payload 測試設定可先套用", pipeline.ApplyAll(tempGameDir, expectedConfig).Success);
+            byte[] wrongLauncher = File.ReadAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName));
+            LauncherModeTable.Apply(ref wrongLauncher, enable: true, 1280, 720);
+            File.WriteAllBytes(Path.Combine(tempGameDir, GamePaths.LauncherFileName), wrongLauncher);
+            var beforeValueAwareVerify = Enum.GetValues<GameFile>().ToDictionary(
+                file => file,
+                file => File.ReadAllBytes(Path.Combine(tempGameDir, PatchState.GetFileName(file))));
+            Result<VerificationReport> valueAware = pipeline.Verify(tempGameDir, expectedConfig);
+            Check("verify 會抓到同 patch 名稱但 Launcher 寬高不同",
+                valueAware.Success && valueAware.Value?.Files[GamePaths.LauncherFileName].MatchesConfig == false);
+            Check("value-aware verify 仍維持五個遊戲檔案零寫入",
+                Enum.GetValues<GameFile>().All(file => File.ReadAllBytes(
+                    Path.Combine(tempGameDir, PatchState.GetFileName(file))).SequenceEqual(beforeValueAwareVerify[file])));
         }
         finally
         {
@@ -2600,6 +2659,18 @@ internal static class Program
             Directory.Delete(orphanRollback, recursive: true);
             validMeta.Version = "1.0.0";
 
+            string manuallyPlacedInvalid = Path.Combine(testBaseDir, "langpacks", "manual-invalid");
+            Directory.CreateDirectory(manuallyPlacedInvalid);
+            validMeta.Id = "manual-invalid";
+            validMeta.Files.Ui = "../../outside.json";
+            File.WriteAllText(Path.Combine(testBaseDir, "outside.json"), "{}");
+            File.WriteAllText(Path.Combine(manuallyPlacedInvalid, "pack.json"), JsonSerializer.Serialize(validMeta));
+            Check("DiscoverAll 對手動放入的包套用相同路徑邊界驗證",
+                !PackLoader.DiscoverAll(testBaseDir).ContainsKey("manual-invalid"));
+            Directory.Delete(manuallyPlacedInvalid, recursive: true);
+            validMeta.Id = "custom-test";
+            validMeta.Files.Ui = "ui.json";
+
             // B. 安全檢查：路徑走訪 (Path Traversal) 拒絕
             string traversalSource = Path.Combine(testBaseDir, "SourceTraversal");
             Directory.CreateDirectory(traversalSource);
@@ -2882,6 +2953,19 @@ internal static class Program
             "auto", 1, keepVanilla: false, numpadKeys: true);
         Check("spawn_item 產生 DefItemHolder 與 AddItem 腳本", itemScript.Contains("Place(&quot;DefItemHolder&quot;", StringComparison.Ordinal) && itemScript.Contains("o.AddItem(item)", StringComparison.Ordinal));
         Check("cycle_item 借用 spawn_item 之 items 參數", itemScript.Contains("King's Belt", StringComparison.Ordinal) && itemScript.Contains("Boar teeth", StringComparison.Ordinal));
+
+        var invalidMarkerPak = HmmPak.CreateEmpty();
+        invalidMarkerPak.WriteText(TrainerInstaller.MarkerPath, "{}");
+        Check("空修改器 marker 被拒絕而非視為可反轉", TrainerInstaller.ReadMarker(invalidMarkerPak) is null);
+        bool invalidMarkerRefused = false;
+        try { TrainerInstaller.Uninstall(invalidMarkerPak); }
+        catch (TrainerException) { invalidMarkerRefused = true; }
+        Check("無效修改器 marker 的 Uninstall fail-closed 且保留 marker",
+            invalidMarkerRefused && invalidMarkerPak.Contains(TrainerInstaller.MarkerPath));
+        invalidMarkerPak.WriteText(TrainerInstaller.MarkerPath,
+            "{\"version\":1,\"toolkitVersion\":\"1.0.5\",\"addedEntries\":[\"CKTRAINER_OLD.VS\"],\"originals\":{},\"cheats\":[],\"tweaks\":{},\"gameSettings\":[]}");
+        Check("修改器 marker 不接受未受稽核的刪除清單",
+            TrainerInstaller.ReadMarker(invalidMarkerPak) is null);
 
         // 永久 scoped Tweak 的 command helper：驗證 .cktw 格式、真實位址 hook、
         // 多人 fail-closed／owner／command 旗標與設定位址、重設值、冪等、
@@ -6270,6 +6354,45 @@ internal static class Program
         Check("權杖原樣寫出", good.Contains($"scripttoken={token}", StringComparison.Ordinal));
         Check("選項以逗號分隔，權杖是最後一段（原生端 OptAscii 讀到逗號就停）",
             good.EndsWith($"scripttoken={token}", StringComparison.Ordinal));
+        string diskSafe = new DiagnosticsOptions { ScriptChannel = true, ScriptToken = token }
+            .ToOptionString(includeScriptToken: false);
+        Check("落盤選項保留通道開關但不含權杖",
+            diskSafe.Contains("scriptchannel=1", StringComparison.Ordinal) &&
+            !diskSafe.Contains("scripttoken", StringComparison.Ordinal));
+
+        Check("Probe 只接受可用狀態",
+            ScriptChannel.IsProbeReady(ScriptStatus.Ok) &&
+            ScriptChannel.IsProbeReady(ScriptStatus.Scheduled) &&
+            ScriptChannel.IsProbeReady(ScriptStatus.NotInGame) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.Rejected) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.CompileError) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.Faulted) &&
+            !ScriptChannel.IsProbeReady(ScriptStatus.TimedOut));
+
+        uint partialPid = unchecked((uint)(Environment.ProcessId + 100000));
+        using (var partialServer = new NamedPipeServerStream(
+            ScriptChannel.PipeNameFor(partialPid), PipeDirection.InOut, 1,
+            PipeTransmissionMode.Byte, PipeOptions.Asynchronous))
+        {
+            Task partialResponse = Task.Run(async () =>
+            {
+                try
+                {
+                    await partialServer.WaitForConnectionAsync();
+                    await partialServer.WriteAsync(new byte[] { 0x43, 0x4B, 0x53, 0x43 });
+                    await partialServer.FlushAsync();
+                    await Task.Delay(300);
+                }
+                catch (IOException) { }
+            });
+            using ScriptChannel partialChannel = ScriptChannel.Create(partialPid, token).Value!;
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            Result<ScriptRunOutcome> partialResult = partialChannel.Run("int i; i = 1;", TimeSpan.FromMilliseconds(100));
+            started.Stop();
+            Check("管線只回部分標頭時整體 deadline 仍會終止 Run",
+                partialResult.IsError && started.Elapsed < TimeSpan.FromSeconds(1));
+            partialResponse.GetAwaiter().GetResult();
+        }
 
         var channelOnly = GameRunner.CreateScriptChannelOnlyOptions();
         Check("channel-only 選項不替使用者打開任何保護",
@@ -6322,6 +6445,27 @@ internal static class Program
                 Check($"ScriptStatus.{status} 有對應的原生常數",
                     statuses.Any(s => s.Value == (int)status));
             }
+
+            string nativeScript = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "script.cpp")));
+            Check("原生 mailbox 具 Running 與 Abandoned 所有權狀態",
+                nativeScript.Contains("kSlotRunning", StringComparison.Ordinal) &&
+                nativeScript.Contains("kSlotAbandoned", StringComparison.Ordinal));
+            Check("原生腳本自測延後至主執行緒 pump",
+                nativeScript.Contains("g_selfTestPending", StringComparison.Ordinal) &&
+                nativeScript.Contains("main-thread self-test deferred", StringComparison.Ordinal));
+            Check("原生 pipe 讀取與 flush 都有 deadline",
+                nativeScript.Contains("PeekNamedPipe", StringComparison.Ordinal) &&
+                nativeScript.Contains("FlushWithDeadline", StringComparison.Ordinal));
+
+            string nativeCommon = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "common.cpp")));
+            Check("掛載模式權杖由記憶體 bootstrap pipe 讀取",
+                nativeCommon.Contains("ckperf-bootstrap-", StringComparison.Ordinal) &&
+                nativeCommon.Contains("ReadBootstrapToken", StringComparison.Ordinal));
+
+            string nativeCrash = File.ReadAllText(FindRepoFile(Path.Combine("src", "CKPerf", "crash.cpp")));
+            Check("已修復站點與未修復故障使用獨立報告計數",
+                nativeCrash.Contains("g_repairedReportCount", StringComparison.Ordinal) &&
+                nativeCrash.Contains("g_reportCount", StringComparison.Ordinal));
         }
         else
         {
@@ -6330,7 +6474,7 @@ internal static class Program
     }
 
     /// <summary>數面板上有幾顆作弊按鈕。面板的按鈕都放在唯一那個 TableLayoutPanel 裡。</summary>
-    // 作弊按鈕直接放在面板的捲動堆疊裡（ISSUE-081）；速度列的「套用」按鈕在自己的 FlowLayoutPanel，不計入。
+    // 作弊按鈕直接放在面板的捲動堆疊裡（ISSUE-101）；速度列的「套用」按鈕在自己的 FlowLayoutPanel，不計入。
     private static int CountPanelCheatButtons(InGamePanelForm panel) =>
         Descendants(panel).OfType<Button>().Count(b => b.Parent is CKToolkit.Gui.Layout.StackPanel);
 
@@ -7088,7 +7232,7 @@ internal static class Program
     }
 
     /// <summary>
-    /// 48. 遊戲資料夾設定往返測試（ISSUE-080）。
+    /// 48. 遊戲資料夾設定往返測試（ISSUE-100）。
     ///
     /// 這一組鎖住的是「使用者不必一直重新設定」這件事本身：套用之後設定留在遊戲資料夾、
     /// 換一份工具包（設定檔不存在）時讀得回來、還原原版時不留痕跡。
@@ -7621,6 +7765,14 @@ internal static class Program
 
             var getInitial = RunCli("settings", "get", "--config", cliConfigFile, "--json");
             Check("`settings get --json` 成功執行", getInitial.Code == ExitCodes.Success && getInitial.Envelope is { Ok: true });
+
+            var getTypo = RunCli("settings", "get", "--typo", "--config", cliConfigFile, "--json");
+            Check("`settings get` 拒絕未知選項", getTypo.Code == ExitCodes.InvalidArgs && getTypo.Envelope is { Ok: false });
+
+            var help = RunCli("--help", "--json");
+            Check("CLI help 契約包含 settings get/set",
+                help.Code == ExitCodes.Success && help.Raw.Contains("settings get", StringComparison.Ordinal) &&
+                help.Raw.Contains("settings set", StringComparison.Ordinal));
 
             var setBoth = RunCli("settings", "set", "--viking-army=on", "--liberati-army=on", "--config", cliConfigFile, "--json");
             Check("`settings set --viking-army=on --liberati-army=on` 成功執行", setBoth.Code == ExitCodes.Success && setBoth.Envelope is { Ok: true });

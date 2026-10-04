@@ -3,7 +3,7 @@ using System.Windows.Forms.Layout;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 寬螢幕上把幾張卡片並排、窄螢幕上自動改成上下排的容器（ISSUE-081）。
+/// 寬螢幕上把幾張卡片並排、窄螢幕上自動改成上下排的容器（ISSUE-101）。
 ///
 /// 欄寬依 <see cref="Add"/> 給的權重分配；任何一欄窄於 <see cref="MinimumColumnLogicalWidth"/>
 /// （或窄於它不換行就放不下的寬度）時整組改成上下堆疊。並排時所有欄位取最高那欄的高度，

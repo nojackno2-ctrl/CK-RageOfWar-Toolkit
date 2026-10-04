@@ -36,7 +36,7 @@ public sealed class GameSettingsPage : ScrollPage
         BuildUi();
     }
 
-    /// <summary>版面（ISSUE-081）：標題、兩張卡片、還原按鈕由上而下，高度全部由內容決定。</summary>
+    /// <summary>版面（ISSUE-101）：標題、兩張卡片、還原按鈕由上而下，高度全部由內容決定。</summary>
     private void BuildUi()
     {
         _title.AutoSize = true;
@@ -123,7 +123,7 @@ public sealed class GameSettingsPage : ScrollPage
         _logisticsCard.Title = Strings.Get("GameSettings_Group_Logistics");
         _wagonCapacity10k.Text = Strings.Get("GameSettings_WagonCapacity10k_Label");
         _wagonCapacityDesc.Text = Strings.Get("GameSettings_WagonCapacity10k_Desc");
-        // 這裡原本查的是不存在的鍵，按鈕上直接印出 "Gui_ResetDefaults"（ISSUE-079 順手修掉）。
+        // 這裡原本查的是不存在的鍵，按鈕上直接印出 "Gui_ResetDefaults"（ISSUE-099 順手修掉）。
         _resetBtn.Text = Strings.Get("GameSettings_ResetDefaults");
     }
 }

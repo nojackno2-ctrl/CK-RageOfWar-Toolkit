@@ -68,7 +68,7 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// 主視窗外框（ISSUE-081）：標題列、分頁、按鈕列、記錄區由上而下堆疊，分頁吃掉剩餘高度。
+    /// 主視窗外框（ISSUE-101）：標題列、分頁、按鈕列、記錄區由上而下堆疊，分頁吃掉剩餘高度。
     /// 記錄區的高度以「幾行字」表示，不再是百分比或寫死的像素。
     /// 所有尺寸都是 96 DPI 的邏輯像素，由 <see cref="Ui.EndForm"/> 一次換算到實際 DPI。
     /// </summary>
@@ -247,7 +247,7 @@ public sealed class MainForm : Form
     }
 
     /// <summary>
-    /// 讀回遊戲資料夾裡那份「上次套用的設定」（ISSUE-080）。
+    /// 讀回遊戲資料夾裡那份「上次套用的設定」（ISSUE-100）。
     ///
     /// 只有在它比手上這份新的時候才改用它——手上這份沒有時間戳（重新下載工具包、
     /// 或設定檔還是舊版格式）也算。這樣「使用者改了但還沒套用」的設定不會被
@@ -331,7 +331,7 @@ public sealed class MainForm : Form
             string previous = _config.GameDir ?? string.Empty;
             _gamePath.Text = dialog.SelectedPath;
             // 換到另一份遊戲安裝時，那一份安裝自己的設定才是權威，不比時間直接採用
-            // （ISSUE-080）。指回原本那一份時就照常比時間。
+            // （ISSUE-100）。指回原本那一份時就照常比時間。
             bool switched = !string.Equals(previous, _gamePath.Text.Trim(), StringComparison.OrdinalIgnoreCase);
             AdoptGameDirConfig(_gamePath.Text.Trim(), force: switched);
             PersistCurrentUiSilently();
@@ -362,6 +362,11 @@ public sealed class MainForm : Form
     {
         gameDir = _gamePath.Text.Trim();
         snapshot = ToolkitConfig.CreateDefault();
+        if (_config.LoadError is not null)
+        {
+            ShowOperationError(_config.LoadError);
+            return false;
+        }
         if (!GamePaths.IsGameDir(gameDir))
         {
             ShowOperationError(Strings.Get("Error_GameNotFound"));
@@ -401,7 +406,7 @@ public sealed class MainForm : Form
             if (result.Value?.SettingsFile is string settingsFile)
             {
                 // 套用時 ApplyAll 把設定寫進了遊戲資料夾，順手把工具包旁邊那份也更新，
-                // 兩份的時間戳才會一致，下次啟動不會誤判誰比較新（ISSUE-080）。
+                // 兩份的時間戳才會一致，下次啟動不會誤判誰比較新（ISSUE-100）。
                 AppendLog(Strings.Get("Cli_Config_GameDirPath", settingsFile));
                 try { _config.Save(); } catch { /* 套用已經成功，存設定失敗只是可惜 */ }
             }
@@ -619,7 +624,7 @@ public sealed class MainForm : Form
     /// <summary>
     /// 平常改的設定也存一份到遊戲資料夾（使用者需求，2026-10-04）。
     ///
-    /// 以前只有「一鍵套用」成功時才寫遊戲資料夾那份（ISSUE-080），改了還沒套用就把工具包
+    /// 以前只有「一鍵套用」成功時才寫遊戲資料夾那份（ISSUE-100），改了還沒套用就把工具包
     /// 搬到別的資料夾，那些修改就跟著舊位置的 cktoolkit.json 一起留在原地。現在遊戲資料夾
     /// 那份永遠是最新的設定，工具包放到哪裡、重新下載幾次，打開都會讀回來。
     ///

@@ -31,7 +31,7 @@ public sealed class LanguagePage : ScrollPage
         ReloadPacks();
     }
 
-    /// <summary>版面（ISSUE-081）：一張卡片，欄位表＋說明文字，全部由內容決定高度。</summary>
+    /// <summary>版面（ISSUE-101）：一張卡片，欄位表＋說明文字，全部由內容決定高度。</summary>
     private void BuildUi()
     {
         var card = new Card();
@@ -160,9 +160,15 @@ public sealed class LanguagePage : ScrollPage
                 _font.Items.Add(face);
             }
 
-            if (string.IsNullOrWhiteSpace(_font.Text) || !_font.Items.Contains(_font.Text))
+            if (string.IsNullOrWhiteSpace(_font.Text))
             {
                 _font.Text = string.IsNullOrWhiteSpace(languagePack.Meta.Font.Face) ? "微軟正黑體" : languagePack.Meta.Font.Face;
+            }
+            else if (!fontFaces.Contains(_font.Text, StringComparer.OrdinalIgnoreCase))
+            {
+                // The list is only a set of suggestions. Preserve an explicitly configured
+                // system font even when the current language pack did not advertise it.
+                _font.Items.Add(_font.Text);
             }
         }
         else _details.Text = Strings.Get("Gui_Lang_NoPack");
@@ -300,7 +306,7 @@ internal sealed class ExportTemplateDialog : Form
 
     private void BuildUi()
     {
-        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-101）。
         // 可縮放：英文說明比中文長，固定大小的對話框會把按鈕擠出畫面。
         Ui.BeginForm(this);
         ClientSize = new Size(560, 340);

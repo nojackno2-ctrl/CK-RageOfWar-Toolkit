@@ -3,7 +3,7 @@ using System.Windows.Forms.Layout;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 由上而下堆疊子控制項的容器——整個 GUI 版面的骨幹（ISSUE-081）。
+/// 由上而下堆疊子控制項的容器——整個 GUI 版面的骨幹（ISSUE-101）。
 ///
 /// 規則只有三條，而且全部在<b>每一次</b>版面計算時依「當下的字型與 DPI」重新量測，
 /// 所以換一台電腦、換一個縮放比例、換一種介面語言都不會有任何一個數字是舊的：
@@ -18,7 +18,7 @@ namespace CKToolkit.Gui.Layout;
 /// </list>
 ///
 /// 以前的版面用 <c>RowStyle(Percent)</c> 分配高度：比例是照開發機上的字型高度抓的，
-/// 換到字比較大的螢幕上，內容比分到的高度高，就被群組框切掉一截（ISSUE-079 的截圖）。
+/// 換到字比較大的螢幕上，內容比分到的高度高，就被群組框切掉一截（ISSUE-099 的截圖）。
 /// 這裡不再有比例，高度永遠是量出來的。
 /// </summary>
 public class StackPanel : Panel

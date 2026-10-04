@@ -1,7 +1,7 @@
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 回報「真實高度」的下拉選單（ISSUE-081）。
+/// 回報「真實高度」的下拉選單（ISSUE-101）。
 ///
 /// WinForms 的 <see cref="ComboBox"/> 對外回報的偏好高度是用字型算出來的估計值，但 Windows 實際給它的
 /// 高度（尤其是 DropDownList 加上視覺樣式時）在字型較大時會多出幾個像素。FlowLayoutPanel／TableLayoutPanel

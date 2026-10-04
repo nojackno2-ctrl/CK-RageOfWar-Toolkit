@@ -3,7 +3,7 @@ using System.Drawing.Drawing2D;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 帶標題的卡片，取代 <see cref="GroupBox"/>（ISSUE-081）。
+/// 帶標題的卡片，取代 <see cref="GroupBox"/>（ISSUE-101）。
 ///
 /// GroupBox 的標題列高度與內容區由系統決定，對外回報的偏好高度又不含內部停靠面板，
 /// 結果就是外層只能猜一個 <c>MinimumSize</c>——猜錯就切掉內容。卡片自己量標題、

@@ -3,7 +3,7 @@ using System.Windows.Forms.Layout;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 每一個分頁的共同底座（ISSUE-081）：內容放在 <see cref="Content"/> 這個 <see cref="StackPanel"/> 裡，
+/// 每一個分頁的共同底座（ISSUE-101）：內容放在 <see cref="Content"/> 這個 <see cref="StackPanel"/> 裡，
 /// 寬度跟著分頁走、高度由內容量出來；放不下才出捲軸，<b>永遠不裁切</b>。
 ///
 /// 捲軸要不要出現是由這裡一次算定的，而不是交給 <see cref="ScrollableControl"/> 依子控制項邊界去推：

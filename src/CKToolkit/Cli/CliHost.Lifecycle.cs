@@ -8,7 +8,7 @@ public static partial class CliHost
 {
     private static int HandleHelp(bool isJson, TextWriter stdout)
     {
-        string helpText = Strings.Get("Cli_HelpText");
+        string helpText = Strings.Get("Cli_HelpText") + Environment.NewLine + Strings.Get("Cli_SettingsHelp");
         if (isJson)
         {
             var envelope = new JsonEnvelope

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// DataGridView 的欄寬與列高 DPI 換算（ISSUE-081）。
+/// DataGridView 的欄寬與列高 DPI 換算（ISSUE-101）。
 ///
 /// WinForms 的表單自動縮放<b>不會</b>換算 DataGridView 的欄寬與列高（實測：150% 螢幕上
 /// 100px 的欄寬縮放後仍是 100px），寫死的 <c>RowTemplate.Height = 30</c> 在 200% 螢幕上

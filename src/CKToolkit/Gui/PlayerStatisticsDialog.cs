@@ -35,7 +35,7 @@ public sealed class PlayerStatisticsDialog : Form
 
     public PlayerStatisticsDialog(PlayerStatisticsSummary current)
     {
-        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-101）。
         Ui.BeginForm(this);
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(600, 440);
@@ -58,7 +58,7 @@ public sealed class PlayerStatisticsDialog : Form
     }
 
     /// <summary>
-    /// 版面（ISSUE-081）：說明、兩張欄位卡片（寬時並排、窄時上下排）、單位卡片、警告放在可捲動區，
+    /// 版面（ISSUE-101）：說明、兩張欄位卡片（寬時並排、窄時上下排）、單位卡片、警告放在可捲動區，
     /// 底部按鈕列固定。對話框再小也只會出捲軸，不會切掉欄位或按鈕。
     /// </summary>
     private void BuildUi()

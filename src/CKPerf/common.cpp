@@ -64,6 +64,36 @@ static void OptAscii(const wchar_t* opts, const wchar_t* key, char* dst, int cch
     dst[i] = 0;
 }
 
+// Attach mode cannot change the target process environment. CKToolkit therefore serves
+// the one-time token through a current-user-only named pipe while LoadLibraryW is in
+// progress. The ini contains only the non-secret scriptchannel=1 flag.
+static bool ReadBootstrapToken(char* dst, int cch) {
+    if (!dst || cch <= kScriptTokenChars) return false;
+    dst[0] = 0;
+    wchar_t pipeName[96];
+    swprintf_s(pipeName, L"\\\\.\\pipe\\ckperf-bootstrap-%u", (unsigned)GetCurrentProcessId());
+    if (!WaitNamedPipeW(pipeName, 5000)) return false;
+    HANDLE pipe = CreateFileW(pipeName, GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (pipe == INVALID_HANDLE_VALUE) return false;
+
+    DWORD total = 0;
+    while (total < kScriptTokenChars) {
+        DWORD read = 0;
+        if (!ReadFile(pipe, dst + total, kScriptTokenChars - total, &read, nullptr) || read == 0) {
+            CloseHandle(pipe);
+            dst[0] = 0;
+            return false;
+        }
+        total += read;
+    }
+    CloseHandle(pipe);
+    for (int i = 0; i < kScriptTokenChars; ++i) {
+        if (dst[i] <= 0x20 || dst[i] >= 0x7F) { dst[0] = 0; return false; }
+    }
+    dst[kScriptTokenChars] = 0;
+    return true;
+}
+
 // Locates ckperf.ini beside this DLL. Returns false when the path cannot be built.
 static bool SettingsPath(HMODULE self, wchar_t* dst, size_t cch) {
     wchar_t modulePath[MAX_PATH];
@@ -112,6 +142,10 @@ void LoadConfig(HMODULE selfModule) {
     // channel with no shared secret would accept requests from any local process, so
     // the two settings are deliberately coupled here rather than trusted separately.
     OptAscii(opts, L"scripttoken", g_cfg.scriptToken, (int)sizeof(g_cfg.scriptToken));
+    if (OptFlag(opts, L"scriptchannel", false) &&
+        strlen(g_cfg.scriptToken) != kScriptTokenChars) {
+        ReadBootstrapToken(g_cfg.scriptToken, (int)sizeof(g_cfg.scriptToken));
+    }
     g_cfg.scriptChannel = OptFlag(opts, L"scriptchannel", false) &&
                           strlen(g_cfg.scriptToken) == kScriptTokenChars;
 

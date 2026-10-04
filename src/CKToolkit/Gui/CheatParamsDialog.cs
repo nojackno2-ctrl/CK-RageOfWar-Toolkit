@@ -52,7 +52,7 @@ public sealed class CheatParamsDialog : Form
     {
         string cheatTitle = TrainerStrings.GetCheatName(_cheat.Id, _cheat.Name);
         Text = Strings.Get("Gui_Trainer_DialogTitle", cheatTitle);
-        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-081）。
+        // 所有尺寸都是 96 DPI 的邏輯像素，結尾由 Ui.EndForm 一次換算（ISSUE-101）。
         // 改成可縮放：英文或高 DPI 下內容比預期長時，使用者可以自己拉大，
         // 中間區塊放不下也會出捲軸，而不是被固定大小的對話框切掉。
         Ui.BeginForm(this);
@@ -68,7 +68,7 @@ public sealed class CheatParamsDialog : Form
         Size = (isSpawnUnit || isSpawnItem) ? new Size(820, 720) : new Size(560, 380);
         MinimumSize = (isSpawnUnit || isSpawnItem) ? new Size(640, 520) : new Size(460, 320);
 
-        // 版面（ISSUE-081）：標題與說明在上、按鈕列在下，兩者高度由內容決定；
+        // 版面（ISSUE-101）：標題與說明在上、按鈕列在下，兩者高度由內容決定；
         // 中間的參數區吃掉剩餘高度，放不下就自己捲動，按鈕永遠看得到。
         // 外框本身也是可捲動的堆疊：對話框被縮到比內容最小需求還小時改成整體捲動，按鈕列不會被擠出去。
         var frame = new ScrollPage { Dock = DockStyle.Fill, Padding = new Padding(16), MinimumContentLogicalWidth = 360 };
@@ -102,7 +102,7 @@ public sealed class CheatParamsDialog : Form
 
     private Control BuildGenericContent()
     {
-        // 由上而下的表單：參數名稱、輸入、範圍說明各佔一行（ISSUE-081）。以前是三欄的
+        // 由上而下的表單：參數名稱、輸入、範圍說明各佔一行（ISSUE-101）。以前是三欄的
         // TableLayoutPanel，量出來的高度與實際排版對不上，字一大最後一個參數就被切掉。
         var panel = new StackPanel { Padding = new Padding(4), BackColor = Color.White };
 
@@ -200,7 +200,7 @@ public sealed class CheatParamsDialog : Form
                 };
 
                 // 輸入框與範圍提示上下排：並排時提示文字只分到剩下的那一點寬度，
-                // 在字大或英文時會被擠成一像素寬（ISSUE-081）。
+                // 在字大或英文時會被擠成一像素寬（ISSUE-101）。
                 num.Width = 180;
                 hint.Margin = new Padding(0, 0, 0, 10);
                 panel.AddNatural(num);
@@ -236,7 +236,7 @@ public sealed class CheatParamsDialog : Form
             ColumnCount = 1,
             RowCount = 3,
         };
-        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-081）。
+        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-101）。
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -464,7 +464,7 @@ public sealed class CheatParamsDialog : Form
             ColumnCount = 1,
             RowCount = 3,
         };
-        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-081）。
+        // 單欄也要明講 100%：沒有欄樣式時欄寬取最寬內容，工具列就不會換行而是撐出對話框外（ISSUE-101）。
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -608,7 +608,7 @@ public sealed class CheatParamsDialog : Form
     }
 
     /// <summary>
-    /// 勾選清單：等寬多欄，列高依字型量出來（ISSUE-081）。以前是 TableLayoutPanel 加固定 30px 列高，
+    /// 勾選清單：等寬多欄，列高依字型量出來（ISSUE-101）。以前是 TableLayoutPanel 加固定 30px 列高，
     /// 字一大勾選框的字就被切掉；而且它自己開 AutoScroll，捲動範圍在高 DPI 下算不準。
     /// </summary>
     private static UniformGrid CreateGrid(int columns = 3) => new()
@@ -637,7 +637,7 @@ public sealed class CheatParamsDialog : Form
 
     /// <summary>
     /// 把「上面幾列自然高度、最後一列吃剩餘高度」的 TableLayoutPanel 轉成 <see cref="StackPanel"/>：
-    /// 百分比列在字變大時會被擠到 1 像素，堆疊則保證它至少有最小高度（ISSUE-081）。
+    /// 百分比列在字變大時會被擠到 1 像素，堆疊則保證它至少有最小高度（ISSUE-101）。
     /// </summary>
     private static StackPanel ToStack(TableLayoutPanel table, int fillMinimumLogicalHeight)
     {

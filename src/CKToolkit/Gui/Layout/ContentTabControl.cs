@@ -1,7 +1,7 @@
 namespace CKToolkit.Gui.Layout;
 
 /// <summary>
-/// 會回報「內容實際需要多高」的分頁控制項（ISSUE-081）。
+/// 會回報「內容實際需要多高」的分頁控制項（ISSUE-101）。
 ///
 /// 一般的 <see cref="TabControl"/> 對外回報的偏好尺寸跟分頁內容無關，外層只能猜一個最小高度。
 /// 這裡把每一頁的根 <see cref="StackPanel"/> 在目前寬度下量一次，取最高的那頁再加上頁籤列，
