@@ -1,5 +1,13 @@
 # AI_HANDOFF.md — 即時共用記憶
 
+## 2026-10-05 Codex: automatic local commit policy
+
+- User authorized automatic local commits without further confirmation; AGENTS.md now records the standing policy. Push/release/history changes require separate authorization.
+- Evidence: inspected branch, git status, git diff, and git log; reviewed collaboration rules and handoff. The initial working tree was clean; this task changes collaboration documentation only.
+- Verification: full staged git diff --cached --check passed; automatic commit wording and remaining authorization limits were checked. Documentation-only work; no build/runtime validation was needed.
+- Status: automatic commit policy established; this record accompanies the authorized local snapshot. No build/test or runtime behavior is claimed by this snapshot task.
+
+
 ## 交接事項：2026-09-14 全面稽核修復（ISSUE-082～098、080～081 與既有缺口）
 
 - 使用者要求修好 9/13 稽核問題。本輪已實作 `ISSUE-082`～`ISSUE-098` 共 17 項，並修復 `ISSUE-080` 主執行緒延後自測、`ISSUE-081` 原生報告配額分離，以及 `ISSUE-035/039/046/048` 的寫入交易、player.ini 跨程序鎖與 verify payload 盲區。

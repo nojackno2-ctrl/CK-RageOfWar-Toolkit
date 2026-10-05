@@ -228,5 +228,12 @@ scdebug 綁走，只剩 4 個自由鍵；小鍵盤模式雖然把 F1–F12 解�
   - 程式碼修復完成且 SelfTest 通過後，標記為 `⏳ 已修碼 · 待實測`，**絕不能直接聲稱修復或標記為已實測**。
   - 唯有使用者在真實遊戲實機確認無誤，或取得實機 Log/Dump 佐證後，方可標記為 `✅ 已實機驗收`。
 - 改動前先看 `git status` / `git diff`，不要丟棄使用者未提交的工作。
-- 未經明確指示不要 commit / push / merge / rebase / reset。
+- 未經明確指示不要 push / merge / rebase / reset；local commit 依下方自動提交授權執行。
 - 宣告完成前必須通過建置與 `dotnet run --project src/CKToolkit.SelfTest`。
+
+## Automatic commits (user authorization, 2026-10-05)
+
+- The user has authorized automatic local commits for all projects. After completing a task and appropriate verification, commit the task changes without asking for confirmation again; do not create empty commits.
+- Review the diff and preserve existing work. Include unrelated pre-existing changes only when the user explicitly requests committing them. Never commit secrets, credentials, or personal runtime data.
+- This standing authorization covers local commits only. Push, release, merge, rebase, reset, force-push, branch deletion, and destructive operations still require explicit authorization.
+- Record what was verified and any unverified behavior in `AI_HANDOFF.md`; never present a commit as proof that functionality works.
