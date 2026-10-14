@@ -18,8 +18,9 @@ An all-in-one performance, localization, trainer, and save-management toolkit fo
 |---|---|
 | **效能與相容性** | 現代 Windows 16bpp 顯示模式切換崩潰修復、大位址感知（LAA）、高解析度靜態直接修補（1080p / 2K / 4K 實機驗證穩定、零捲動塗抹破圖、直接透過 Steam 啟動；CVXVisible 32px 網格上限 4096x2400，超過一律拒絕寫入）、動畫開關、執行期崩潰攔截修復（Null-pointer 重導）、取樣分析器 |
 | **多國語言包** | 內建 6 國語言包（繁體中文 zh-TW、簡體中文 zh-CN、日本語 ja-JP、Español es-ES、Italiano it-IT、Русский ru-RU，各 3,925 條詞彙 100% 覆蓋，含全部 7 套戰役與劇本）、APF 點陣字型可逆光柵化、語言包圖形化安全匯入／匯出範本工具、可擴充任意新語言 |
-| **修改器** | 17 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
+| **修改器** | 18 項作弊功能（資源、人口、建築修復、部隊增益、天譴敵軍、滑鼠生成單位／裝備、循環切換、選取單位等級修改、遊戲速度）、數十項數值平衡 Tweaks、圖形化參數設定與裝備挑選器、全鍵盤／小鍵盤自訂重對應 |
 | **存檔與玩家資料** | 列舉 profile 存檔與預覽圖、SHA-256 驗證的 `.cksave` 匯出／匯入、撞名不覆寫、可復原的保護性刪除，以及玩家基本資料與遊戲統計頁（戰績、軍事評價、偏好、資源、單位紀錄）編輯 |
+| **遊戲規則** | 英雄編隊規則（維京領主、自由鬥士、運糧馬可編入英雄隊伍；部隊遠距／全圖瞬時編入英雄）、運糧馬／運金馬運載上限提升至 10,000，皆可逐項開關並精確還原 |
 
 #### 實機遊戲畫面（HD 介面 / 2K / 4K 高解析度支援）
 
@@ -73,16 +74,16 @@ An all-in-one performance, localization, trainer, and save-management toolkit fo
 
      | 檔案 | 大小 | 需要先安裝什麼 |
      |---|---|---|
-     | `CKToolkit-<版本>-win-x64-self-contained.exe` | ~50 MB | **不需要**，雙擊即用（推薦） |
-     | `CKToolkit-<版本>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+     | `CKToolkit-<版本>-win-x64-self-contained.exe` | ~53 MB | **不需要**，雙擊即用（推薦） |
+     | `CKToolkit-<版本>-win-x64.exe` | ~4.6 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
 
      兩者功能完全相同，差別只在有沒有把 .NET 執行階段包進去。發布物皆由 GitHub Actions 從原始碼建置並附 build provenance 證明，可用 `gh attestation verify <檔名> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit` 查核。
-  2. 放置於任意目錄執行（不必放進遊戲目錄）。
+  2. 放置於任意目錄執行（不必放進遊戲目錄）。你的設定會同步存一份在**遊戲資料夾**的 `cktoolkit.json`，之後把工具包移到別的資料夾、重新下載或換一台電腦，打開都會自動讀回原本的設定；「還原原版」時這個檔案會一併刪除。
   3. 無參數啟動即開啟 GUI 圖形介面：
      ```cmd
      CKToolkit.exe
      ```
-  4. 六大分頁：**效能 / 語言 / 修改器 / 存檔 / 分析器 / 關於**，右上角可自由切換繁體中文／簡體中文／English。
+  4. 七個分頁：**效能 / 語言 / 修改器 / 遊戲設定 / 存檔 / 分析器 / 關於**，右上角可自由切換繁體中文／簡體中文／English。介面會依這台電腦的 Windows 縮放比例（100%～200%）、字型與視窗大小自動排版，放不下時出現捲軸而不會切掉文字。
   5. 勾選欲啟用的項目（如 2K 2560x1440 或 4K 3840x2160、繁體中文語言包、修改器功能）後點擊「一鍵套用」。底部只保留「一鍵套用／還原原版」兩個全域動作，避免重複按鈕混淆。
   6. **套用後可直接從 Steam或桌面捷徑啟動遊戲**；若要使用修改器或效能頁所選的執行期穩定性保護，請從「修改器」頁啟動遊戲。
   7. 若需還原原版，於工具中點擊「還原原版」即可逐位元組恢復原版檔案。
@@ -203,9 +204,20 @@ CKToolkit.exe save stats set --profile noname --military-rating 50 --single-game
 
 ---
 
+### 遊戲設定（規則調整）
+
+「遊戲設定」分頁調整原版寫死的遊戲規則，每一項都可以單獨開關，關閉後精確還原原版位元組：
+
+- **英雄編隊規則**：允許維京領主編入英雄隊伍、允許自由鬥士編入英雄隊伍、允許運糧馬／騾子編入英雄隊伍、允許部隊遠距／全圖瞬時編入英雄。
+- **經濟與運輸規則**：運糧馬／運金馬運載上限提升至 10,000。
+
+CLI 對應指令為 `settings get` 與 `settings set`（見下方 CLI 一節）。
+
+---
+
 ### 修改器功能清單
 
-修改器支援 17 項作弊功能與數十項數值平衡調整：
+修改器支援 18 項作弊功能與數十項數值平衡調整：
 
 - **資源與內政**：黃金補滿、食物補滿、人口提升、忠誠度全滿、快速生產。
 - **戰鬥與部隊**：部隊完全治療、全軍戰鬥增益、修復建築物、天譴敵軍。
@@ -216,6 +228,8 @@ CKToolkit.exe save stats set --profile noname --military-rating 50 --single-game
   - **滑鼠生成物品 (`spawn_item`)**：在游標位置生成地面皮袋，收錄全遊戲 23 種可穿戴物品／神器。
   - **切換生成物品 (`cycle_item`)**：熱鍵循環切換當前生成物品。
 - **選取單位等級修改 (`set_selected_level`)**：直接將目前選取之單位或英雄部隊設定為指定等級（Lv.1~1000）。
+- **遊戲速度 (`game_speed`)**：循環切換遊戲速度，可自選要循環的倍率。
+- **診斷 (`diagnose`)**：在遊戲內顯示訊息，確認修改器確實在運作。
 - **圖形化參數設定對話框**：提供整齊對齊的兵種挑選器、全裝備屬性說明（如王者腰帶、狂亂皮手套、專注之石等）與一鍵神裝推薦組合。
 - **鍵盤配置**：支援標準鍵盤與九宮格小鍵盤 (Numpad) 專屬獨立鍵位配置（**選用**，見下）。
 
@@ -318,6 +332,8 @@ CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
 CKToolkit.exe trainer exec --cheat <id> [--param k=v]... [--json]
 CKToolkit.exe trainer exec --script "<VS>" [--json]
 CKToolkit.exe save list|export|import|delete|player|stats ...
+CKToolkit.exe settings get|set ...           遊戲規則設定（英雄編隊、運輸上限）
+CKToolkit.exe config show|pull|push        比對／同步工具旁與遊戲資料夾的設定檔
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] [--log-dir <dir>] 完整診斷記錄
 CKToolkit.exe run [--plain|--watch|--attach] 帶診斷執行或掛載遊戲
 CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
@@ -345,6 +361,8 @@ CKToolkit.exe --game <dir>                  覆寫遊戲目錄（全域參數）
 dotnet build CKToolkit.sln -c Release
 dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
 ```
+
+SelfTest 第 49 組是 **GUI 版面稽核**：在 96 DPI 與本機實際 DPI、字型放大 100%～200%、三種介面語言、最小／預設／最大化視窗下實際排版每一個分頁與對話框，檢查文字不被裁切、控制項不重疊、表格列高足夠。改動介面後若造成跑版，這一組會失敗。
 
 若欲使用真實的原版遊戲檔案進行 APF 字型往返、目錄排序等深度驗證，可設定環境變數：
 ```cmd
@@ -374,8 +392,9 @@ An all-in-one modernization toolkit for *Celtic Kings: Rage of War* (2004, Steam
 |---|---|
 | **Performance & Compatibility** | Fixes 16bpp mode-switch crashes on modern Windows, Large Address Aware (LAA), High-Resolution static direct patching (1080p / 2K / 4K verified stable with zero scrolling artifacts, launchable directly via Steam; the CVXVisible 32px grid tops out at 4096x2400 and anything larger is refused), animation toggles, runtime crash interceptor (null-pointer redirection), sampling profiler |
 | **Language Packs** | Six built-in language packs (zh-TW, zh-CN, ja-JP, es-ES, it-IT, ru-RU — 3,925 entries each, 100% coverage, covering all 7 campaigns and scenarios), reversible APF bitmap font rasterization, GUI-based safe import/export template tools, extensible to any new language |
-| **Trainer** | 17 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
+| **Trainer** | 18 cheat features (resources, population, instant build, godmode heal/buff, smite enemies, spawn units/items at cursor, hotkey cycling, selected unit level modifier, game speed), dozens of balance tweaks, visual parameter dialog with item picker, full keyboard / Numpad remapping |
 | **Saves & Player Data** | Profile saves with BMP previews, SHA-256-verified `.cksave` export/import, collision-safe slots, recoverable deletion, plus editing of basic profile data and the in-game statistics page (results, military rating, preferences, resources, and unit records) |
+| **Game Rules** | Hero-army rules (let Viking Lords, Liberati and food mules join hero armies; attach squads to a hero from any distance) and a 10,000 food/gold mule capacity — each toggled individually and exactly reversible |
 
 #### In-Game Screenshots (HD UI / 2K / 4K High-Resolution Support)
 
@@ -429,16 +448,16 @@ Backups are replaced by **Exact Reversal**:
 
      | File | Size | Prerequisite |
      |---|---|---|
-     | `CKToolkit-<version>-win-x64-self-contained.exe` | ~50 MB | **None** — just run it (recommended) |
-     | `CKToolkit-<version>-win-x64.exe` | ~3 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
+     | `CKToolkit-<version>-win-x64-self-contained.exe` | ~53 MB | **None** — just run it (recommended) |
+     | `CKToolkit-<version>-win-x64.exe` | ~4.6 MB | [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) |
 
      Both are functionally identical; the only difference is whether the .NET runtime is bundled in. Release binaries are built from source by GitHub Actions and carry a build provenance attestation, checkable with `gh attestation verify <file> --repo nojackno2-ctrl/CK-RageOfWar-Toolkit`.
-  2. Run from anywhere (does not need to be placed inside the game folder).
+  2. Run from anywhere (does not need to be placed inside the game folder). Your settings are also saved as `cktoolkit.json` in the **game folder**, so moving the toolkit, downloading it again or switching computers brings your settings back automatically; "Restore" removes that file too.
   3. Running with no arguments opens the GUI:
      ```cmd
      CKToolkit.exe
      ```
-  4. Six tabs: **Performance / Language / Trainer / Saves / Profiler / About**, with a Traditional Chinese / Simplified Chinese / English toggle in the top-right corner.
+  4. Seven tabs: **Performance / Language / Trainer / Game Settings / Saves / Profiler / About**, with a Traditional Chinese / Simplified Chinese / English toggle in the top-right corner. The layout adapts to the computer's Windows scaling (100%–200%), fonts and window size; when something does not fit it scrolls instead of cutting text off.
   5. Select desired options (e.g. 2K 2560x1440 or 4K 3840x2160, Traditional Chinese language pack, Trainer options) and click "Apply".
   6. **Launch directly from Steam or standard shortcut** — 2K/4K and all patches are statically applied to game files, no background utility needed!
   7. Click "Restore" at any time to return all files to byte-exact vanilla.
@@ -559,9 +578,20 @@ CKToolkit.exe save stats set --profile noname --military-rating 50 --single-game
 
 ---
 
+### Game Settings (Rule Tweaks)
+
+The Game Settings tab changes rules that are hard-coded in the original game. Each option can be toggled on its own, and turning it off restores the original bytes exactly:
+
+- **Hero army rules**: allow Viking Lords in hero armies, allow Liberati in hero armies, allow food mules in hero armies, allow instant squad attachment from any distance.
+- **Economy & logistics rules**: increase food/gold mule capacity to 10,000.
+
+The CLI equivalents are `settings get` and `settings set` (see the CLI section below).
+
+---
+
 ### Trainer Feature Overview
 
-Supports 17 cheats and dozens of gameplay balance tweaks:
+Supports 18 cheats and dozens of gameplay balance tweaks:
 
 - **Economy & Base**: Fill Gold, Fill Food, Population Boost, Max Loyalty, Instant Production.
 - **Combat & Armies**: Heal Army, Buff Army, Repair Buildings, Smite Enemies.
@@ -572,6 +602,8 @@ Supports 17 cheats and dozens of gameplay balance tweaks:
   - **Spawn Item (`spawn_item`)**: Spawn item bags at cursor containing any of the 23 game items / artifacts.
   - **Cycle Item (`cycle_item`)**: Hotkey to cycle through available items.
 - **Set Selected Unit Level (`set_selected_level`)**: Instantly set the selected unit or hero army to any level (1–1000).
+- **Game Speed (`game_speed`)**: Cycle through game speeds; you choose which multipliers are in the cycle.
+- **Diagnose (`diagnose`)**: Shows an in-game message confirming the trainer is working.
 - **Graphical Parameter Dialog**: Clean 3-column aligned grid with item ability descriptions and recommended gear presets (Godly Gear, Max ATK, Max DEF).
 - **Key Remapping**: Comprehensive keyboard and Numpad key binding support (**optional** — see below).
 
@@ -689,6 +721,8 @@ CKToolkit.exe trainer list-cheats|list-tweaks|set|apply ...
 CKToolkit.exe trainer exec --cheat <id> [--param k=v]... [--json]
 CKToolkit.exe trainer exec --script "<VS>" [--json]
 CKToolkit.exe save list|export|import|delete|player|stats ...
+CKToolkit.exe settings get|set ...           Game rule settings (hero armies, mule capacity)
+CKToolkit.exe config show|pull|push        Compare/sync the toolkit and game-folder settings files
 CKToolkit.exe profile [--mode launch|attach|wait] [--no-inject] [--hz <n>] Full diagnostics run
 CKToolkit.exe run [--plain|--watch|--attach] Launch or attach with diagnostics
 CKToolkit.exe --game <dir>                  Override game directory (global flag)
@@ -715,6 +749,8 @@ JSON output envelope format:
 dotnet build CKToolkit.sln -c Release
 dotnet run --project src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release
 ```
+
+SelfTest group 49 is a **GUI layout audit**: every tab and dialog is laid out at 96 DPI and at the machine's real DPI, with text scaled 100%–200%, in all three UI languages and at minimum / default / maximised window sizes, checking that no text is clipped, no controls overlap and grid rows fit their text. A UI change that breaks the layout fails this group.
 
 To validate format handling against authentic game files, set the environment variable:
 ```cmd
