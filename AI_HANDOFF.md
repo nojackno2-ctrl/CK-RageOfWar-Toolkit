@@ -1,5 +1,16 @@
 # AI_HANDOFF.md — 即時共用記憶
 
+## 2026-10-17 Antigravity: Rust rewrite audit & release readiness evidence
+
+- **Task**: Audit repository for Rust migration feasibility, release readiness, branch ancestry, and CI/verification status.
+- **Repository type**: Windows Desktop Tool (`CKToolkit.exe` WinForms WinExe, .NET 10, x64) + Injected 32-bit Win32 Hook DLL (`ckperf.dll`, C++17/MSVC, Win32).
+- **Git & Release state**: HEAD `78c657d` on `master`, clean working tree. Up-to-date with `origin/master`. No branch divergence. Latest GitHub release is `v1.0.6` (assets: `CKToolkit-v1.0.6-win-x64-self-contained.exe` sha256 `1a035417f4d78f9afd26c1a26649dfb7d1bff2e7670767f5f4d14dab8e62a6ec`, `CKToolkit-v1.0.6-win-x64.exe` sha256 `01be2c25ad81f2edb9e06dc9cec4c9c9f5f79b0275914ab7aad1666ebf67003a`, `CKPerf-SHA256.txt` sha256 `b97d30699bf249618b88d8481cdb41d91a61f328e4863c3250afbd26f5bf9a7e`, `SHA256SUMS.txt` sha256 `fed9a73d6fc9663b6c433a4b688295bd6023c574a2ba3112f0d88ef7f54dacdc`). `git diff v1.0.6..HEAD` contains only documentation changes (`AGENTS.md`, `AI_HANDOFF.md`, `README.md`); no executable code added since v1.0.6. Next release version would be `v1.0.7` if releasing, though no functional code changes exist.
+- **Rust feasibility**: Highly feasible for `ckperf.dll` (injected 32-bit hook DLL) and core PAK/PE/Ini/font parsers (`windows-sys`, `retour`/`minhook`, `pelite`, `serde`). Runtime linkage depends on build settings. Rust unsafe/FFI, process injection and IPC still require ABI, lifetime and rollback verification; safety and performance gains were not measured in this audit. For `CKToolkit` GUI (WinForms), migration is high risk / complex: requires rewriting extensive WinForms tabs, DPI layout rules, and dialogs in a Rust desktop GUI framework (`slint`, `iced`, `egui`, or `tauri`), while targeting both x86 (for injected DLL) and x64 (for host application).
+- **Verification**: `dotnet test src/CKToolkit.SelfTest/CKToolkit.SelfTest.csproj -c Release` restored and built successfully; delegated terminal result reported all 49 test groups passed, including synthetic PE reversal, PAK ordering, trainer keymaps and GUI layout audit. GitHub Actions CI passing.
+- **Status**: Audit complete. No Git/release mutations performed (parent owns mutations).
+
+- 2026-10-17 Codex parent verification: downloaded all current release assets; every SHA256 matches GitHub digest. Evidence: D:/Github/release-audit-2026-10-17/CK-RageOfWar-Toolkit/verification.json. No executable source change requires a new version.
+
 ## 2026-10-14 Antigravity: automatic commit and push to GitHub policy
 
 - User authorized automatic local commits and automatic push to GitHub for all projects; AGENTS.md now records the standing policy. A Git post-commit hook has been installed in `.git/hooks/post-commit` to automatically push the current branch to `origin` upon commit. Destructive operations (force-push, release, merge, rebase, reset, branch deletion) still require separate authorization.
